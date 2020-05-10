@@ -1,0 +1,43 @@
+
+; Core types:
+; - Byte
+; - Tuple
+; - Name
+; - Array
+; - Function
+
+; The `type` type is built in, because it would have to be
+; recursively defined. This is a way of specifying its memory
+; layout, more than anything:
+(type :i32 (name :i32 (array 4 byte)))
+(type :i32 (name :i32 (array 4 byte)))
+(type :type (name :type (tuple i32 ptr)))
+
+; name type (tuple i32 )
+
+; There are only values, but some special values can
+; be used to define new types of value.
+
+; Intrinsic calls:
+; - tuple_type: creates a new tuple type
+; - fun_type: creates a new function type
+; - name_type: creates a new named type
+; - array_type: creates a new array type
+; - fun : creates a new function
+
+; Definition syntax:
+; def symbol_name : symbol_type = symbol_value
+
+(defs
+  type i32 (name i32 (array 4 byte))
+
+  i32 a 3
+
+
+)
+
+type i32 = name i32 (array 4 byte)
+
+i32 a = 3
+
+

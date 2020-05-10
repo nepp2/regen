@@ -1,0 +1,18 @@
+
+(block condition
+  (set result true)
+  (cjump result then else)
+)
+
+(block then
+  (jump continue)
+)
+
+(block else
+  (jump continue)
+)
+
+(block continue
+  exit
+)
+
