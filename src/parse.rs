@@ -46,12 +46,6 @@ fn find_child_indices(
   find(ns, child_indices, &mut index);
 }
 
-pub fn children<'l>(n : &Node, child_indices : &'l [usize]) -> &'l [usize] {
-  let start = n.children_offset as usize;
-  let end = start + n.num_children as usize;
-  &child_indices[start..end]
-}
-
 /// parse sexp list
 fn parse_list(ns : &mut Vec<Node>, cs : &mut CharStream, start : usize) {
   let node_index = ns.len();
@@ -104,6 +98,12 @@ fn parse_atom(cs : &mut CharStream, start : usize) -> Node {
     }
   }
   Node {num_children: 0, children_offset: 0, start, end }
+}
+
+pub fn node_children<'l>(n : &Node, child_indices : &'l [usize]) -> &'l [usize] {
+  let start = n.children_offset as usize;
+  let end = start + n.num_children as usize;
+  &child_indices[start..end]
 }
 
 pub fn parse(s : String) -> AbstractSyntaxTree {

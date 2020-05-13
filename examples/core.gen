@@ -1,6 +1,6 @@
 
 (block condition
-  (set result true)
+  (let result true)
   (cjump result then else)
 )
 

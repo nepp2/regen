@@ -1,4 +1,15 @@
 
+fn call_c_function() {
+  let fun = blah as *const ();
+  unsafe {
+    call_6(fun, 1, 2, 3, 4, 5, 6);
+  }
+}
+
+#[test]
+fn ffi_test() {
+  call_c_function();
+}
 
 pub extern "C" fn blah(a : i16, b : i16, c : u8, d : u32, e : u8, f : u8) {
   println!(
@@ -66,16 +77,4 @@ unsafe fn call_6(
   let fun : extern "C" fn(u64, u64, u64, u64, u64, u64) -> u64 =
     std::mem::transmute(fun);
   fun(a, b, c, d, e, f)
-}
-
-fn call_c_function() {
-  let fun = blah as *const ();
-  unsafe {
-    call_6(fun, 1, 2, 3, 4, 5, 6);
-  }
-}
-
-#[test]
-fn ffi_test() {
-  call_c_function();
 }
