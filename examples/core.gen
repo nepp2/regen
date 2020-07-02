@@ -1,18 +1,25 @@
 
-(block condition
-  (let result true)
-  (cjump result then else)
-)
+(fun ()
+  (vars blah result)
 
-(block then
-  (jump continue)
-)
+  (block condition
+    (set blah 5)
+    (set result (+ 0 blah))
+    (cjump result then else)
+  )
 
-(block else
-  (jump continue)
-)
+  (block then
+    (debug THEN)
+    (jump continue)
+  )
 
-(block continue
-  exit
+  (block else
+    (debug ELSE)
+    (jump continue)
+  )
+
+  (block continue
+    exit
+  )
 )
 

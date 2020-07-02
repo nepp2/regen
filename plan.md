@@ -1,9 +1,15 @@
 
-# Hexx
+# Regen
 
 Small, s-expression based interpreter
 
 overview: minimal language for self-extension
+
+# Plan
+
+
+
+# Bootstrapping
 
 interpreted prior to llvm use
 
