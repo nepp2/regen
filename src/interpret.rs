@@ -1,7 +1,12 @@
 
-use crate::bytecode::{ByteCode, Op, Expr};
+use crate::symbols::Symbol;
+use crate::bytecode::{ByteCode, Op, Expr, Function};
 
-pub fn interpret(bc : &ByteCode) {
+use std::collections::HashMap;
+
+type Env = HashMap<Symbol, u64>;
+
+pub fn interpret(bc : &ByteCode, env : &mut Env) {
   println!("Entering interpreter");
   // program counter
   let mut pc = 0;
@@ -11,6 +16,8 @@ pub fn interpret(bc : &ByteCode) {
     match &bc.ops[pc] {
       Op::Expr(r, e) => {
         let v = match e {
+          Expr::Symbol(sym) =>
+            sym.0 as u64,
           Expr::LiteralU64(val) =>
             *val as u64,
           Expr::Add(a, b) =>
@@ -33,6 +40,12 @@ pub fn interpret(bc : &ByteCode) {
       Op::Jump(block) => {
         pc = bc.blocks[block.0].start_op;
         continue;
+      }
+      Op::Call(fun) => {
+        let symbol = Symbol(reg[fun.0] as usize);
+        let f = *env.get(&symbol).unwrap() as *const Function;
+        let bc = unsafe { &(*f).bytecode };
+        interpret(bc, env);
       }
       Op::Debug(s) => {
         println!("debug: {}", s);

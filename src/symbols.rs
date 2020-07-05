@@ -19,8 +19,8 @@ impl StrPtr {
   }
 }
 
-#[derive(Copy, Clone, PartialEq)]
-pub struct Symbol(usize);
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+pub struct Symbol(pub usize);
 
 #[derive(Default)]
 struct Symbols {

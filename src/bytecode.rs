@@ -12,6 +12,7 @@ pub struct RegIndex(pub usize);
 
 #[derive(Copy, Clone, Debug)]
 pub enum Expr {
+  Symbol(Symbol),
   LiteralU64(u64),
   Add(RegIndex, RegIndex),
 }
@@ -23,6 +24,7 @@ pub enum Op {
   CJump{ cond: RegIndex, then_block: BlockIndex, else_block: BlockIndex },
   Debug(Symbol),
   Jump(BlockIndex),
+  Call(RegIndex),
   Exit,
   //Error,
 }
@@ -41,11 +43,27 @@ pub struct ByteCode {
   pub frame_byte_size : usize,
 }
 
+pub struct Function {
+  pub bytecode : ByteCode
+}
+
 type BlockInfo<'l> = Vec<(Symbol, &'l [usize])>;
 
 pub fn codegen(ast : &AST) -> ByteCode {
-  let mut bc : ByteCode = Default::default();
   let root_node = 0;
+  let children = node_children(ast, root_node);
+  codegen_function(ast, children[0]).bytecode
+}
+
+pub fn codegen_function(ast : &AST, root_node : usize) -> Function {
+  if let Some([args, body]) = match_head(ast, root_node, "fun") {
+    return Function { bytecode: codegen_bytecode(ast, *body)};
+  }
+  panic!("expected function")
+}
+
+fn codegen_bytecode(ast : &AST, root_node : usize) -> ByteCode {
+  let mut bc : ByteCode = Default::default();
   let children = node_children(ast, root_node);
   let mut blocks = vec![];
   let mut locals = vec![];
