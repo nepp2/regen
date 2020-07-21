@@ -1,25 +1,28 @@
 
-(fun () (
-  (vars blah result)
+(def butt (fun () (
+  (block run
+    (debug HELLO_BUTT)
+    exit
+  )
+)))
 
+(def main (fun () (
+  (vars blah result)
   (block condition
     (set blah 5)
     (set result (+ 0 blah))
     (cjump result then else)
   )
-
   (block then
     (debug THEN)
+    (invoke butt)
     (jump continue)
   )
-
   (block else
     (debug ELSE)
     (jump continue)
   )
-
   (block continue
     exit
   )
-))
-
+)))

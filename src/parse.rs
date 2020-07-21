@@ -1,5 +1,8 @@
 
 
+use crate::symbols;
+use symbols::Symbol;
+
 use std::str::CharIndices;
 use std::iter::Peekable;
 
@@ -108,6 +111,21 @@ fn parse_atom(cs : &mut CharStream, start : usize) -> NodeInfo {
     }
   }
   NodeInfo {num_children: 0, children_offset: 0, start, end }
+}
+
+pub fn to_symbol(ast : &AbstractSyntaxTree, n : NodeIndex) -> Symbol {
+  symbols::to_symbol(code_segment(ast, n))
+}
+
+// TODO: this is called repeatedly on the same node, which might be a bit slow
+pub fn match_head<'l>(ast : &'l AbstractSyntaxTree, n : NodeIndex, s : &str) -> Option<&'l [NodeIndex]> {
+  let cs = node_children(ast, n);
+  if cs.len() > 0 {
+    if code_segment(ast, cs[0]) == s {
+      return Some(&cs[1..]);
+    }
+  }
+  None
 }
 
 pub fn code_segment(ast : &AbstractSyntaxTree, n : NodeIndex) -> &str {
