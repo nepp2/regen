@@ -1,4 +1,8 @@
 
+- Call interpreted functions
+- Call C functions
+- Pointer dereferencing
+
 How are functions called?
 
 Currently there is only one function. It has no parameters. It can see no globals.

@@ -17,6 +17,9 @@ fn main() {
   println!("file contents:\n\n{}", contents);
 
   let ast = parse::parse(contents);
+
+  
+
   let bc = bytecode::codegen(&ast);
 
   println!();
@@ -30,5 +33,5 @@ fn main() {
     }
   }
 
-  interpret::interpret(&bc);
+  //interpret::interpret(&bc);
 }

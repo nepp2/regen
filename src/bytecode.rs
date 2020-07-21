@@ -1,6 +1,10 @@
 
 use crate::{parse, symbols};
-use parse::{AbstractSyntaxTree as AST};
+use parse::{
+  AbstractSyntaxTree as AST,
+  NodeIndex, node_children,
+  code_segment,
+};
 use symbols::Symbol;
 
 #[derive(Copy, Clone, Debug)]
@@ -47,24 +51,23 @@ pub struct Function {
   pub bytecode : ByteCode
 }
 
-type BlockInfo<'l> = Vec<(Symbol, &'l [usize])>;
+type BlockInfo<'l> = Vec<(Symbol, &'l [NodeIndex])>;
 
 pub fn codegen(ast : &AST) -> ByteCode {
-  let root_node = 0;
-  let children = node_children(ast, root_node);
+  let children = node_children(ast, AST::root());
   codegen_function(ast, children[0]).bytecode
 }
 
-pub fn codegen_function(ast : &AST, root_node : usize) -> Function {
-  if let Some([args, body]) = match_head(ast, root_node, "fun") {
+pub fn codegen_function(ast : &AST, root : NodeIndex) -> Function {
+  if let Some([args, body]) = match_head(ast, root, "fun") {
     return Function { bytecode: codegen_bytecode(ast, *body)};
   }
   panic!("expected function")
 }
 
-fn codegen_bytecode(ast : &AST, root_node : usize) -> ByteCode {
+fn codegen_bytecode(ast : &AST, root : NodeIndex) -> ByteCode {
   let mut bc : ByteCode = Default::default();
-  let children = node_children(ast, root_node);
+  let children = node_children(ast, root);
   let mut blocks = vec![];
   let mut locals = vec![];
   let mut registers = 0;
@@ -97,17 +100,7 @@ fn codegen_bytecode(ast : &AST, root_node : usize) -> ByteCode {
   bc
 }
 
-fn node_children(ast : &AST, n : usize) -> &[usize] {
-  let n = &ast.nodes[n];
-  parse::node_children(n, &ast.child_indices)
-}
-
-fn code_segment(ast : &AST, n : usize) -> &str {
-  let n = &ast.nodes[n];
-  &ast.code[n.start..n.end]
-}
-
-fn to_symbol(ast : &AST, n : usize) -> Symbol {
+fn to_symbol(ast : &AST, n : NodeIndex) -> Symbol {
   symbols::to_symbol(code_segment(ast, n))
 }
 
@@ -116,7 +109,7 @@ fn to_block_id(blocks : &BlockInfo, s : Symbol) -> BlockIndex {
   BlockIndex(i)
 }
 
-fn match_head<'l>(ast : &'l AST, n : usize, s : &str) -> Option<&'l [usize]> {
+fn match_head<'l>(ast : &'l AST, n : NodeIndex, s : &str) -> Option<&'l [NodeIndex]> {
   let cs = node_children(ast, n);
   if cs.len() > 0 {
     if code_segment(ast, cs[0]) == s {
@@ -138,7 +131,7 @@ fn try_gen_expr(
   locals : &mut Vec<(Symbol, RegIndex)>,
   registers : &mut usize,
   ast : &AST,
-  node : usize
+  node : NodeIndex
 ) -> Option<Expr> {
   if let Some([a, b]) = match_head(ast, node, "+") {
     let a = gen_value(bc, blocks, locals, registers, ast, *a);
@@ -165,7 +158,7 @@ fn gen_value(
   locals : &mut Vec<(Symbol, RegIndex)>,
   registers : &mut usize,
   ast : &AST,
-  node : usize
+  node : NodeIndex
 ) -> RegIndex {
   if let Some(e) = try_gen_expr(bc, blocks, locals, registers, ast, node) {
     let reg = next_reg(registers);
@@ -179,7 +172,7 @@ fn gen_value(
   panic!("invalid expression")
 }
 
-fn find_local(locals : &mut Vec<(Symbol, RegIndex)>, ast : &AST, node : usize)
+fn find_local(locals : &mut Vec<(Symbol, RegIndex)>, ast : &AST, node : NodeIndex)
   -> Option<RegIndex>
 {
   let c = to_symbol(ast, node);
@@ -193,7 +186,7 @@ fn gen_instruction(
   locals : &mut Vec<(Symbol, RegIndex)>,
   registers : &mut usize,
   ast : &AST,
-  node : usize
+  node : NodeIndex,
 ) {
   let op = {
     // set var
