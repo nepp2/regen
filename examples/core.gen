@@ -2,7 +2,7 @@
 (def butt (fun (a) (
   (block run
     (debug a)
-    exit)
+    return)
 )))
 
 (def main (fun () (
@@ -18,5 +18,5 @@
     (debug blah)
     (jump continue))
   (block continue
-    exit)
+    return)
 )))

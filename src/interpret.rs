@@ -26,10 +26,10 @@ pub fn interpret(ast : &AST) {
   }
 
   if let Some(&v) = env.get(&to_symbol("main")) {
-    let f = unsafe { &*(v as *const Function) };
+    let f = v as *const Function;
     let mut stack = [0 ; 2048];
-    let mut p = ProcessorState{ pc: 0, sbp: 0 };
-    interpreter_loop(&mut stack, &mut p, f, &mut env);
+    let mut shadow_stack = vec![Frame { pc: 0, sbp: 0, f }];
+    interpreter_loop(&mut stack, &mut shadow_stack, &mut env);
     println!("Execution of main function complete.");
   }
   else {
@@ -37,73 +37,93 @@ pub fn interpret(ast : &AST) {
   }
 }
   
-struct ProcessorState {
+struct Frame {
   /// program counter
   pc : usize,
 
   /// the stack base pointer (index of the beginning of the current stack frame)
   sbp : usize,
+
+  /// function pointer
+  f : *const Function,
 }
 
-fn reg(p : &ProcessorState, i : RegIndex) -> usize {
-  i.0 as usize + p.sbp
+fn reg(sbp : usize, i : RegIndex) -> usize {
+  i.0 as usize + sbp
 }
 
-fn interpreter_loop(stack : &mut [u64], p : &mut ProcessorState, fun : &Function, env : &mut Env) {
-  loop {
-    let op = fun.ops[p.pc];
-    println!(">>> {}:   {}", p.pc, op);
-    match op {
-      Op::Expr(r, e) => {
-        let v = match e {
-          Expr::Def(sym) =>
-            if let Some(&f) = env.get(&sym) {
-              f
-            }
-            else {
-              panic!("Symbol '{}' not present in env", sym);
-            }
-          Expr::LiteralU64(val) =>
-            val as u64,
-          Expr::Add(a, b) =>
-            stack[reg(p, a)] + stack[reg(p, b)],
-        };
-        stack[reg(p, r)] = v;
-      }
-      Op::Set(var, val) => {
-        stack[reg(p, var)] = stack[reg(p, val)];
-      }
-      Op::CJump{ cond, then_block, else_block } => {
-        if reg(p, cond) != 0 {
-          p.pc = fun.blocks[then_block.0].start_op;
+fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &mut Env) {
+  let mut frame = shadow_stack.pop().unwrap();
+  'outer: loop {
+    let fun = unsafe { &*frame.f };
+    let sbp = frame.sbp;
+    loop {
+      let op = fun.ops[frame.pc];
+      println!(">>> {}:   {}", frame.pc, op);
+      match op {
+        Op::Expr(r, e) => {
+          let v = match e {
+            Expr::Def(sym) =>
+              if let Some(&f) = env.get(&sym) {
+                f
+              }
+              else {
+                panic!("Symbol '{}' not present in env", sym);
+              }
+            Expr::LiteralU64(val) =>
+              val as u64,
+            Expr::Add(a, b) =>
+              stack[reg(sbp, a)] + stack[reg(sbp, b)],
+          };
+          stack[reg(sbp, r)] = v;
         }
-        else {
-          p.pc = fun.blocks[else_block.0].start_op;
+        Op::Set(var, val) => {
+          stack[reg(sbp, var)] = stack[reg(sbp, val)];
         }
-        continue;
-      }
-      Op::Jump(block) => {
-        p.pc = fun.blocks[block.0].start_op;
-        continue;
-      }
-      Op::Arg{ index, value } => {
-        let index = p.sbp + fun.registers + (index as usize);
-        stack[index] = stack[reg(p, value)];
+        Op::CJump{ cond, then_block, else_block } => {
+          if reg(sbp, cond) != 0 {
+            frame.pc = fun.blocks[then_block.0].start_op;
+          }
+          else {
+            frame.pc = fun.blocks[else_block.0].start_op;
+          }
+          continue;
+        }
+        Op::Jump(block) => {
+          frame.pc = fun.blocks[block.0].start_op;
+          continue;
+        }
+        Op::Arg{ index, value } => {
+          let index = frame.sbp + fun.registers + (index as usize);
+          stack[index] = stack[reg(sbp, value)];
 
+        }
+        Op::Invoke(f) => {
+          let fun_address = stack[reg(sbp, f)];
+          let f = unsafe { &*(fun_address as *const Function) };
+          // advance the current frame past the call, and store it on the
+          // shadow stack to be returned to later
+          frame.pc += 1;
+          shadow_stack.push(frame);
+          // set the new frame
+          frame = Frame{ pc: 0, sbp: sbp + fun.registers, f };
+          break;
+        }
+        Op::Debug(r) => {
+          println!("debug: {}", stack[reg(sbp, r)]);
+        }
+        Op::Return => {
+          if let Some(prev_frame) = shadow_stack.pop() {
+            frame = prev_frame;
+            break;
+          }
+          else {
+            break 'outer;
+          }
+        }
       }
-      Op::Invoke(f) => {
-        let fun_address = stack[reg(p, f)];
-        let f = unsafe { &*(fun_address as *const Function) };
-        let mut next_p = ProcessorState{ pc: 0, sbp: p.sbp + fun.registers };
-        interpreter_loop(stack, &mut next_p, f, env);
-      }
-      Op::Debug(r) => {
-        println!("debug: {}", stack[reg(p, r)]);
-      }
-      Op::Exit => {
-        return;
-      }
+      frame.pc += 1;
     }
-    p.pc += 1;
   }
+  shadow_stack.push(frame);
 }

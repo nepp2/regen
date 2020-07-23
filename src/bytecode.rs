@@ -34,7 +34,7 @@ pub enum Op {
   Jump(BlockIndex),
   Arg{ index: u8, value: RegIndex },
   Invoke(RegIndex),
-  Exit,
+  Return,
   //Error,
 }
 
@@ -208,8 +208,8 @@ fn gen_instruction(b : &mut Builder, node : NodeIndex) {
       Op::Debug(reg)
     }
     // Exit
-    else if code_segment(b.ast, node) == "exit" {
-      Op::Exit
+    else if code_segment(b.ast, node) == "return" {
+      Op::Return
     }
     // Call
     else if let Some(tail) = match_head(b.ast, node, "invoke") {
@@ -277,8 +277,8 @@ impl fmt::Display for Op {
         write!(f, "Arg {} = reg[{}]", index, value.0)?,
       Op::Invoke(reg) =>
         write!(f, "Invoke reg[{}]", reg.0)?,
-      Op::Exit =>
-        write!(f, "Exit")?,
+      Op::Return =>
+        write!(f, "Return")?,
     }
     Ok(())
   }
