@@ -3,9 +3,10 @@
 
 mod symbols;
 mod parse;
+mod env;
 mod bytecode;
-mod ffi;
 mod interpret;
+mod ffi;
 
 use std::fs;
 
