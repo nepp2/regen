@@ -1,8 +1,7 @@
 
-(def butt (fun (a) (
+(def butt (fun (a b) (
   (block run
-    (debug a)
-    return)
+    (return (+ a b)))
 )))
 
 (def main (fun () (
@@ -12,7 +11,9 @@
     (set result (+ 0 blah))
     (cjump result then else))
   (block then
-    (invoke butt 57)
+    (set blah
+      (invoke butt 57 24))
+    (debug blah)
     (jump continue))
   (block else
     (debug blah)

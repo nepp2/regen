@@ -23,17 +23,18 @@ pub enum Expr {
   Def(Symbol),
   LiteralU64(u64),
   Add(RegIndex, RegIndex),
+  Invoke(RegIndex),
 }
 
 #[derive(Copy, Clone, Debug)]
 pub enum Op {
   Expr(RegIndex, Expr),
   Set(RegIndex, RegIndex),
+  SetReturn(RegIndex),
   CJump{ cond: RegIndex, then_block: BlockIndex, else_block: BlockIndex },
   Debug(RegIndex),
   Jump(BlockIndex),
   Arg{ index: u8, value: RegIndex },
-  Invoke(RegIndex),
   Return,
   //Error,
 }
@@ -101,6 +102,7 @@ pub fn codegen(env: &Env, ast : &AST, root : NodeIndex) -> Function {
     registers: &mut registers,
     ast: &ast,
     env,
+    arg_values: vec![],
   };
   for bi in block_instrs.as_slice() {
     let start_op = b.ops.len();
@@ -131,7 +133,21 @@ fn push_expr(b : &mut Builder, e : Expr) -> RegIndex{
 }
 
 fn expr_to_value(b : &mut Builder, node : NodeIndex) -> RegIndex {
-  // check for operator
+  // invoke
+  if let Some(tail) = match_head(b.ast, node, "invoke") {
+    b.arg_values.clear();
+    for &arg in &tail[1..] {
+      let v = expr_to_value(b, arg);
+      b.arg_values.push(v);
+    }
+    let reg = expr_to_value(b, tail[0]);
+    for (i, value) in b.arg_values.drain(..).enumerate() {
+      b.ops.push(Op::Arg{ index: i as u8, value });
+    }
+    let e = Expr::Invoke(reg);
+    return push_expr(b, e);
+  }
+  // operator
   if let Some([v1, v2]) = match_head(b.ast, node, "+") {
     let v1 = expr_to_value(b, *v1);
     let v2 = expr_to_value(b, *v2);
@@ -180,51 +196,47 @@ struct Builder<'l> {
   registers : &'l mut usize,
   ast : &'l AST,
   env : &'l Env,
+
+  /// used to store argument values without reallocating a lot
+  arg_values : Vec<RegIndex>,
 }
 
 fn gen_instruction(b : &mut Builder, node : NodeIndex) {
-  let op = {
-    // set var
-    if let Some([varname, value]) = match_head(b.ast, node, "set") {
-      let var_reg = find_local(b.locals, b.ast, *varname).expect("no variable found");
-      let val_reg = expr_to_value(b, *value);
-      Op::Set(var_reg, val_reg)
-    }
-    // conditional jump
-    else if let Some([cond, then_block, else_block]) = match_head(b.ast, node, "cjump") {
-      let cond = expr_to_value(b, *cond);
-      let then_block = to_block_id(b.blocks, to_symbol(b.ast, *then_block));
-      let else_block = to_block_id(b.blocks, to_symbol(b.ast, *else_block));
-      Op::CJump{cond, then_block, else_block}
-    }
-    // Jump
-    else if let Some([block]) = match_head(b.ast, node, "jump") {
-      let block = to_block_id(b.blocks, to_symbol(b.ast, *block));
-      Op::Jump(block)
-    }
-    // Debug
-    else if let Some([v]) = match_head(b.ast, node, "debug") {
-      let reg = expr_to_value(b, *v);
-      Op::Debug(reg)
-    }
-    // Exit
-    else if code_segment(b.ast, node) == "return" {
-      Op::Return
-    }
-    // Call
-    else if let Some(tail) = match_head(b.ast, node, "invoke") {
-      for (i, arg) in tail[1..].iter().enumerate() {
-        let value = expr_to_value(b, *arg);
-        b.ops.push(Op::Arg{ index: i as u8, value });
-      }
-      let reg = expr_to_value(b, tail[0]);
-      Op::Invoke(reg)
-    }
-    else {
-      panic!("unrecognised instruction:\n   {}", code_segment(b.ast, node))
-    }
-  };
-  b.ops.push(op);
+  // set var
+  if let Some([varname, value]) = match_head(b.ast, node, "set") {
+    let var_reg = find_local(b.locals, b.ast, *varname).expect("no variable found");
+    let val_reg = expr_to_value(b, *value);
+    b.ops.push(Op::Set(var_reg, val_reg));
+  }
+  // conditional jump
+  else if let Some([cond, then_block, else_block]) = match_head(b.ast, node, "cjump") {
+    let cond = expr_to_value(b, *cond);
+    let then_block = to_block_id(b.blocks, to_symbol(b.ast, *then_block));
+    let else_block = to_block_id(b.blocks, to_symbol(b.ast, *else_block));
+    b.ops.push(Op::CJump{cond, then_block, else_block});
+  }
+  // Jump
+  else if let Some([block]) = match_head(b.ast, node, "jump") {
+    let block = to_block_id(b.blocks, to_symbol(b.ast, *block));
+    b.ops.push(Op::Jump(block));
+  }
+  // Debug
+  else if let Some([v]) = match_head(b.ast, node, "debug") {
+    let reg = expr_to_value(b, *v);
+    b.ops.push(Op::Debug(reg));
+  }
+  // Return
+  else if let Some([v]) = match_head(b.ast, node, "return") {
+    let reg = expr_to_value(b, *v);
+    b.ops.push(Op::SetReturn(reg));
+    b.ops.push(Op::Return);
+  }
+  else if code_segment(b.ast, node) == "return" {
+    b.ops.push(Op::Return);
+  }
+  else {
+    panic!("unrecognised instruction:\n   {}", code_segment(b.ast, node))
+  }
 }
 
 // #### Display implementations ####
@@ -254,6 +266,8 @@ impl fmt::Display for Expr {
         write!(f, "{}", sym)?,
       Expr::Add(a, b) =>
         write!(f, "reg[{}] + reg[{}]", a.0, b.0)?,
+      Expr::Invoke(reg) =>
+      write!(f, "Invoke reg[{}]", reg.0)?,
     }
     Ok(())
   }
@@ -266,6 +280,8 @@ impl fmt::Display for Op {
         write!(f, "reg[{}] = {}", reg.0, expr)?,
       Op::Set(a, b) =>
         write!(f, "reg[{}] := reg[{}]", a.0, b.0)?,
+      Op::SetReturn(v) =>
+        write!(f, "RetVal := reg[{}]", v.0)?,
       Op::CJump{ cond, then_block, else_block } =>
         write!(f, "CJump reg[{}] to block[{}] else block[{}]",
           cond.0, then_block.0, else_block.0)?,
@@ -275,8 +291,6 @@ impl fmt::Display for Op {
         write!(f, "Jump to block[{}]", block.0)?,
       Op::Arg{ index, value } =>
         write!(f, "Arg {} = reg[{}]", index, value.0)?,
-      Op::Invoke(reg) =>
-        write!(f, "Invoke reg[{}]", reg.0)?,
       Op::Return =>
         write!(f, "Return")?,
     }

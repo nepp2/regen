@@ -54,31 +54,50 @@ fn reg(sbp : usize, i : RegIndex) -> usize {
 
 fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &mut Env) {
   let mut frame = shadow_stack.pop().unwrap();
+  let mut return_addr = 0;
   'outer: loop {
     let fun = unsafe { &*frame.f };
     let sbp = frame.sbp;
     loop {
       let op = fun.ops[frame.pc];
-      println!(">>> {}:   {}", frame.pc, op);
+      // TODO: println!(">>> {}:   {}", frame.pc, op);
       match op {
         Op::Expr(r, e) => {
-          let v = match e {
+          let r = reg(sbp, r);
+          match e {
             Expr::Def(sym) =>
               if let Some(&f) = env.get(&sym) {
-                f
+                stack[r] = f;
               }
               else {
                 panic!("Symbol '{}' not present in env", sym);
               }
-            Expr::LiteralU64(val) =>
-              val as u64,
-            Expr::Add(a, b) =>
-              stack[reg(sbp, a)] + stack[reg(sbp, b)],
+            Expr::LiteralU64(val) => {
+              stack[r] = val as u64;
+            }
+            Expr::Add(a, b) => {
+              stack[r] = stack[reg(sbp, a)] + stack[reg(sbp, b)];
+            }
+            Expr::Invoke(f) => {
+              let fun_address = stack[reg(sbp, f)];
+              let f = unsafe { &*(fun_address as *const Function) };
+              // advance the current frame past the call, and store it on the
+              // shadow stack to be returned to later
+              frame.pc += 1;
+              shadow_stack.push(frame);
+              // set the new frame
+              frame = Frame{ pc: 0, sbp: sbp + fun.registers, f };
+              // set the return address
+              return_addr = r;
+              break;
+            }
           };
-          stack[reg(sbp, r)] = v;
         }
         Op::Set(var, val) => {
           stack[reg(sbp, var)] = stack[reg(sbp, val)];
+        }
+        Op::SetReturn(val) => {
+          stack[return_addr] = stack[reg(sbp, val)];
         }
         Op::CJump{ cond, then_block, else_block } => {
           if reg(sbp, cond) != 0 {
@@ -97,17 +116,6 @@ fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &m
           let index = frame.sbp + fun.registers + (index as usize);
           stack[index] = stack[reg(sbp, value)];
 
-        }
-        Op::Invoke(f) => {
-          let fun_address = stack[reg(sbp, f)];
-          let f = unsafe { &*(fun_address as *const Function) };
-          // advance the current frame past the call, and store it on the
-          // shadow stack to be returned to later
-          frame.pc += 1;
-          shadow_stack.push(frame);
-          // set the new frame
-          frame = Frame{ pc: 0, sbp: sbp + fun.registers, f };
-          break;
         }
         Op::Debug(r) => {
           println!("debug: {}", stack[reg(sbp, r)]);

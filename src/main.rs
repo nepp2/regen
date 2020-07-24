@@ -15,7 +15,7 @@ fn main() {
     fs::read_to_string("examples/core.gen")
     .expect("Something went wrong reading the file");
   
-  println!("file contents:\n\n{}", contents);
+  // println!("file contents:\n\n{}", contents);
 
   let ast = parse::parse(contents);
   interpret::interpret(&ast);
