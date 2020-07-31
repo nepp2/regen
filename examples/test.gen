@@ -1,0 +1,23 @@
+
+(def butt (fun (a b) (
+  (block run
+    (return (+ a b)))
+)))
+
+(def main (fun () (
+  (vars blah result) 
+  (block condition
+    (set blah 5)
+    (set result (+ 0 blah))
+    (cjump result then else))
+  (block then
+    (set blah
+      (call butt 57 24))
+    (debug blah)
+    (jump continue))
+  (block else
+    (debug blah)
+    (jump continue))
+  (block continue
+    return)
+)))

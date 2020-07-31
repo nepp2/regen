@@ -1,5 +1,5 @@
 
-use crate::{symbols, parse, bytecode, env};
+use crate::{symbols, parse, bytecode, env, ffi};
 
 use env::Env;
 use symbols::to_symbol;
@@ -8,13 +8,20 @@ use parse::{
   node_children, match_head,
 };
 use bytecode::{
-  Function, Op, Expr, RegIndex,
+  Function, Op, Expr, RegIndex, BinOp,
 };
+
+pub extern "C" fn c_add(a : u64, b : u64) -> u64 {
+  a + b
+}
 
 pub fn interpret(ast : &AST) {
   println!("Entering interpreter");
   let children = node_children(ast, AST::root());
   let mut env = Env::new();
+
+  env.insert(to_symbol("c_add"), c_add as u64);
+
   for &c in children {
     if let Some([name, value]) = match_head(ast, c, "def") {
       let name = parse::code_segment(ast, *name);
@@ -75,8 +82,16 @@ fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &m
             Expr::LiteralU64(val) => {
               stack[r] = val as u64;
             }
-            Expr::Add(a, b) => {
-              stack[r] = stack[reg(sbp, a)] + stack[reg(sbp, b)];
+            Expr::BinOp(op, a, b) => {
+              let a = stack[reg(sbp, a)];
+              let b  = stack[reg(sbp, b)];
+              stack[r] = match op {
+               BinOp::Add => a + b,
+               BinOp::Sub => a - b,
+               BinOp::Mul => a * b,
+               BinOp::Div => a / b,
+               BinOp::Rem => a % b,
+              };
             }
             Expr::Invoke(f) => {
               let fun_address = stack[reg(sbp, f)];
@@ -90,6 +105,16 @@ fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &m
               // set the return address
               return_addr = r;
               break;
+            }
+            Expr::InvokeC(f, arg_count) => {
+              let fptr = stack[reg(sbp, f)] as *const ();
+              let args = {
+                let offset = sbp + fun.registers;
+                &stack[offset..(offset + arg_count)]
+              };
+              stack[r] = unsafe {
+                ffi::call_c_function(fptr, args)
+              };
             }
           };
         }

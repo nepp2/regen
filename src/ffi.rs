@@ -1,20 +1,32 @@
 
-fn call_c_function() {
+#[test]
+fn ffi_test() {
   let fun = blah as *const ();
   unsafe {
     call_6(fun, 1, 2, 3, 4, 5, 6);
   }
 }
 
-#[test]
-fn ffi_test() {
-  call_c_function();
-}
-
 pub extern "C" fn blah(a : i16, b : i16, c : u8, d : u32, e : u8, f : u8) {
   println!(
     "a: {}, b: {}, c: {}, d: {}, e: {}, f: {}",
     a, b, c, d, e, f);
+}
+
+pub unsafe fn call_c_function(fun : *const (), args : &[u64]) -> u64 {
+  let a = args;
+  match a.len() {
+    0 => call_0(fun),
+    1 => call_1(fun, a[0]),
+    2 => call_2(fun, a[0], a[1]),
+    3 => call_3(fun, a[0], a[1], a[2]),
+    4 => call_4(fun, a[0], a[1], a[2], a[3]),
+    5 => call_5(fun, a[0], a[1], a[2], a[3], a[4]),
+    6 => call_6(fun, a[0], a[1], a[2], a[3], a[4], a[5]),
+    _ => {
+      panic!("C calls with {} arguments not supported", a.len())
+    }
+  }
 }
 
 unsafe fn call_0(fun : *const ()) -> u64 {

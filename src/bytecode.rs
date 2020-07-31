@@ -19,11 +19,17 @@ pub struct BlockIndex(pub usize);
 pub struct RegIndex(pub usize);
 
 #[derive(Copy, Clone, Debug)]
+pub enum BinOp {
+  Add, Sub, Mul, Div, Rem
+}
+
+#[derive(Copy, Clone, Debug)]
 pub enum Expr {
   Def(Symbol),
   LiteralU64(u64),
-  Add(RegIndex, RegIndex),
+  BinOp(BinOp, RegIndex, RegIndex),
   Invoke(RegIndex),
+  InvokeC(RegIndex, usize),
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -132,28 +138,22 @@ fn push_expr(b : &mut Builder, e : Expr) -> RegIndex{
   return reg;
 }
 
-fn expr_to_value(b : &mut Builder, node : NodeIndex) -> RegIndex {
-  // invoke
-  if let Some(tail) = match_head(b.ast, node, "invoke") {
-    b.arg_values.clear();
-    for &arg in &tail[1..] {
-      let v = expr_to_value(b, arg);
-      b.arg_values.push(v);
-    }
-    let reg = expr_to_value(b, tail[0]);
-    for (i, value) in b.arg_values.drain(..).enumerate() {
-      b.ops.push(Op::Arg{ index: i as u8, value });
-    }
-    let e = Expr::Invoke(reg);
-    return push_expr(b, e);
+fn function_call(b : &mut Builder, node : NodeIndex) -> RegIndex {
+  let nodes = &node_children(b.ast, node)[1..];
+  b.arg_values.clear();
+  for &arg in &nodes[1..] {
+    let v = expr_to_value(b, arg);
+    b.arg_values.push(v);
   }
-  // operator
-  if let Some([v1, v2]) = match_head(b.ast, node, "+") {
-    let v1 = expr_to_value(b, *v1);
-    let v2 = expr_to_value(b, *v2);
-    let e = Expr::Add(v1, v2);
-    return push_expr(b, e);
+  let reg = expr_to_value(b, nodes[0]);
+  for (i, value) in b.arg_values.drain(..).enumerate() {
+    b.ops.push(Op::Arg{ index: i as u8, value });
   }
+  let e = Expr::Invoke(reg);
+  push_expr(b, e)
+}
+
+fn atom_to_value(b : &mut Builder, node : NodeIndex) -> RegIndex {
   let segment = code_segment(b.ast, node);
   // boolean literals
   match segment {
@@ -178,7 +178,61 @@ fn expr_to_value(b : &mut Builder, node : NodeIndex) -> RegIndex {
   }
   // Assume global
   let e = Expr::Def(symbols::to_symbol(segment));
-  return push_expr(b, e);
+  push_expr(b, e)
+}
+
+fn list_expr_to_value(b : &mut Builder, node : NodeIndex, children : &[NodeIndex]) -> RegIndex {
+  let head = code_segment(b.ast, children[0]);
+  // function call
+  if head == "call" || head == "ccall" {
+    b.arg_values.clear();
+    for &arg in &children[2..] {
+      let v = expr_to_value(b, arg);
+      b.arg_values.push(v);
+    }
+    let reg = expr_to_value(b, children[1]);
+    for (i, value) in b.arg_values.drain(..).enumerate() {
+      b.ops.push(Op::Arg{ index: i as u8, value });
+    }
+    let e = {
+      if head == "ccall" {
+        let args = children[2..].len();
+        Expr::InvokeC(reg, args)
+      }
+      else {
+        Expr::Invoke(reg)
+      }
+    };
+    return push_expr(b, e);
+  }
+  // operator
+  let op : Option<BinOp> = match head {
+    "+" => Some(BinOp::Add),
+    "-" => Some(BinOp::Sub),
+    "*" => Some(BinOp::Mul),
+    "/" => Some(BinOp::Div),
+    "%" => Some(BinOp::Rem),
+    _ => None,
+  };
+  if let Some(op) = op {
+    if let [v1, v2] = children[1..] {
+      let v1 = expr_to_value(b, v1);
+      let v2 = expr_to_value(b, v2);
+      let e = Expr::BinOp(op, v1, v2);
+      return push_expr(b, e);
+    }
+  }
+  panic!("unrecognised instruction:\n   {}", code_segment(b.ast, node))
+}
+
+fn expr_to_value(b : &mut Builder, node : NodeIndex) -> RegIndex {
+  let children = node_children(b.ast, node);
+  if children.len() == 0 {
+    atom_to_value(b, node)
+  }
+  else {
+    list_expr_to_value(b, node, children)
+  }
 }
 
 fn find_local(locals : &mut Vec<(Symbol, RegIndex)>, ast : &AST, node : NodeIndex)
@@ -234,8 +288,9 @@ fn gen_instruction(b : &mut Builder, node : NodeIndex) {
   else if code_segment(b.ast, node) == "return" {
     b.ops.push(Op::Return);
   }
+  // Assume expression
   else {
-    panic!("unrecognised instruction:\n   {}", code_segment(b.ast, node))
+    expr_to_value(b, node);
   }
 }
 
@@ -257,6 +312,19 @@ impl fmt::Display for Function {
   }
 }
 
+impl fmt::Display for BinOp {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    use BinOp::*;
+    match self {
+      Add => write!(f, "+"),
+      Sub => write!(f, "-"),
+      Mul => write!(f, "*"),
+      Div => write!(f, "/"),
+      Rem => write!(f, "%"),
+    }
+  }
+}
+
 impl fmt::Display for Expr {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
@@ -264,10 +332,12 @@ impl fmt::Display for Expr {
         write!(f, "{}", v)?,
       Expr::Def(sym) =>
         write!(f, "{}", sym)?,
-      Expr::Add(a, b) =>
-        write!(f, "reg[{}] + reg[{}]", a.0, b.0)?,
+      Expr::BinOp(op, a, b) =>
+        write!(f, "reg[{}] {} reg[{}]", a.0, op, b.0)?,
       Expr::Invoke(reg) =>
-      write!(f, "Invoke reg[{}]", reg.0)?,
+        write!(f, "Invoke reg[{}]", reg.0)?,
+      Expr::InvokeC(reg, args) =>
+        write!(f, "InvokeC reg[{}] ({} args)", reg.0, args)?,
     }
     Ok(())
   }
