@@ -1,34 +1,8 @@
+# S-Expression syntax
 
-# Regen
+Considering potential lightweight alternatives to the paren syntax. Much like the Scopes syntax.
 
-Small, s-expression based interpreter
-
-overview: minimal language for self-extension
-
-# Plan
-
-
-
-# Bootstrapping
-
-interpreted prior to llvm use
-
-requirements:
-
-- intrinsics
-- eval
-- only one control flow mechanism
-- types are values?
-- all functions/values/types use same type of "def"
-- values are unboxed with varying sizes
-
-
-Type:
- - int
- - id
- - tuple
-
-# S-Exp improvements
+## Using whitespace
 
 Some parens are implicit, unless there are new lines awaiting a closing paren:
 
