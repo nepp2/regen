@@ -4,8 +4,7 @@ use crate::{symbols, parse, bytecode, env, ffi};
 use env::Env;
 use symbols::to_symbol;
 use parse::{
-  AbstractSyntaxTree as AST,
-  node_children, match_head,
+  match_head, Node, code_segment
 };
 use bytecode::{
   Function, Op, Expr, RegIndex, BinOp,
@@ -15,17 +14,16 @@ pub extern "C" fn c_add(a : u64, b : u64) -> u64 {
   a + b
 }
 
-pub fn interpret(ast : &AST) {
+pub fn interpret(n : &Node, code : &str) {
   println!("Entering interpreter");
-  let children = node_children(ast, AST::root());
   let mut env = Env::new();
 
   env.insert(to_symbol("c_add"), c_add as u64);
 
-  for &c in children {
-    if let Some([name, value]) = match_head(ast, c, "def") {
-      let name = parse::code_segment(ast, *name);
-      let function = bytecode::codegen(&env, ast, *value);
+  for &c in n.children {
+    if let Some([name, value]) = match_head(&c, code, "def") {
+      let name = code_segment(code, *name);
+      let function = bytecode::codegen(&env, code, *value);
       let value =
         Box::into_raw(Box::new(function)) as u64;
       env.insert(to_symbol(name), value);

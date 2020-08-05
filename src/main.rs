@@ -1,6 +1,7 @@
 
 #![allow(dead_code)]
 
+mod perm_alloc;
 mod symbols;
 mod parse;
 mod env;
@@ -10,14 +11,13 @@ mod ffi;
 
 use std::fs;
 use std::path::Path;
-use std::ffi::OsStr;
 
 fn run_file(path : impl AsRef<Path>) {
-  let contents =
+  let code =
     fs::read_to_string(path)
     .expect("Something went wrong reading the file");
-  let ast = parse::parse(contents);
-  interpret::interpret(&ast);
+  let ast = parse::parse(&code);
+  interpret::interpret(&ast, &code);
 }
 
 #[test]
@@ -25,7 +25,9 @@ fn run_test_cases() {
   let tests = fs::read_dir("examples/tests")
     .expect("could not open test directory")
     .flatten()
-    .filter(|x| x.path().extension() == Some(OsStr::new("gen")));
+    .filter(|x|
+      x.path().extension() == Some(std::ffi::OsStr::new("gen"))
+    );
   for f in tests {
     run_file(f.path());
   }

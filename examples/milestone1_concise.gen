@@ -9,5 +9,5 @@
   (if result
    ((set blah (butt 57 24))
     (debug blah))
-   ((debug blah))
-))
+   ((debug blah)))
+)))
