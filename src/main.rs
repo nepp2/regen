@@ -6,6 +6,7 @@ mod symbols;
 mod parse;
 mod env;
 mod bytecode;
+mod compile;
 mod interpret;
 mod ffi;
 

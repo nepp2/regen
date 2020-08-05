@@ -10,18 +10,24 @@ use parse::{
 };
 use symbols::Symbol;
 
+/// Block instructions
+struct BlockInstrs<'l> {
+  name : Symbol,
+  instructions : &'l [Node],
+}
+
 /// Read bytecode from a simple basic-block s-expression representation
 pub fn read_bytecode(env: &Env, code : &str, root : Node) -> BytecodeFunction {
     let body;
     let mut registers = 0;
-    let mut args = vec![];  
+    let mut args = 0;  
     let mut locals = vec![];
     if let Some([arg_nodes, body_node]) = match_head(&root, code, "fun") {
       body = *body_node;
-      for &arg in arg_nodes.children.as_slice() {
+      args = arg_nodes.children.len();
+      for &arg in arg_nodes.children {
         let name = to_symbol(code, arg);
         locals.push((name, next_reg(&mut registers)));
-        args.push(name);
       }
     }
     else {
@@ -65,7 +71,7 @@ pub fn read_bytecode(env: &Env, code : &str, root : Node) -> BytecodeFunction {
       let num_ops = b.ops.len() - start_op;
       blocks.push(Block {name: bi.name, start_op, num_ops });
     }
-    BytecodeFunction { blocks, ops, registers, args }
+    BytecodeFunction { blocks, ops, registers, args, locals }
   }
   
   fn to_block_id(blocks : &Vec<BlockInstrs>, s : Symbol) -> BlockIndex {

@@ -82,6 +82,14 @@ pub fn match_head<'l>(n : &'l Node, code : &str, s : &str) -> Option<&'l [Node]>
   None
 }
 
+pub fn head_tail<'l>(n : &'l Node, code : &'l str) -> Option<(&'l str, &'l [Node])> {
+  if n.children.len() > 0 {
+    let s = code_segment(code, n.children[0]);
+    return Some((s, &n.children[1..]));
+  }
+  None
+}
+
 pub fn code_segment(code : &str, n : Node) -> &str {
   &code[n.start..n.end]
 }

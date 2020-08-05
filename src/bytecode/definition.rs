@@ -1,7 +1,6 @@
 
-use crate::{parse, symbols};
+use crate::symbols;
 use symbols::Symbol;
-use parse::Node;
 
 #[derive(Copy, Clone, Debug)]
 pub struct BlockIndex(pub usize);
@@ -46,12 +45,7 @@ pub struct Block {
 pub struct BytecodeFunction {
   pub blocks : Vec<Block>,
   pub ops : Vec<Op>,
-  pub args : Vec<Symbol>,
+  pub args : usize,
+  pub locals : Vec<(Symbol, RegIndex)>,
   pub registers : usize,
-}
-
-/// Block instructions
-pub struct BlockInstrs<'l> {
-  pub name : Symbol,
-  pub instructions : &'l [Node],
 }
