@@ -1,7 +1,7 @@
 
 pub mod definition;
-pub mod ast_to_bytecode;
+pub mod reader;
+pub mod display;
 
 pub use definition::*;
-pub use ast_to_bytecode::codegen;
-
+pub use reader::read_bytecode;

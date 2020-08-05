@@ -7,7 +7,7 @@ use parse::{
   match_head, Node, code_segment
 };
 use bytecode::{
-  Function, Op, Expr, RegIndex, BinOp,
+  BytecodeFunction, Op, Expr, RegIndex, BinOp,
 };
 
 pub extern "C" fn c_add(a : u64, b : u64) -> u64 {
@@ -23,7 +23,7 @@ pub fn interpret(n : &Node, code : &str) {
   for &c in n.children {
     if let Some([name, value]) = match_head(&c, code, "def") {
       let name = code_segment(code, *name);
-      let function = bytecode::codegen(&env, code, *value);
+      let function = bytecode::read_bytecode(&env, code, *value);
       let value =
         Box::into_raw(Box::new(function)) as u64;
       env.insert(to_symbol(name), value);
@@ -31,7 +31,7 @@ pub fn interpret(n : &Node, code : &str) {
   }
 
   if let Some(&v) = env.get(&to_symbol("main")) {
-    let f = v as *const Function;
+    let f = v as *const BytecodeFunction;
     let mut stack = [0 ; 2048];
     let mut shadow_stack = vec![Frame { pc: 0, sbp: 0, f }];
     interpreter_loop(&mut stack, &mut shadow_stack, &mut env);
@@ -50,7 +50,7 @@ struct Frame {
   sbp : usize,
 
   /// function pointer
-  f : *const Function,
+  f : *const BytecodeFunction,
 }
 
 fn reg(sbp : usize, i : RegIndex) -> usize {
@@ -93,7 +93,7 @@ fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &m
             }
             Expr::Invoke(f) => {
               let fun_address = stack[reg(sbp, f)];
-              let f = unsafe { &*(fun_address as *const Function) };
+              let f = unsafe { &*(fun_address as *const BytecodeFunction) };
               // advance the current frame past the call, and store it on the
               // shadow stack to be returned to later
               frame.pc += 1;

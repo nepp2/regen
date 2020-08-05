@@ -10,8 +10,8 @@ use parse::{
 };
 use symbols::Symbol;
 
-
-pub fn codegen(env: &Env, code : &str, root : Node) -> Function {
+/// Read bytecode from a simple basic-block s-expression representation
+pub fn read_bytecode(env: &Env, code : &str, root : Node) -> BytecodeFunction {
     let body;
     let mut registers = 0;
     let mut args = vec![];  
@@ -60,12 +60,12 @@ pub fn codegen(env: &Env, code : &str, root : Node) -> Function {
     for bi in block_instrs.as_slice() {
       let start_op = b.ops.len();
       for &n in bi.instructions {
-        gen_instruction(&mut b, n);
+        read_instruction(&mut b, n);
       }
       let num_ops = b.ops.len() - start_op;
       blocks.push(Block {name: bi.name, start_op, num_ops });
     }
-    Function { blocks, ops, registers, args }
+    BytecodeFunction { blocks, ops, registers, args }
   }
   
   fn to_block_id(blocks : &Vec<BlockInstrs>, s : Symbol) -> BlockIndex {
@@ -202,7 +202,7 @@ pub fn codegen(env: &Env, code : &str, root : Node) -> Function {
     arg_values : Vec<RegIndex>,
   }
   
-  fn gen_instruction(b : &mut Builder, node : Node) {
+  fn read_instruction(b : &mut Builder, node : Node) {
     // set var
     if let Some([varname, value]) = match_head(&node, b.code, "set") {
       let var_reg = find_local(b.locals, b.code, *varname).expect("no variable found");
