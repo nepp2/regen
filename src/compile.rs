@@ -9,9 +9,14 @@ use env::Env;
 use parse::{
   Node,
   code_segment, to_symbol,
-  match_head, head_tail,
+  match_head, node_shape, NodeShape,
 };
 use symbols::Symbol;
+
+struct LabelPair {
+  entry_block: BlockIndex,
+  exit_block: BlockIndex,
+}
 
 /// Function builder
 struct Builder<'l> {
@@ -22,12 +27,33 @@ struct Builder<'l> {
   block_completion : Vec<bool>,
   blocks : Vec<Block>,
   ops : Vec<Op>,
+  label_stack : Vec<LabelPair>,
 
   code : &'l str,
   env : &'l Env,
 
   /// used to store argument values without reallocating a lot
   arg_values : Vec<RegIndex>,
+}
+
+fn find_local(b : &mut Builder, node : Node)
+  -> Option<RegIndex>
+{
+  let c = to_symbol(b.code, node);
+  b.locals.iter()
+    .find(|&l| l.0 == c).map(|v| v.1)
+}
+
+fn next_reg(b : &mut Builder) -> RegIndex {
+  let r = RegIndex(b.registers);
+  b.registers += 1;
+  r
+}
+
+fn push_expr(b : &mut Builder, e : Expr) -> RegIndex{
+  let reg = next_reg(b);
+  b.ops.push(Op::Expr(reg, e));
+  return reg;
 }
 
 fn create_basic_block(b : &mut Builder, name : &str) -> BlockIndex {
@@ -77,70 +103,135 @@ fn complete_function(mut b : Builder) -> BytecodeFunction {
   }
 }
 
-fn compile_expr(b : &mut Builder, node : Node) -> RegIndex {
-  if node.children.len() == 0 {
-    atom_to_value(b, node)
+fn compile_if_else(b : &mut Builder, cond : Node, then_expr : Node, else_expr : Node) -> RegIndex {
+  let result_reg = next_reg(b);
+  let then_block = create_basic_block(b, "then");
+  let else_block = create_basic_block(b, "else");
+  let exit_block = create_basic_block(b, "exit");
+  let cond = compile_expr_to_value(b, cond);
+  b.ops.push(Op::CJump{ cond, then_block, else_block });
+  set_current_basic_block(b, then_block);
+  let then_result = compile_block(b, then_expr);
+  if let Some(v) = then_result {
+    b.ops.push(Op::Set(result_reg, v));
   }
-  else {
-    compile_list_expr(b, node, node.children.as_slice())
+  b.ops.push(Op::Jump(exit_block));
+  set_current_basic_block(b, else_block);
+  let else_result = compile_block(b, else_expr);
+  if let Some(v) = else_result {
+    b.ops.push(Op::Set(result_reg, v));
+  }
+  b.ops.push(Op::Jump(exit_block));
+  set_current_basic_block(b, exit_block);
+  result_reg
+}
+
+fn compile_expr_to_value(b : &mut Builder, node : Node) -> RegIndex {
+  compile_expr(b, node).expect("expected value, found none")
+}
+
+fn compile_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {
+  use NodeShape::*;
+  match node_shape(&node, b.code) {
+    // Return
+    Atom("return") => {
+      b.ops.push(Op::Return);
+      None
+    }
+    // Break
+    Atom("break") => {
+      let break_to = b.label_stack.last().unwrap().exit_block;
+      b.ops.push(Op::Jump(break_to));
+      None
+    }
+    // Repeat
+    Atom("repeat") => {
+      let loop_back_to = b.label_stack.last().unwrap().entry_block;
+      b.ops.push(Op::Jump(loop_back_to));
+      None
+    }
+    Atom(_) => {
+      Some(atom_to_value(b, node))
+    }
+    // set var
+    Command("set", [varname, value]) => {
+      let var_reg = find_local(b, *varname).expect("no variable found");
+      let val_reg = compile_expr_to_value(b, *value);
+      b.ops.push(Op::Set(var_reg, val_reg));
+      None
+    }
+    // let
+    Command("let", [var_name, value]) => {
+      // TODO: make the var name unique
+      // TODO: handle scoping
+      // push a local variable
+      let var_reg = next_reg(b);
+      let var_name = to_symbol(b.code, *var_name);
+      b.locals.push((var_name, var_reg));
+      // evaluate the expression
+      let val_reg = compile_expr_to_value(b, *value);
+      // push a set command
+      b.ops.push(Op::Set(var_reg, val_reg));
+      None
+    }
+    // if then
+    Command("if", [cond, then_expr]) => {
+      let then_block = create_basic_block(b, "then");
+      let exit_block = create_basic_block(b, "exit");
+      let cond = compile_expr_to_value(b, *cond);
+      b.ops.push(Op::CJump{ cond, then_block, else_block: exit_block });
+      set_current_basic_block(b, then_block);
+      compile_block(b, *then_expr);
+      b.ops.push(Op::Jump(exit_block));
+      set_current_basic_block(b, exit_block);
+      None
+    }
+    // if then else
+    Command("if", [cond, then_expr, else_expr]) => {
+      let r = compile_if_else(b, *cond, *then_expr, *else_expr);
+      Some(r)
+    }
+    // block
+    Command("block", [body]) => {
+      let entry_block = create_basic_block(b, "loop");
+      let exit_block = create_basic_block(b, "loop_exit");
+      b.ops.push(Op::Jump(entry_block));
+      set_current_basic_block(b, entry_block);
+      b.label_stack.push(
+        LabelPair{ entry_block, exit_block }
+      );
+      compile_block(b, *body);
+      b.label_stack.pop();
+      b.ops.push(Op::Jump(entry_block));
+      set_current_basic_block(b, exit_block);
+      panic!()
+    }
+  // Debug
+    Command("debug", [v]) => {
+      let reg = compile_expr_to_value(b, *v);
+      b.ops.push(Op::Debug(reg));
+      None
+    }
+    // Return
+    Command("return", [v]) => {
+      let reg = compile_expr_to_value(b, *v);
+      b.ops.push(Op::SetReturn(reg));
+      b.ops.push(Op::Return);
+      None
+    }
+    _ => {
+      let r = compile_list_expr(b, node);
+      Some(r)
+    }
   }
 }
 
-fn compile_statement(b : &mut Builder, node : Node) {
-  let segment = code_segment(b.code, node);
-  let ht = head_tail(&node, b.code);
-  // set var
-  if let Some(("set", [varname, value])) = ht {
-    let var_reg = find_local(b, *varname).expect("no variable found");
-    let val_reg = compile_expr(b, *value);
-    b.ops.push(Op::Set(var_reg, val_reg));
+fn compile_block(b : &mut Builder, node : Node) -> Option<RegIndex> {  
+  let mut r = None;
+  for &c in node.children {
+    r = compile_expr(b, c);
   }
-  // let
-  else if let Some(("let", [varname, value])) = ht {
-    panic!()
-  }
-  // if then
-  else if let Some(("if", [cond, then_expr])) = ht {
-    panic!()
-  }
-  // if then else
-  else if let Some(("if", [cond, then_expr, else_expr])) = ht {
-    panic!()
-  }
-  // loop
-  else if let Some(("loop", [body])) = ht {
-    panic!()
-  }
-// Debug
-  else if let Some(("debug", [v])) = ht {
-    let reg = compile_expr(b, *v);
-    b.ops.push(Op::Debug(reg));
-  }
-  // Return
-  else if let Some(("return", [v])) = ht {
-    let reg = compile_expr(b, *v);
-    b.ops.push(Op::SetReturn(reg));
-    b.ops.push(Op::Return);
-  }
-  else if segment == "return" {
-    b.ops.push(Op::Return);
-  }
-  // Break
-  else if segment == "break" {
-    panic!()
-  }
-  // Assume expression
-  else {
-    compile_expr(b, node);
-  }
-}
-
-fn compile_block(b : &mut Builder, node : Node) {
-  for &statement in node.children {
-    compile_statement(b, statement)
-  }
-
-  // if the last op was an expression, return its value
+  r
 }
 
 /// Compile basic imperative language into bytecode
@@ -152,7 +243,8 @@ pub fn compile_function(env: &Env, code : &str, root : Node) -> BytecodeFunction
     block_completion: vec![],
     cur_block: None,
     blocks: vec![],
-    ops : vec![],
+    ops: vec![],
+    label_stack: vec![],
     code,
     env,
     arg_values: vec![],
@@ -173,20 +265,12 @@ pub fn compile_function(env: &Env, code : &str, root : Node) -> BytecodeFunction
   // start a block
   let entry_block = create_basic_block(&mut b, "entry");
   set_current_basic_block(&mut b, entry_block);
-  compile_block(&mut b, body);
+  let r = compile_block(&mut b, body);
+  if let Some(r) = r {
+    b.ops.push(Op::SetReturn(r));
+  }
+  b.ops.push(Op::Return);
   complete_function(b)
-}
-
-fn next_reg(b : &mut Builder) -> RegIndex {
-  let r = RegIndex(b.registers);
-  b.registers += 1;
-  r
-}
-
-fn push_expr(b : &mut Builder, e : Expr) -> RegIndex{
-  let reg = next_reg(b);
-  b.ops.push(Op::Expr(reg, e));
-  return reg;
 }
 
 fn function_call(b : &mut Builder, node : Node) -> RegIndex {
@@ -194,10 +278,10 @@ fn function_call(b : &mut Builder, node : Node) -> RegIndex {
   let args = &node.children[1..];
   b.arg_values.clear();
   for &arg in args {
-    let v = compile_expr(b, arg);
+    let v = compile_expr_to_value(b, arg);
     b.arg_values.push(v);
   }
-  let reg = compile_expr(b, function_val);
+  let reg = compile_expr_to_value(b, function_val);
   for (i, value) in b.arg_values.drain(..).enumerate() {
     b.ops.push(Op::Arg{ index: i as u8, value });
   }
@@ -233,30 +317,32 @@ fn atom_to_value(b : &mut Builder, node : Node) -> RegIndex {
   push_expr(b, e)
 }
 
-fn compile_list_expr(b : &mut Builder, node : Node, children : &[Node]) -> RegIndex {
-  let head = code_segment(b.code, children[0]);
-  // function call
-  if head == "call" || head == "ccall" {
-    b.arg_values.clear();
-    for &arg in &children[2..] {
-      let v = compile_expr(b, arg);
-      b.arg_values.push(v);
-    }
-    let reg = compile_expr(b, children[1]);
-    for (i, value) in b.arg_values.drain(..).enumerate() {
-      b.ops.push(Op::Arg{ index: i as u8, value });
-    }
-    let e = {
-      if head == "ccall" {
-        let args = children[2..].len();
-        Expr::InvokeC(reg, args)
-      }
-      else {
-        Expr::Invoke(reg)
-      }
-    };
-    return push_expr(b, e);
+fn compile_function_call(b : &mut Builder, list : &[Node], ccall : bool) -> RegIndex {
+  let function = list[0];
+  let args = &list[1..];
+  b.arg_values.clear();
+  for &arg in args {
+    let v = compile_expr_to_value(b, arg);
+    b.arg_values.push(v);
   }
+  let reg = compile_expr_to_value(b, function);
+  for (i, value) in b.arg_values.drain(..).enumerate() {
+    b.ops.push(Op::Arg{ index: i as u8, value });
+  }
+  let e = {
+    if ccall {
+      Expr::InvokeC(reg, args.len())
+    }
+    else {
+      Expr::Invoke(reg)
+    }
+  };
+  return push_expr(b, e);
+}
+
+fn compile_list_expr(b : &mut Builder, node : Node) -> RegIndex {
+  let head = code_segment(b.code, node.children[0]);
+  let tail = &node.children[1..];
   // operator
   let op : Option<BinOp> = match head {
     "+" => Some(BinOp::Add),
@@ -266,21 +352,16 @@ fn compile_list_expr(b : &mut Builder, node : Node, children : &[Node]) -> RegIn
     "%" => Some(BinOp::Rem),
     _ => None,
   };
-  if let Some(op) = op {
-    if let [v1, v2] = children[1..] {
-      let v1 = compile_expr(b, v1);
-      let v2 = compile_expr(b, v2);
-      let e = Expr::BinOp(op, v1, v2);
-      return push_expr(b, e);
-    }
+  if let (Some(op), [v1, v2]) = (op, tail) {
+    let v1 = compile_expr_to_value(b, *v1);
+    let v2 = compile_expr_to_value(b, *v2);
+    let e = Expr::BinOp(op, v1, v2);
+    push_expr(b, e)
   }
-  panic!("unrecognised instruction:\n   {}", code_segment(b.code, node))
-}
-
-fn find_local(b : &mut Builder, node : Node)
-  -> Option<RegIndex>
-{
-  let c = to_symbol(b.code, node);
-  b.locals.iter()
-    .find(|&l| l.0 == c).map(|v| v.1)
+  else if head == "ccall" {
+    compile_function_call(b, tail, true)
+  }
+  else {
+    compile_function_call(b, node.children.as_slice(), false)
+  }
 }

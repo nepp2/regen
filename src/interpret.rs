@@ -14,7 +14,9 @@ pub extern "C" fn c_add(a : u64, b : u64) -> u64 {
   a + b
 }
 
-pub fn interpret(n : &Node, code : &str) {
+pub type CompileFunction = fn(env : &Env, code : &str, fun : Node) -> BytecodeFunction;
+
+pub fn interpret(n : &Node, code : &str, f : CompileFunction) {
   println!("Entering interpreter");
   let mut env = Env::new();
 
@@ -23,7 +25,7 @@ pub fn interpret(n : &Node, code : &str) {
   for &c in n.children {
     if let Some([name, value]) = match_head(&c, code, "def") {
       let name = code_segment(code, *name);
-      let function = bytecode::read_bytecode(&env, code, *value);
+      let function = f(&env, code, *value);
       let value =
         Box::into_raw(Box::new(function)) as u64;
       env.insert(to_symbol(name), value);
@@ -123,7 +125,8 @@ fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &m
           stack[return_addr] = stack[reg(sbp, val)];
         }
         Op::CJump{ cond, then_block, else_block } => {
-          if reg(sbp, cond) != 0 {
+          let v = stack[reg(sbp, cond)];
+          if v != 0 {
             frame.pc = fun.blocks[then_block.0].start_op;
           }
           else {

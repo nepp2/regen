@@ -3,11 +3,10 @@
   (+ a b)
 )))
 
-(def main (fun () ( 
+(def main (fun () (
   (let blah 5)
-  (let result (+ 0 blah))
-  (if result
+  (if false
    ((set blah (butt 57 24))
     (debug blah))
-   ((debug blah)))
+   ((debug 43)))
 )))

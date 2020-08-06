@@ -82,6 +82,28 @@ pub fn match_head<'l>(n : &'l Node, code : &str, s : &str) -> Option<&'l [Node]>
   None
 }
 
+pub enum NodeShape<'l> {
+  Command(&'l str, &'l [Node]),
+  Atom(&'l str),
+  Other,
+}
+
+pub fn node_shape<'l>(n : &'l Node, code : &'l str) -> NodeShape<'l> {
+  if n.children.len() > 0 {
+    let head = n.children[0];
+    if head.children.len() == 0 {    
+      let s = code_segment(code, head);
+      NodeShape::Command(s, &n.children[1..])
+    }
+    else {
+      NodeShape::Other
+    }
+  }
+  else {
+    NodeShape::Atom(code_segment(code, *n))
+  }
+}
+
 pub fn head_tail<'l>(n : &'l Node, code : &'l str) -> Option<(&'l str, &'l [Node])> {
   if n.children.len() > 0 {
     let s = code_segment(code, n.children[0]);
