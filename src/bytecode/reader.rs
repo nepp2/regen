@@ -10,8 +10,8 @@ use parse::{
 };
 use symbols::Symbol;
 
-/// Block instructions
-struct BlockInstrs<'l> {
+/// Sequence instructions
+struct SeqInstrs<'l> {
   name : Symbol,
   instructions : &'l [Node],
 }
@@ -33,8 +33,8 @@ pub fn read_bytecode(env: &Env, code : &str, root : Node) -> BytecodeFunction {
   else {
     panic!("expected function")
   }
-  let mut block_instrs = vec![];
-  // Find all blocks (they can be out of order)
+  let mut seq_instrs = vec![];
+  // Find all sequences (they can be out of order)
   for node in body.children {
     match node_shape(node, code) {
       Command("vars", tail) => {
@@ -43,42 +43,42 @@ pub fn read_bytecode(env: &Env, code : &str, root : Node) -> BytecodeFunction {
           locals.push((name, next_reg(&mut registers)));
         }
       }
-      Command("block", tail) => {
+      Command("seq", tail) => {
         let name = to_symbol(code, tail[0]);
         let instructions = &tail[1..];
-        block_instrs.push(BlockInstrs{ name, instructions });
+        seq_instrs.push(SeqInstrs{ name, instructions });
       }
       _ => {
-        panic!("expected block")
+        panic!("expected seq")
       }
     }
   }
-  // Generation block instructions
-  let mut blocks = vec![];
+  // Generation sequence instructions
+  let mut sequences = vec![];
   let mut ops = vec![];
   let mut b = Builder {
     ops: &mut ops,
-    blocks: &block_instrs,
+    sequences: &seq_instrs,
     locals: &mut locals,
     registers: &mut registers,
     code,
     env,
     arg_values: vec![],
   };
-  for bi in block_instrs.as_slice() {
+  for bi in seq_instrs.as_slice() {
     let start_op = b.ops.len();
     for &n in bi.instructions {
       read_instruction(&mut b, n);
     }
     let num_ops = b.ops.len() - start_op;
-    blocks.push(Block {name: bi.name, start_op, num_ops });
+    sequences.push(Sequence {name: bi.name, start_op, num_ops });
   }
-  BytecodeFunction { blocks, ops, registers, args, locals }
+  BytecodeFunction { sequences, ops, registers, args, locals }
 }
 
-fn to_block_id(blocks : &Vec<BlockInstrs>, s : Symbol) -> BlockIndex {
-  let i = blocks.iter().position(|b| b.name == s).unwrap();
-  BlockIndex(i)
+fn to_sequence_id(sequences : &Vec<SeqInstrs>, s : Symbol) -> SeqenceId {
+  let i = sequences.iter().position(|b| b.name == s).unwrap();
+  SeqenceId(i)
 }
 
 fn next_reg(registers : &mut usize) -> RegIndex {
@@ -200,7 +200,7 @@ fn find_local(locals : &mut Vec<(Symbol, RegIndex)>, code : &str, node : Node)
 
 struct Builder<'l> {
   ops : &'l mut Vec<Op>,
-  blocks : &'l Vec<BlockInstrs<'l>>,
+  sequences : &'l Vec<SeqInstrs<'l>>,
   locals : &'l mut Vec<(Symbol, RegIndex)>,
   registers : &'l mut usize,
   code : &'l str,
@@ -219,16 +219,16 @@ fn read_instruction(b : &mut Builder, node : Node) {
       b.ops.push(Op::Set(var_reg, val_reg));
     }
     // conditional jump
-    Command("cjump", [cond, then_block, else_block]) => {
+    Command("cjump", [cond, then_seq, else_seq]) => {
       let cond = expr_to_value(b, *cond);
-      let then_block = to_block_id(b.blocks, to_symbol(b.code, *then_block));
-      let else_block = to_block_id(b.blocks, to_symbol(b.code, *else_block));
-      b.ops.push(Op::CJump{cond, then_block, else_block});
+      let then_seq = to_sequence_id(b.sequences, to_symbol(b.code, *then_seq));
+      let else_seq = to_sequence_id(b.sequences, to_symbol(b.code, *else_seq));
+      b.ops.push(Op::CJump{cond, then_seq, else_seq});
     }
     // Jump
-    Command("jump", [block]) => {
-      let block = to_block_id(b.blocks, to_symbol(b.code, *block));
-      b.ops.push(Op::Jump(block));
+    Command("jump", [seq]) => {
+      let seq = to_sequence_id(b.sequences, to_symbol(b.code, *seq));
+      b.ops.push(Op::Jump(seq));
     }
     // Debug
     Command("debug", [v]) => {

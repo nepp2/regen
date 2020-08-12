@@ -1,23 +1,23 @@
 
 (def foo (fun (a b) (
-  (block run
+  (seq run
     (return (+ a b)))
 )))
 
 (def main (fun () (
   (vars blah result) 
-  (block condition
+  (seq condition
     (set blah 5)
     (set result (+ 0 blah))
     (cjump result then else))
-  (block then
+  (seq then
     (set blah
       (call foo 57 24))
     (debug blah)
     (jump continue))
-  (block else
+  (seq else
     (debug blah)
     (jump continue))
-  (block continue
+  (seq continue
     return)
 )))

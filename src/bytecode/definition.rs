@@ -2,10 +2,13 @@
 use crate::symbols;
 use symbols::Symbol;
 
+/// ID of the sequence, which is actually its offset within
+/// the function it belongs to; this ID is only unique within
+/// the function.
 #[derive(Copy, Clone, Debug)]
-pub struct BlockIndex(pub usize);
+pub struct SeqenceId(pub usize);
 
-/// Register local to block, indexed from 0 upward
+/// Register local to stack frame, indexed from 0 upward
 #[derive(Copy, Clone, Debug)]
 pub struct RegIndex(pub usize);
 
@@ -28,22 +31,24 @@ pub enum Op {
   Expr(RegIndex, Expr),
   Set(RegIndex, RegIndex),
   SetReturn(RegIndex),
-  CJump{ cond: RegIndex, then_block: BlockIndex, else_block: BlockIndex },
+  CJump{ cond: RegIndex, then_seq: SeqenceId, else_seq: SeqenceId },
   Debug(RegIndex),
-  Jump(BlockIndex),
+  Jump(SeqenceId),
   Arg{ index: u8, value: RegIndex },
   Return,
-  //Error,
 }
 
-pub struct Block {
+/// A sequence of instructions. Equivalent to a basic block,
+/// but the name "sequence" is used to avoid confusion with
+/// block expressions.
+pub struct Sequence {
   pub name : Symbol,
   pub start_op : usize,
   pub num_ops : usize,
 }
 
 pub struct BytecodeFunction {
-  pub blocks : Vec<Block>,
+  pub sequences : Vec<Sequence>,
   pub ops : Vec<Op>,
   pub args : usize,
   pub locals : Vec<(Symbol, RegIndex)>,

@@ -124,18 +124,18 @@ fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &m
         Op::SetReturn(val) => {
           stack[return_addr] = stack[reg(sbp, val)];
         }
-        Op::CJump{ cond, then_block, else_block } => {
+        Op::CJump{ cond, then_seq, else_seq } => {
           let v = stack[reg(sbp, cond)];
           if v != 0 {
-            frame.pc = fun.blocks[then_block.0].start_op;
+            frame.pc = fun.sequences[then_seq.0].start_op;
           }
           else {
-            frame.pc = fun.blocks[else_block.0].start_op;
+            frame.pc = fun.sequences[else_seq.0].start_op;
           }
           continue;
         }
-        Op::Jump(block) => {
-          frame.pc = fun.blocks[block.0].start_op;
+        Op::Jump(seq) => {
+          frame.pc = fun.sequences[seq.0].start_op;
           continue;
         }
         Op::Arg{ index, value } => {

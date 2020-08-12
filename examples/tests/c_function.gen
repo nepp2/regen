@@ -1,6 +1,6 @@
 
 (def main (fun () (
-  (block run
+  (seq run
     (debug (ccall c_add 12 24))
     return)
 )))

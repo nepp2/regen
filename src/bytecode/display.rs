@@ -16,8 +16,8 @@ impl fmt::Display for BytecodeFunction {
     }
     writeln!(f)?;
     writeln!(f, "Registers: {}", self.registers)?;
-    for (i, b) in self.blocks.iter().enumerate() {
-      writeln!(f, "Block {} ({}):", i, b.name)?;
+    for (i, b) in self.sequences.iter().enumerate() {
+      writeln!(f, "Sequence {} ({}):", i, b.name)?;
       let end = b.start_op + b.num_ops;
       for op in self.ops[b.start_op..end].iter() {
         writeln!(f, "   {}", op)?;
@@ -67,13 +67,13 @@ impl fmt::Display for Op {
         write!(f, "set reg[{}] = reg[{}]", a, b)?,
       Op::SetReturn(v) =>
         write!(f, "set RetVal = reg[{}]", v)?,
-      Op::CJump{ cond, then_block, else_block } =>
-        write!(f, "CJump {} to block[{}] else block[{}]",
-          cond, then_block.0, else_block.0)?,
+      Op::CJump{ cond, then_seq, else_seq } =>
+        write!(f, "CJump {} to seq[{}] else seq[{}]",
+          cond, then_seq.0, else_seq.0)?,
       Op::Debug(reg) =>
         write!(f, "Debug reg[{}]", reg)?,
-      Op::Jump(block) =>
-        write!(f, "Jump to block[{}]", block.0)?,
+      Op::Jump(seq) =>
+        write!(f, "Jump to seq[{}]", seq.0)?,
       Op::Arg{ index, value } =>
         write!(f, "set Arg {} = reg[{}]", index, value)?,
       Op::Return =>

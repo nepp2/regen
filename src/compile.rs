@@ -1,5 +1,5 @@
 
-/// Transform basic-block format into structured if/let format
+/// Transform structured if/let format into labelled sequence format
 
 use crate::{bytecode, parse, symbols, env};
 
@@ -15,22 +15,40 @@ use NodeShape::*;
 use symbols::Symbol;
 
 struct LabelPair {
-  entry_block: BlockIndex,
-  exit_block: BlockIndex,
+  entry_seq: SeqenceId,
+  exit_seq: SeqenceId,
 }
 
 /// Function builder
 struct Builder<'l> {
+  /// number of arguments the function takes
   args : usize,
+
+  /// named local variables (including the arguments)
   locals : Vec<(Symbol, RegIndex)>,
+
+  /// number of 64bit registers used
   registers : usize,
-  cur_block : Option<BlockIndex>,
-  block_completion : Vec<bool>,
-  blocks : Vec<Block>,
+
+  /// the instruction sequence currently being built
+  cur_seq : Option<SeqenceId>,
+
+  /// flags indicating which sequences have been finalised
+  seq_completion : Vec<bool>,
+
+  /// sequence information
+  sequences : Vec<Sequence>,
+
+  /// the operations of all the sequences
   ops : Vec<Op>,
+
+  /// labels indicating the start and end of a block expression
   label_stack : Vec<LabelPair>,
 
+  /// the code text
   code : &'l str,
+
+  /// the environment containing all visible symbols
   env : &'l Env,
 
   /// used to store argument values without reallocating a lot
@@ -57,46 +75,46 @@ fn push_expr(b : &mut Builder, e : Expr) -> RegIndex{
   return reg;
 }
 
-fn create_basic_block(b : &mut Builder, name : &str) -> BlockIndex {
-  let i = b.blocks.len();
+fn create_sequence(b : &mut Builder, name : &str) -> SeqenceId {
+  let i = b.sequences.len();
   // TODO: do a better job of making sure that the name is unique
   let name = format!("{}_{}", name, i);
-  b.blocks.push(Block {
+  b.sequences.push(Sequence {
     name: symbols::to_symbol(&name),
     start_op: 0, num_ops: 0,
   });
-  b.block_completion.push(false);
-  BlockIndex(i)
+  b.seq_completion.push(false);
+  SeqenceId(i)
 }
 
-fn set_current_basic_block(b : &mut Builder, block : BlockIndex) {
-  // complete the current block (if there is one)
-  complete_basic_block(b);
-  // check that the block isn't done yet
-  if b.block_completion[block.0] {
-    panic!("this block has already been completed");
+fn set_current_sequence(b : &mut Builder, sequence : SeqenceId) {
+  // complete the current sequence (if there is one)
+  complete_sequence(b);
+  // check that the sequence isn't done yet
+  if b.seq_completion[sequence.0] {
+    panic!("this sequence has already been completed");
   }
-  b.cur_block = Some(block);
-  b.blocks[block.0].start_op = b.ops.len();
+  b.cur_seq = Some(sequence);
+  b.sequences[sequence.0].start_op = b.ops.len();
 }
 
-fn complete_basic_block(b : &mut Builder) {
-  if let Some(i) = b.cur_block {
-    let block = &mut b.blocks[i.0];
-    block.num_ops = b.ops.len() - block.start_op;
-    b.block_completion[i.0] = true;
-    b.cur_block = None;
+fn complete_sequence(b : &mut Builder) {
+  if let Some(i) = b.cur_seq {
+    let seq = &mut b.sequences[i.0];
+    seq.num_ops = b.ops.len() - seq.start_op;
+    b.seq_completion[i.0] = true;
+    b.cur_seq = None;
   }
 }
 
 fn complete_function(mut b : Builder) -> BytecodeFunction {
-  complete_basic_block(&mut b);
-  // check all blocks are complete
-  if !b.block_completion.iter().all(|x| *x) {
-    panic!("not all basic blocks were completed")
+  complete_sequence(&mut b);
+  // check all sequences are complete
+  if !b.seq_completion.iter().all(|x| *x) {
+    panic!("not all basic sequences were completed")
   }
   BytecodeFunction {
-    blocks: b.blocks,
+    sequences: b.sequences,
     ops: b.ops,
     registers: b.registers,
     args: b.args,
@@ -106,24 +124,24 @@ fn complete_function(mut b : Builder) -> BytecodeFunction {
 
 fn compile_if_else(b : &mut Builder, cond : Node, then_expr : Node, else_expr : Node) -> RegIndex {
   let result_reg = next_reg(b);
-  let then_block = create_basic_block(b, "then");
-  let else_block = create_basic_block(b, "else");
-  let exit_block = create_basic_block(b, "exit");
+  let then_seq = create_sequence(b, "then");
+  let else_seq = create_sequence(b, "else");
+  let exit_seq = create_sequence(b, "exit");
   let cond = compile_expr_to_value(b, cond);
-  b.ops.push(Op::CJump{ cond, then_block, else_block });
-  set_current_basic_block(b, then_block);
-  let then_result = compile_block(b, then_expr);
+  b.ops.push(Op::CJump{ cond, then_seq, else_seq });
+  set_current_sequence(b, then_seq);
+  let then_result = compile_block_expr(b, then_expr);
   if let Some(v) = then_result {
     b.ops.push(Op::Set(result_reg, v));
   }
-  b.ops.push(Op::Jump(exit_block));
-  set_current_basic_block(b, else_block);
-  let else_result = compile_block(b, else_expr);
+  b.ops.push(Op::Jump(exit_seq));
+  set_current_sequence(b, else_seq);
+  let else_result = compile_block_expr(b, else_expr);
   if let Some(v) = else_result {
     b.ops.push(Op::Set(result_reg, v));
   }
-  b.ops.push(Op::Jump(exit_block));
-  set_current_basic_block(b, exit_block);
+  b.ops.push(Op::Jump(exit_seq));
+  set_current_sequence(b, exit_seq);
   result_reg
 }
 
@@ -140,13 +158,13 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {
     }
     // Break
     Atom("break") => {
-      let break_to = b.label_stack.last().unwrap().exit_block;
+      let break_to = b.label_stack.last().unwrap().exit_seq;
       b.ops.push(Op::Jump(break_to));
       None
     }
     // Repeat
     Atom("repeat") => {
-      let loop_back_to = b.label_stack.last().unwrap().entry_block;
+      let loop_back_to = b.label_stack.last().unwrap().entry_seq;
       b.ops.push(Op::Jump(loop_back_to));
       None
     }
@@ -176,14 +194,14 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {
     }
     // if then
     Command("if", [cond, then_expr]) => {
-      let then_block = create_basic_block(b, "then");
-      let exit_block = create_basic_block(b, "exit");
+      let then_seq = create_sequence(b, "then");
+      let exit_seq = create_sequence(b, "exit");
       let cond = compile_expr_to_value(b, *cond);
-      b.ops.push(Op::CJump{ cond, then_block, else_block: exit_block });
-      set_current_basic_block(b, then_block);
-      compile_block(b, *then_expr);
-      b.ops.push(Op::Jump(exit_block));
-      set_current_basic_block(b, exit_block);
+      b.ops.push(Op::CJump{ cond, then_seq, else_seq: exit_seq });
+      set_current_sequence(b, then_seq);
+      compile_block_expr(b, *then_expr);
+      b.ops.push(Op::Jump(exit_seq));
+      set_current_sequence(b, exit_seq);
       None
     }
     // if then else
@@ -191,19 +209,19 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {
       let r = compile_if_else(b, *cond, *then_expr, *else_expr);
       Some(r)
     }
-    // block
+    // block expression
     Command("block", [body]) => {
-      let entry_block = create_basic_block(b, "loop");
-      let exit_block = create_basic_block(b, "loop_exit");
-      b.ops.push(Op::Jump(entry_block));
-      set_current_basic_block(b, entry_block);
+      let entry_seq = create_sequence(b, "loop");
+      let exit_seq = create_sequence(b, "loop_exit");
+      b.ops.push(Op::Jump(entry_seq));
+      set_current_sequence(b, entry_seq);
       b.label_stack.push(
-        LabelPair{ entry_block, exit_block }
+        LabelPair{ entry_seq, exit_seq }
       );
-      compile_block(b, *body);
+      compile_block_expr(b, *body);
       b.label_stack.pop();
-      b.ops.push(Op::Jump(entry_block));
-      set_current_basic_block(b, exit_block);
+      b.ops.push(Op::Jump(entry_seq));
+      set_current_sequence(b, exit_seq);
       panic!()
     }
   // Debug
@@ -226,7 +244,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {
   }
 }
 
-fn compile_block(b : &mut Builder, node : Node) -> Option<RegIndex> {  
+fn compile_block_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {  
   let mut r = None;
   for &c in node.children {
     r = compile_expr(b, c);
@@ -240,9 +258,9 @@ pub fn compile_function(env: &Env, code : &str, root : Node) -> BytecodeFunction
     args: 0,
     locals: vec![],
     registers: 0,
-    block_completion: vec![],
-    cur_block: None,
-    blocks: vec![],
+    seq_completion: vec![],
+    cur_seq: None,
+    sequences: vec![],
     ops: vec![],
     label_stack: vec![],
     code,
@@ -262,10 +280,10 @@ pub fn compile_function(env: &Env, code : &str, root : Node) -> BytecodeFunction
   else {
     panic!("expected function")
   }
-  // start a block
-  let entry_block = create_basic_block(&mut b, "entry");
-  set_current_basic_block(&mut b, entry_block);
-  let r = compile_block(&mut b, body);
+  // start a sequence
+  let entry_seq = create_sequence(&mut b, "entry");
+  set_current_sequence(&mut b, entry_seq);
+  let r = compile_block_expr(&mut b, body);
   if let Some(r) = r {
     b.ops.push(Op::SetReturn(r));
   }
