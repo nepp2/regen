@@ -17,7 +17,6 @@ pub extern "C" fn c_add(a : u64, b : u64) -> u64 {
 pub type CompileFunction = fn(env : &Env, code : &str, fun : Node) -> BytecodeFunction;
 
 pub fn interpret(n : &Node, code : &str, f : CompileFunction) {
-  println!("Entering interpreter");
   let mut env = Env::new();
 
   env.insert(to_symbol("c_add"), c_add as u64);
@@ -26,6 +25,9 @@ pub fn interpret(n : &Node, code : &str, f : CompileFunction) {
     if let Command("def", [name, value]) = node_shape(&c, code) {
       let name = code_segment(code, *name);
       let function = f(&env, code, *value);
+      // TODO: add debug flag to enable this
+      // println!("function {}:", name);
+      // println!("{}", function);
       let value =
         Box::into_raw(Box::new(function)) as u64;
       env.insert(to_symbol(name), value);
@@ -35,9 +37,10 @@ pub fn interpret(n : &Node, code : &str, f : CompileFunction) {
   if let Some(&v) = env.get(&to_symbol("main")) {
     let f = v as *const BytecodeFunction;
     let mut stack = [0 ; 2048];
-    let mut shadow_stack = vec![Frame { pc: 0, sbp: 0, f }];
+    let mut shadow_stack = vec![
+      Frame { pc: 0, sbp: 0, f, return_addr: 0 }
+    ];
     interpreter_loop(&mut stack, &mut shadow_stack, &mut env);
-    println!("Execution of main function complete.");
   }
   else {
     println!("No main function found.");
@@ -53,6 +56,9 @@ struct Frame {
 
   /// function pointer
   f : *const BytecodeFunction,
+
+  /// return address
+  return_addr : usize,
 }
 
 fn reg(sbp : usize, i : RegIndex) -> usize {
@@ -61,13 +67,11 @@ fn reg(sbp : usize, i : RegIndex) -> usize {
 
 fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &mut Env) {
   let mut frame = shadow_stack.pop().unwrap();
-  let mut return_addr = 0;
   'outer: loop {
     let fun = unsafe { &*frame.f };
     let sbp = frame.sbp;
     loop {
       let op = fun.ops[frame.pc];
-      // TODO: println!(">>> {}:   {}", frame.pc, op);
       match op {
         Op::Expr(r, e) => {
           let r = reg(sbp, r);
@@ -91,6 +95,11 @@ fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &m
                BinOp::Mul => a * b,
                BinOp::Div => a / b,
                BinOp::Rem => a % b,
+               BinOp::Eq => (a == b) as u64,
+               BinOp::LT => (a < b) as u64,
+               BinOp::GT => (a > b) as u64,
+               BinOp::LTE => (a <= b) as u64,
+               BinOp::GTE => (a >= b) as u64,
               };
             }
             Expr::Invoke(f) => {
@@ -101,9 +110,12 @@ fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &m
               frame.pc += 1;
               shadow_stack.push(frame);
               // set the new frame
-              frame = Frame{ pc: 0, sbp: sbp + fun.registers, f };
-              // set the return address
-              return_addr = r;
+              frame = Frame{
+                pc: 0,
+                sbp: sbp + fun.registers,
+                f,
+                return_addr: r,
+              };
               break;
             }
             Expr::InvokeC(f, arg_count) => {
@@ -122,7 +134,7 @@ fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &m
           stack[reg(sbp, var)] = stack[reg(sbp, val)];
         }
         Op::SetReturn(val) => {
-          stack[return_addr] = stack[reg(sbp, val)];
+          stack[frame.return_addr] = stack[reg(sbp, val)];
         }
         Op::CJump{ cond, then_seq, else_seq } => {
           let v = stack[reg(sbp, cond)];
@@ -143,8 +155,8 @@ fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &m
           stack[index] = stack[reg(sbp, value)];
 
         }
-        Op::Debug(r) => {
-          println!("debug: {}", stack[reg(sbp, r)]);
+        Op::Debug(sym, r) => {
+          println!("{}: {}", sym, stack[reg(sbp, r)]);
         }
         Op::Return => {
           if let Some(prev_frame) = shadow_stack.pop() {

@@ -27,7 +27,8 @@ pub fn read_bytecode(env: &Env, code : &str, root : Node) -> BytecodeFunction {
     args = arg_nodes.children.len();
     for &arg in arg_nodes.children {
       let name = to_symbol(code, arg);
-      locals.push((name, next_reg(&mut registers)));
+      let reg = next_reg(&mut registers);
+      locals.push(LocalVar{ name, reg });
     }
   }
   else {
@@ -40,7 +41,8 @@ pub fn read_bytecode(env: &Env, code : &str, root : Node) -> BytecodeFunction {
       Command("vars", tail) => {
         for &var in tail {
           let name = to_symbol(code, var);
-          locals.push((name, next_reg(&mut registers)));
+          let reg = next_reg(&mut registers);
+          locals.push(LocalVar{ name, reg });
         }
       }
       Command("seq", tail) => {
@@ -190,18 +192,18 @@ fn expr_to_value(b : &mut Builder, node : Node) -> RegIndex {
   }
 }
 
-fn find_local(locals : &mut Vec<(Symbol, RegIndex)>, code : &str, node : Node)
+fn find_local(locals : &mut Vec<LocalVar>, code : &str, node : Node)
   -> Option<RegIndex>
 {
   let c = to_symbol(code, node);
   locals.iter()
-    .find(|&l| l.0 == c).map(|v| v.1)
+    .find(|&l| l.name == c).map(|l| l.reg)
 }
 
 struct Builder<'l> {
   ops : &'l mut Vec<Op>,
   sequence_info : &'l Vec<SeqInstrs<'l>>,
-  locals : &'l mut Vec<(Symbol, RegIndex)>,
+  locals : &'l mut Vec<LocalVar>,
   registers : &'l mut usize,
   code : &'l str,
   env : &'l Env,
@@ -233,7 +235,8 @@ fn read_instruction(b : &mut Builder, node : Node) {
     // Debug
     Command("debug", [v]) => {
       let reg = expr_to_value(b, *v);
-      b.ops.push(Op::Debug(reg));
+      let sym = to_symbol(b.code, *v);
+      b.ops.push(Op::Debug(sym, reg));
     }
     // Return
     Command("return", [v]) => {

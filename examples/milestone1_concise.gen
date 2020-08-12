@@ -1,12 +1,27 @@
 
-(def butt (fun (a b) (
-  (+ a b)
+(def factorial (fun (n) (
+  (if (< n 2)
+    (1)
+    ((* n 
+      (factorial (- n 1))))
+  )
+)))
+
+(def factorial_loop (fun (n) (
+  (let fact 1)
+  (let i 2)
+  (let limit (+ n 1))
+  (block (
+    (if (>= i limit)
+      (break))
+    (set fact (* fact i))
+    (set i (+ i 1))
+    repeat
+  ))
+  fact
 )))
 
 (def main (fun () (
-  (let blah 5)
-  (if false
-   ((set blah (butt 57 24))
-    (debug blah))
-   ((debug 43)))
+  (debug (factorial 3))
+  (debug (factorial_loop 3))
 )))

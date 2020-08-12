@@ -14,7 +14,7 @@ pub struct RegIndex(pub usize);
 
 #[derive(Copy, Clone, Debug)]
 pub enum BinOp {
-  Add, Sub, Mul, Div, Rem
+  Add, Sub, Mul, Div, Rem, Eq, LT, GT, LTE, GTE
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -32,7 +32,7 @@ pub enum Op {
   Set(RegIndex, RegIndex),
   SetReturn(RegIndex),
   CJump{ cond: RegIndex, then_seq: SeqenceId, else_seq: SeqenceId },
-  Debug(RegIndex),
+  Debug(Symbol, RegIndex),
   Jump(SeqenceId),
   Arg{ index: u8, value: RegIndex },
   Return,
@@ -47,10 +47,16 @@ pub struct SequenceInfo {
   pub num_ops : usize,
 }
 
+#[derive(Copy, Clone)]
+pub struct LocalVar {
+  pub name : Symbol,
+  pub reg : RegIndex,
+}
+
 pub struct BytecodeFunction {
   pub sequence_info : Vec<SequenceInfo>,
   pub ops : Vec<Op>,
   pub args : usize,
-  pub locals : Vec<(Symbol, RegIndex)>,
+  pub locals : Vec<LocalVar>,
   pub registers : usize,
 }

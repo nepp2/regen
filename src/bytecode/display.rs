@@ -6,13 +6,13 @@ use std::fmt;
 impl fmt::Display for BytecodeFunction {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "Args:")?;
-    for (a, i) in &self.locals.as_slice()[..self.args] {
-      write!(f, " {} ({}),", a, i.0)?;
+    for l in &self.locals.as_slice()[..self.args] {
+      write!(f, " {} ({}),", l.name, l.reg)?;
     }
     writeln!(f)?;
     write!(f, "Locals:")?;
-    for (a, i) in &self.locals.as_slice()[self.args..] {
-      write!(f, " {} ({}),", a, i.0)?;
+    for l in &self.locals.as_slice()[self.args..] {
+      write!(f, " {} ({}),", l.name, l.reg)?;
     }
     writeln!(f)?;
     writeln!(f, "Registers: {}", self.registers)?;
@@ -36,6 +36,11 @@ impl fmt::Display for BinOp {
       Mul => write!(f, "*"),
       Div => write!(f, "/"),
       Rem => write!(f, "%"),
+      Eq => write!(f, "="),
+      LT => write!(f, "<"),
+      GT => write!(f, ">"),
+      LTE => write!(f, "<="),
+      GTE => write!(f, ">="),
     }
   }
 }
@@ -70,8 +75,8 @@ impl fmt::Display for Op {
       Op::CJump{ cond, then_seq, else_seq } =>
         write!(f, "CJump {} to seq[{}] else seq[{}]",
           cond, then_seq.0, else_seq.0)?,
-      Op::Debug(reg) =>
-        write!(f, "Debug reg[{}]", reg)?,
+      Op::Debug(sym, reg) =>
+        write!(f, "Debug {}: reg[{}]", sym, reg)?,
       Op::Jump(seq) =>
         write!(f, "Jump to seq[{}]", seq.0)?,
       Op::Arg{ index, value } =>

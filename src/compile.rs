@@ -14,7 +14,7 @@ use parse::{
 use NodeShape::*;
 use symbols::Symbol;
 
-struct LabelPair {
+struct LabelledBlockExpr {
   entry_seq: SeqenceId,
   exit_seq: SeqenceId,
 }
@@ -25,7 +25,10 @@ struct Builder<'l> {
   args : usize,
 
   /// named local variables (including the arguments)
-  locals : Vec<(Symbol, RegIndex)>,
+  locals : Vec<LocalVar>,
+
+  /// local variables in scope
+  scoped_locals : Vec<LocalVar>,
 
   /// number of 64bit registers used
   registers : usize,
@@ -42,8 +45,8 @@ struct Builder<'l> {
   /// the operations of all the sequences
   ops : Vec<Op>,
 
-  /// labels indicating the start and end of a block expression
-  label_stack : Vec<LabelPair>,
+  /// labels indicating the start and end of a labelled block expression
+  label_stack : Vec<LabelledBlockExpr>,
 
   /// the code text
   code : &'l str,
@@ -55,12 +58,18 @@ struct Builder<'l> {
   arg_values : Vec<RegIndex>,
 }
 
-fn find_local(b : &mut Builder, node : Node)
+fn find_local_in_scope(b : &mut Builder, node : Node)
   -> Option<RegIndex>
 {
   let c = to_symbol(b.code, node);
-  b.locals.iter()
-    .find(|&l| l.0 == c).map(|v| v.1)
+  b.locals.iter().rev()
+    .find(|&l| l.name == c).map(|l| l.reg)
+}
+
+fn add_local(b : &mut Builder, name : Symbol, reg : RegIndex) {
+  let local = LocalVar{ name, reg };
+  b.locals.push(local);
+  b.scoped_locals.push(local);
 }
 
 fn next_reg(b : &mut Builder) -> RegIndex {
@@ -76,15 +85,22 @@ fn push_expr(b : &mut Builder, e : Expr) -> RegIndex{
 }
 
 fn create_sequence(b : &mut Builder, name : &str) -> SeqenceId {
-  let i = b.seq_info.len();
-  // TODO: do a better job of making sure that the name is unique
-  let name = format!("{}_{}", name, i);
+  // Make sure the name is unique
+  let mut i = 1;
+  let mut name_candidate = symbols::to_symbol(&name);
+  loop {
+    let name_unique = b.seq_info.iter().find(|s| s.name == name_candidate).is_none();
+    if name_unique { break }
+    i += 1;
+    name_candidate = symbols::to_symbol(&format!("{}_{}", name, i));
+  }
+  let seq_id = SeqenceId(b.seq_info.len());
   b.seq_info.push(SequenceInfo {
-    name: symbols::to_symbol(&name),
+    name: name_candidate,
     start_op: 0, num_ops: 0,
   });
   b.seq_completion.push(false);
-  SeqenceId(i)
+  seq_id
 }
 
 fn set_current_sequence(b : &mut Builder, sequence : SeqenceId) {
@@ -173,21 +189,19 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {
     }
     // set var
     Command("set", [varname, value]) => {
-      let var_reg = find_local(b, *varname).expect("no variable found");
       let val_reg = compile_expr_to_value(b, *value);
+      let var_reg = find_local_in_scope(b, *varname).expect("no variable found");
       b.ops.push(Op::Set(var_reg, val_reg));
       None
     }
     // let
     Command("let", [var_name, value]) => {
-      // TODO: make the var name unique
-      // TODO: handle scoping
-      // push a local variable
-      let var_reg = next_reg(b);
-      let var_name = to_symbol(b.code, *var_name);
-      b.locals.push((var_name, var_reg));
       // evaluate the expression
       let val_reg = compile_expr_to_value(b, *value);
+      // push a local variable
+      let var_reg = next_reg(b);
+      let name = to_symbol(b.code, *var_name);
+      add_local(b, name, var_reg);
       // push a set command
       b.ops.push(Op::Set(var_reg, val_reg));
       None
@@ -211,23 +225,24 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {
     }
     // block expression
     Command("block", [body]) => {
-      let entry_seq = create_sequence(b, "loop");
-      let exit_seq = create_sequence(b, "loop_exit");
+      let entry_seq = create_sequence(b, "block_entry");
+      let exit_seq = create_sequence(b, "block_exit");
       b.ops.push(Op::Jump(entry_seq));
       set_current_sequence(b, entry_seq);
       b.label_stack.push(
-        LabelPair{ entry_seq, exit_seq }
+        LabelledBlockExpr{ entry_seq, exit_seq }
       );
-      compile_block_expr(b, *body);
+      let result = compile_block_expr(b, *body);
       b.label_stack.pop();
-      b.ops.push(Op::Jump(entry_seq));
+      b.ops.push(Op::Jump(exit_seq));
       set_current_sequence(b, exit_seq);
-      panic!()
+      result
     }
   // Debug
     Command("debug", [v]) => {
       let reg = compile_expr_to_value(b, *v);
-      b.ops.push(Op::Debug(reg));
+      let sym = to_symbol(b.code, *v);
+      b.ops.push(Op::Debug(sym, reg));
       None
     }
     // Return
@@ -246,9 +261,11 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {
 
 fn compile_block_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {  
   let mut r = None;
+  let num_locals = b.scoped_locals.len();
   for &c in node.children {
     r = compile_expr(b, c);
   }
+  b.scoped_locals.drain(num_locals..).for_each(|_| ());
   r
 }
 
@@ -257,6 +274,7 @@ pub fn compile_function(env: &Env, code : &str, root : Node) -> BytecodeFunction
   let mut b = Builder {
     args: 0,
     locals: vec![],
+    scoped_locals: vec![],
     registers: 0,
     seq_completion: vec![],
     cur_seq: None,
@@ -274,7 +292,7 @@ pub fn compile_function(env: &Env, code : &str, root : Node) -> BytecodeFunction
     for &arg in arg_nodes.children {
       let name = to_symbol(code, arg);
       let reg = next_reg(&mut b);
-      b.locals.push((name, reg));
+      add_local(&mut b, name, reg);
     }
   }
   else {
@@ -327,7 +345,7 @@ fn atom_to_value(b : &mut Builder, node : Node) -> RegIndex {
     return push_expr(b, e);
   }
   // Look for local
-  if let Some(v) = find_local(b, node) {
+  if let Some(v) = find_local_in_scope(b, node) {
     return v;
   }
   // Assume global
@@ -368,6 +386,11 @@ fn compile_list_expr(b : &mut Builder, node : Node) -> RegIndex {
     "*" => Some(BinOp::Mul),
     "/" => Some(BinOp::Div),
     "%" => Some(BinOp::Rem),
+    "=" => Some(BinOp::Eq),
+    "<" => Some(BinOp::LT),
+    ">" => Some(BinOp::GT),
+    "<=" => Some(BinOp::LTE),
+    ">=" => Some(BinOp::GTE),
     _ => None,
   };
   if let (Some(op), [v1, v2]) = (op, tail) {
