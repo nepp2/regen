@@ -4,7 +4,7 @@ use crate::{symbols, parse, bytecode, env, ffi};
 use env::Env;
 use symbols::to_symbol;
 use parse::{
-  match_head, Node, code_segment
+  Node, code_segment, node_shape, NodeShape::Command
 };
 use bytecode::{
   BytecodeFunction, Op, Expr, RegIndex, BinOp,
@@ -23,7 +23,7 @@ pub fn interpret(n : &Node, code : &str, f : CompileFunction) {
   env.insert(to_symbol("c_add"), c_add as u64);
 
   for &c in n.children {
-    if let Some([name, value]) = match_head(&c, code, "def") {
+    if let Command("def", [name, value]) = node_shape(&c, code) {
       let name = code_segment(code, *name);
       let function = f(&env, code, *value);
       let value =

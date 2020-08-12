@@ -9,8 +9,9 @@ use env::Env;
 use parse::{
   Node,
   code_segment, to_symbol,
-  match_head, node_shape, NodeShape,
+  node_shape, NodeShape,
 };
+use NodeShape::*;
 use symbols::Symbol;
 
 struct LabelPair {
@@ -131,7 +132,6 @@ fn compile_expr_to_value(b : &mut Builder, node : Node) -> RegIndex {
 }
 
 fn compile_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {
-  use NodeShape::*;
   match node_shape(&node, b.code) {
     // Return
     Atom("return") => {
@@ -250,7 +250,7 @@ pub fn compile_function(env: &Env, code : &str, root : Node) -> BytecodeFunction
     arg_values: vec![],
   };
   let body;
-  if let Some([arg_nodes, body_node]) = match_head(&root, code, "fun") {
+  if let Command("fun", [arg_nodes, body_node]) = node_shape(&root, code) {
     body = *body_node;
     b.args = arg_nodes.children.len();
     for &arg in arg_nodes.children {

@@ -72,16 +72,6 @@ pub fn to_symbol(code : &str, n : Node) -> Symbol {
   symbols::to_symbol(code_segment(code, n))
 }
 
-// TODO: this is called repeatedly on the same node, which might be a bit slow
-pub fn match_head<'l>(n : &'l Node, code : &str, s : &str) -> Option<&'l [Node]> {
-  if n.children.len() > 0 {
-    if code_segment(code, n.children[0]) == s {
-      return Some(&n.children[1..]);
-    }
-  }
-  None
-}
-
 pub enum NodeShape<'l> {
   Command(&'l str, &'l [Node]),
   Atom(&'l str),
