@@ -54,26 +54,26 @@ pub fn read_bytecode(env: &Env, code : &str, root : Node) -> BytecodeFunction {
     }
   }
   // Generation sequence instructions
-  let mut sequences = vec![];
   let mut ops = vec![];
   let mut b = Builder {
     ops: &mut ops,
-    sequences: &seq_instrs,
+    sequence_info: &seq_instrs,
     locals: &mut locals,
     registers: &mut registers,
     code,
     env,
     arg_values: vec![],
   };
+  let mut sequence_info = vec![];
   for bi in seq_instrs.as_slice() {
     let start_op = b.ops.len();
     for &n in bi.instructions {
       read_instruction(&mut b, n);
     }
     let num_ops = b.ops.len() - start_op;
-    sequences.push(Sequence {name: bi.name, start_op, num_ops });
+    sequence_info.push(SequenceInfo {name: bi.name, start_op, num_ops });
   }
-  BytecodeFunction { sequences, ops, registers, args, locals }
+  BytecodeFunction { sequence_info, ops, registers, args, locals }
 }
 
 fn to_sequence_id(sequences : &Vec<SeqInstrs>, s : Symbol) -> SeqenceId {
@@ -200,7 +200,7 @@ fn find_local(locals : &mut Vec<(Symbol, RegIndex)>, code : &str, node : Node)
 
 struct Builder<'l> {
   ops : &'l mut Vec<Op>,
-  sequences : &'l Vec<SeqInstrs<'l>>,
+  sequence_info : &'l Vec<SeqInstrs<'l>>,
   locals : &'l mut Vec<(Symbol, RegIndex)>,
   registers : &'l mut usize,
   code : &'l str,
@@ -221,13 +221,13 @@ fn read_instruction(b : &mut Builder, node : Node) {
     // conditional jump
     Command("cjump", [cond, then_seq, else_seq]) => {
       let cond = expr_to_value(b, *cond);
-      let then_seq = to_sequence_id(b.sequences, to_symbol(b.code, *then_seq));
-      let else_seq = to_sequence_id(b.sequences, to_symbol(b.code, *else_seq));
+      let then_seq = to_sequence_id(b.sequence_info, to_symbol(b.code, *then_seq));
+      let else_seq = to_sequence_id(b.sequence_info, to_symbol(b.code, *else_seq));
       b.ops.push(Op::CJump{cond, then_seq, else_seq});
     }
     // Jump
     Command("jump", [seq]) => {
-      let seq = to_sequence_id(b.sequences, to_symbol(b.code, *seq));
+      let seq = to_sequence_id(b.sequence_info, to_symbol(b.code, *seq));
       b.ops.push(Op::Jump(seq));
     }
     // Debug

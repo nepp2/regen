@@ -127,15 +127,15 @@ fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &m
         Op::CJump{ cond, then_seq, else_seq } => {
           let v = stack[reg(sbp, cond)];
           if v != 0 {
-            frame.pc = fun.sequences[then_seq.0].start_op;
+            frame.pc = fun.sequence_info[then_seq.0].start_op;
           }
           else {
-            frame.pc = fun.sequences[else_seq.0].start_op;
+            frame.pc = fun.sequence_info[else_seq.0].start_op;
           }
           continue;
         }
         Op::Jump(seq) => {
-          frame.pc = fun.sequences[seq.0].start_op;
+          frame.pc = fun.sequence_info[seq.0].start_op;
           continue;
         }
         Op::Arg{ index, value } => {

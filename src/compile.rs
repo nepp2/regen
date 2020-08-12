@@ -37,7 +37,7 @@ struct Builder<'l> {
   seq_completion : Vec<bool>,
 
   /// sequence information
-  sequences : Vec<Sequence>,
+  seq_info : Vec<SequenceInfo>,
 
   /// the operations of all the sequences
   ops : Vec<Op>,
@@ -76,10 +76,10 @@ fn push_expr(b : &mut Builder, e : Expr) -> RegIndex{
 }
 
 fn create_sequence(b : &mut Builder, name : &str) -> SeqenceId {
-  let i = b.sequences.len();
+  let i = b.seq_info.len();
   // TODO: do a better job of making sure that the name is unique
   let name = format!("{}_{}", name, i);
-  b.sequences.push(Sequence {
+  b.seq_info.push(SequenceInfo {
     name: symbols::to_symbol(&name),
     start_op: 0, num_ops: 0,
   });
@@ -95,12 +95,12 @@ fn set_current_sequence(b : &mut Builder, sequence : SeqenceId) {
     panic!("this sequence has already been completed");
   }
   b.cur_seq = Some(sequence);
-  b.sequences[sequence.0].start_op = b.ops.len();
+  b.seq_info[sequence.0].start_op = b.ops.len();
 }
 
 fn complete_sequence(b : &mut Builder) {
   if let Some(i) = b.cur_seq {
-    let seq = &mut b.sequences[i.0];
+    let seq = &mut b.seq_info[i.0];
     seq.num_ops = b.ops.len() - seq.start_op;
     b.seq_completion[i.0] = true;
     b.cur_seq = None;
@@ -114,7 +114,7 @@ fn complete_function(mut b : Builder) -> BytecodeFunction {
     panic!("not all basic sequences were completed")
   }
   BytecodeFunction {
-    sequences: b.sequences,
+    sequence_info: b.seq_info,
     ops: b.ops,
     registers: b.registers,
     args: b.args,
@@ -260,7 +260,7 @@ pub fn compile_function(env: &Env, code : &str, root : Node) -> BytecodeFunction
     registers: 0,
     seq_completion: vec![],
     cur_seq: None,
-    sequences: vec![],
+    seq_info: vec![],
     ops: vec![],
     label_stack: vec![],
     code,

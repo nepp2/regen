@@ -41,14 +41,14 @@ pub enum Op {
 /// A sequence of instructions. Equivalent to a basic block,
 /// but the name "sequence" is used to avoid confusion with
 /// block expressions.
-pub struct Sequence {
+pub struct SequenceInfo {
   pub name : Symbol,
   pub start_op : usize,
   pub num_ops : usize,
 }
 
 pub struct BytecodeFunction {
-  pub sequences : Vec<Sequence>,
+  pub sequence_info : Vec<SequenceInfo>,
   pub ops : Vec<Op>,
   pub args : usize,
   pub locals : Vec<(Symbol, RegIndex)>,

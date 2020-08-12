@@ -16,7 +16,7 @@ impl fmt::Display for BytecodeFunction {
     }
     writeln!(f)?;
     writeln!(f, "Registers: {}", self.registers)?;
-    for (i, b) in self.sequences.iter().enumerate() {
+    for (i, b) in self.sequence_info.iter().enumerate() {
       writeln!(f, "Sequence {} ({}):", i, b.name)?;
       let end = b.start_op + b.num_ops;
       for op in self.ops[b.start_op..end].iter() {
