@@ -1,12 +1,14 @@
 
 # Immediate TODO
 
-- ~~Call basic interpreted functions~~
-- ~~Call basic C functions~~
+- Handle semicolon comments in parser
+- Define milestone 2
+- Implement milestone 2
 
 # Future
 
-- figure out vertical slice 
+- Figure out vertical slice
+  - As a sequence of milestones 
 - eval function
 - struct support
   - layout based on pointer alignment
