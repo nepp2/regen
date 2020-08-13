@@ -135,61 +135,55 @@ pub fn parse(code : &str) -> Node {
   let mut ns = vec!();
   let mut ts = TokenStream { code, next_start: 0, next_len: 0 };
   parse_list(&mut ns, &mut ts);
-  display(code, 0, ns[0]);
+  display(code, 0, ns[0], &mut false);
+  println!();
   ns.pop().unwrap()
 }
 
-fn display(code : &str, indent: usize, n : Node) {
-  if n.children.len() == 0 {
-    print_indent(indent);
-    println!("{}", &code[n.start..n.end]);
-  }
-  else {
-    print_indent(indent);
-    print!("(");
-    let mut i = 0;
-    let cs = n.children;
-    'outer: loop {
-      while i < cs.len() {
-        let c = cs[i];
-        if c.end - c.start > 20 {
-          break 'outer;
-        }
-        if i > 0 {
-          print!(" ");
-        }
-        display_inline(code, c);
-        i += 1;
-      }
-      print!(")");
-      return;
-    }
-    while i < cs.len() {
-      let c = cs[i];
-      println!();
-      display(code, indent + 2, c);
-      i += 1;
-    }
-    print_indent(indent);
-    print!(")");
-  }
-}
-
-fn print_indent(indent : usize) {
-  for _ in 0..indent { print!(" ") }
-}
-
-fn display_inline(code : &str, n : Node) {
+fn display(code : &str, depth: usize, n : Node, newline : &mut bool) {
   if n.children.len() == 0 {
     print!("{}", &code[n.start..n.end]);
   }
   else {
-    print!("(");
-    display_inline(code, n.children[0]);
-    for &c in  &n.children[1..] {
-      print!(" ");
-      display_inline(code, c);
-    }
-    print!(")");
+    display_list(code, depth, n.children.as_slice(), newline);
   }
+}
+
+fn display_list(code : &str, depth: usize, ns : &[Node], newline : &mut bool) {
+  print!("(");
+  for i in 0..ns.len() {
+    let n = ns[i];
+    if n.children.len() > 0 && (ns.len() > 3 || i == 0) {
+      display_list_newline(code, depth + 1, ns, i, true);
+      *newline = true;
+      return;
+    }
+    if i > 0 {
+      print!(" ");
+    }
+    display(code, depth, n, newline);
+    if *newline {
+      display_list_newline(code, depth + 1, ns, i + 1, false);
+      return;
+    }
+  }
+  print!(")");
+}
+
+fn display_list_newline(code : &str, depth: usize, ns : &[Node], mut i : usize, indent_newline : bool) {
+  while i < ns.len() {
+    println!();
+    print_indent(depth * 2);
+    display(code, depth, ns[i], &mut false);
+    i += 1;
+  }
+  if indent_newline {
+    println!();
+    print_indent((depth-1) * 2);
+  }
+  print!(")");
+}
+
+fn print_indent(indent : usize) {
+  for _ in 0..indent { print!(" ") }
 }
