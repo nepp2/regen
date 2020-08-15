@@ -2,6 +2,7 @@
 
 use crate::symbols;
 use symbols::Symbol;
+use std::str::CharIndices;
 
 use crate::perm_alloc::{perm, perm_slice, Perm, PermSlice};
 
@@ -11,32 +12,75 @@ struct TokenStream<'l>{
   next_len : usize,
 }
 
-fn is_divider(c : char) -> bool {
-  match c {
-    ' ' | '\n' | '\r' | '\t' | '(' | ')' => true,
-    _ => false,
+#[derive(Copy, Clone)]
+enum TokenType { Normal, Comment, Whitespace, Empty }
+use TokenType::*;
+
+#[derive(Copy, Clone)]
+struct Token<'l>(TokenType, &'l str);
+
+fn trim_token(s : &str) -> Token {
+  fn is_symbol_char(c : char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
   }
+  fn is_bracket(c : char) -> bool {
+    "()[]{}".chars().find(|x| *x == c).is_some()
+  }
+  fn is_operator(c : char) -> bool {
+    c.is_ascii_punctuation() && !is_bracket(c)
+  }
+  fn trim_comment<'l>(s : &'l str, mut it : CharIndices) -> &'l str {
+    while let Some((i, c)) = it.next() {
+      if c == '\n' { return &s[..i]; }
+    }
+    return s;
+  }
+  fn trim_whitespace<'l>(s : &'l str, mut it : CharIndices) -> &'l str {
+    while let Some((i, c)) = it.next() {
+      if !c.is_ascii_whitespace() { return &s[..i]; }
+    }
+    return s;
+  }
+  fn trim_operator<'l>(s : &'l str, mut it : CharIndices) -> &'l str {
+    while let Some((i, c)) = it.next() {
+      if !is_operator(c) { return &s[..i]; }
+    }
+    return s;
+  }
+  fn trim_symbol<'l>(s : &'l str, mut it : CharIndices) -> &'l str {
+    while let Some((i, c)) = it.next() {
+      if !is_symbol_char(c) { return &s[..i]; }
+    }
+    return s;
+  }
+  let it = s.char_indices();
+  if s.starts_with(";;") {
+    return Token(Comment, trim_comment(s, it));
+  }
+  if let Some(c) = s.chars().next() {
+    if is_bracket(c) {
+      return Token(Normal, &s[..1]);
+    }
+    else if c.is_ascii_whitespace() {
+      return Token(Whitespace, trim_whitespace(s, it));
+    }
+    else if is_operator(c) {
+      return Token(Normal, trim_operator(s, it));
+    }
+    else if is_symbol_char(c) {
+      return Token(Normal, trim_symbol(s, it));
+    }
+    else {
+      panic!("unrecognised char")
+    }
+  };
+  return Token(Empty, "");
 }
 
-fn trim_token(s : &str) -> &str {
-  let mut it = s.char_indices();
-  if let Some((_, c)) = it.next() {
-    if is_divider(c) {
-      return &s[..1]
-    }
-  }
-  while let Some((i, c)) = it.next() {
-    if is_divider(c) {
-      return &s[..i];
-    }
-  }
-  s
-}
-
-fn peek<'l>(ts : &mut TokenStream<'l>) -> &'l str {
-  let s = trim_token(&ts.code[ts.next_start..]);
-  ts.next_len = s.len();
-  s
+fn peek<'l>(ts : &mut TokenStream<'l>) -> Token<'l> {
+  let t = trim_token(&ts.code[ts.next_start..]);
+  ts.next_len = t.1.len();
+  t
 }
 
 fn skip<'l>(ts : &mut TokenStream<'l>) {
@@ -61,30 +105,37 @@ fn parse_list(ns : &mut Vec<Node>, ts : &mut TokenStream) {
   let node_index = ns.len();
   let start = ts.next_start;
   loop {
-    match peek(ts) {
-      "" | ")" => {
-        break;
-      }
-      " " | "\n" | "\r" | "\t" => {
+    let t = peek(ts);
+    match t.0 {
+      Empty => break,
+      Comment => (),
+      Whitespace => {
         skip(ts);
       }
-      "(" => {
-        skip(ts);
-        parse_list(ns, ts);
-        // TODO handle error properly
-        if peek(ts) != ")" {
-          panic!("syntax error: unbalanced list");
+      Normal => {
+        match t.1 {
+          "" | ")" => {
+            break;
+          }
+          "(" => {
+            skip(ts);
+            parse_list(ns, ts);
+            // TODO handle error properly
+            if peek(ts).1 != ")" {
+              panic!("syntax error: unbalanced list");
+            }
+            skip(ts);
+          }
+          _ => {
+            let atom = NodeInfo {
+              start: ts.next_start,
+              end: ts.next_start + ts.next_len,
+              children: perm_slice(&[])
+            };
+            skip(ts);
+            ns.push(perm(atom));
+          }
         }
-        skip(ts);
-      }
-      _ => {
-        let atom = NodeInfo {
-          start: ts.next_start,
-          end: ts.next_start + ts.next_len,
-          children: perm_slice(&[])
-        };
-        skip(ts);
-        ns.push(perm(atom));
       }
     }
   }
@@ -135,8 +186,8 @@ pub fn parse(code : &str) -> Node {
   let mut ns = vec!();
   let mut ts = TokenStream { code, next_start: 0, next_len: 0 };
   parse_list(&mut ns, &mut ts);
-  display(code, 0, ns[0], &mut false);
-  println!();
+  // display(code, 0, ns[0], &mut false);
+  // println!();
   ns.pop().unwrap()
 }
 

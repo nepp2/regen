@@ -10,6 +10,9 @@ use bytecode::{
   BytecodeFunction, Op, Expr, RegIndex, BinOp,
 };
 
+use std::fs;
+use std::path::Path;
+
 pub extern "C" fn c_add(a : u64, b : u64) -> u64 {
   a + b
 }
@@ -172,4 +175,12 @@ fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &m
     }
   }
   shadow_stack.push(frame);
+}
+
+pub fn run_file(path : impl AsRef<Path>, f : CompileFunction) {
+  let code =
+    fs::read_to_string(path)
+    .expect("Something went wrong reading the file");
+  let ast = parse::parse(&code);
+  interpret(&ast, &code, f);
 }

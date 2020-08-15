@@ -76,5 +76,8 @@ fn get_symbols() -> &'static mut Symbols {
   }
 }
 
+/// TODO: this isn't threadsafe!
 static mut SYMBOLS_INITIALISED: bool = false;
+
+/// TODO: this isn't threadsafe!
 static mut SYMBOLS: *mut Symbols = std::ptr::null_mut();
