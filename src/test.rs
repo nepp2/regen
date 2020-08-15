@@ -5,7 +5,7 @@ use interpret::run_file;
 use std::fs;
 
 // Runs the tests in isolated processes, because they do unsafe things and could pollute each other.
-//rusty_fork_test! {
+// rusty_fork_test! {
 
   #[test]
   fn run_test_cases() {

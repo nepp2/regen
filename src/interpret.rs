@@ -2,7 +2,7 @@
 use crate::{symbols, parse, bytecode, env, ffi};
 
 use env::Env;
-use symbols::to_symbol;
+use symbols::{to_symbol, SymbolTable};
 use parse::{
   Node, code_segment, node_shape, NodeShape::Command
 };
@@ -19,10 +19,10 @@ pub extern "C" fn c_add(a : u64, b : u64) -> u64 {
 
 pub type CompileFunction = fn(env : &Env, code : &str, fun : Node) -> BytecodeFunction;
 
-pub fn interpret(n : &Node, code : &str, f : CompileFunction) {
-  let mut env = Env::new();
+pub fn interpret(st : SymbolTable, n : &Node, code : &str, f : CompileFunction) {
+  let mut env = Env::new(st);
 
-  env.insert(to_symbol("c_add"), c_add as u64);
+  env.values.insert(to_symbol(st, "c_add"), c_add as u64);
 
   for &c in n.children {
     if let Command("def", [name, value]) = node_shape(&c, code) {
@@ -33,11 +33,11 @@ pub fn interpret(n : &Node, code : &str, f : CompileFunction) {
       // println!("{}", function);
       let value =
         Box::into_raw(Box::new(function)) as u64;
-      env.insert(to_symbol(name), value);
+      env.values.insert(to_symbol(st, name), value);
     }
   }
 
-  if let Some(&v) = env.get(&to_symbol("main")) {
+  if let Some(&v) = env.values.get(&to_symbol(st, "main")) {
     let f = v as *const BytecodeFunction;
     let mut stack = [0 ; 2048];
     let mut shadow_stack = vec![
@@ -80,7 +80,7 @@ fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &m
           let r = reg(sbp, r);
           match e {
             Expr::Def(sym) =>
-              if let Some(&f) = env.get(&sym) {
+              if let Some(&f) = env.values.get(&sym) {
                 stack[r] = f;
               }
               else {
@@ -181,6 +181,7 @@ pub fn run_file(path : impl AsRef<Path>, f : CompileFunction) {
   let code =
     fs::read_to_string(path)
     .expect("Something went wrong reading the file");
+  let st = symbols::symbol_table();
   let ast = parse::parse(&code);
-  interpret(&ast, &code, f);
+  interpret(st, &ast, &code, f);
 }

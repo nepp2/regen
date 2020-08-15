@@ -1,7 +1,7 @@
 
 
 use crate::symbols;
-use symbols::Symbol;
+use symbols::{Symbol, SymbolTable};
 use std::str::CharIndices;
 
 use crate::perm_alloc::{perm, perm_slice, Perm, PermSlice};
@@ -144,8 +144,8 @@ fn parse_list(ns : &mut Vec<Node>, ts : &mut TokenStream) {
   ns.push(perm(NodeInfo{ start, end: ts.next_start, children }));
 }
 
-pub fn to_symbol(code : &str, n : Node) -> Symbol {
-  symbols::to_symbol(code_segment(code, n))
+pub fn to_symbol(st : SymbolTable, code : &str, n : Node) -> Symbol {
+  symbols::to_symbol(st, code_segment(code, n))
 }
 
 pub enum NodeShape<'l> {

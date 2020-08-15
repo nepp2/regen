@@ -26,7 +26,7 @@ pub fn read_bytecode(env: &Env, code : &str, root : Node) -> BytecodeFunction {
     body = *body_node;
     args = arg_nodes.children.len();
     for &arg in arg_nodes.children {
-      let name = to_symbol(code, arg);
+      let name = to_symbol(env.st, code, arg);
       let reg = next_reg(&mut registers);
       locals.push(LocalVar{ name, reg });
     }
@@ -40,13 +40,13 @@ pub fn read_bytecode(env: &Env, code : &str, root : Node) -> BytecodeFunction {
     match node_shape(node, code) {
       Command("vars", tail) => {
         for &var in tail {
-          let name = to_symbol(code, var);
+          let name = to_symbol(env.st, code, var);
           let reg = next_reg(&mut registers);
           locals.push(LocalVar{ name, reg });
         }
       }
       Command("seq", tail) => {
-        let name = to_symbol(code, tail[0]);
+        let name = to_symbol(env.st, code, tail[0]);
         let instructions = &tail[1..];
         seq_instrs.push(SeqInstrs{ name, instructions });
       }
@@ -131,11 +131,11 @@ fn atom_to_value(b : &mut Builder, node : Node) -> RegIndex {
     return push_expr(b, e);
   }
   // Look for local
-  if let Some(v) = find_local(b.locals, b.code, node) {
+  if let Some(v) = find_local(b, node) {
     return v;
   }
   // Assume global
-  let e = Expr::Def(symbols::to_symbol(segment));
+  let e = Expr::Def(symbols::to_symbol(b.env.st, segment));
   push_expr(b, e)
 }
 
@@ -192,11 +192,11 @@ fn expr_to_value(b : &mut Builder, node : Node) -> RegIndex {
   }
 }
 
-fn find_local(locals : &mut Vec<LocalVar>, code : &str, node : Node)
+fn find_local(b : &Builder, node : Node)
   -> Option<RegIndex>
 {
-  let c = to_symbol(code, node);
-  locals.iter()
+  let c = to_symbol(b.env.st, b.code, node);
+  b.locals.iter()
     .find(|&l| l.name == c).map(|l| l.reg)
 }
 
@@ -216,26 +216,26 @@ fn read_instruction(b : &mut Builder, node : Node) {
   match node_shape(&node, b.code) {
     // set var
     Command("set", [varname, value]) => {
-      let var_reg = find_local(b.locals, b.code, *varname).expect("no variable found");
+      let var_reg = find_local(b, *varname).expect("no variable found");
       let val_reg = expr_to_value(b, *value);
       b.ops.push(Op::Set(var_reg, val_reg));
     }
     // conditional jump
     Command("cjump", [cond, then_seq, else_seq]) => {
       let cond = expr_to_value(b, *cond);
-      let then_seq = to_sequence_id(b.sequence_info, to_symbol(b.code, *then_seq));
-      let else_seq = to_sequence_id(b.sequence_info, to_symbol(b.code, *else_seq));
+      let then_seq = to_sequence_id(b.sequence_info, to_symbol(b.env.st, b.code, *then_seq));
+      let else_seq = to_sequence_id(b.sequence_info, to_symbol(b.env.st, b.code, *else_seq));
       b.ops.push(Op::CJump{cond, then_seq, else_seq});
     }
     // Jump
     Command("jump", [seq]) => {
-      let seq = to_sequence_id(b.sequence_info, to_symbol(b.code, *seq));
+      let seq = to_sequence_id(b.sequence_info, to_symbol(b.env.st, b.code, *seq));
       b.ops.push(Op::Jump(seq));
     }
     // Debug
     Command("debug", [v]) => {
       let reg = expr_to_value(b, *v);
-      let sym = to_symbol(b.code, *v);
+      let sym = to_symbol(b.env.st, b.code, *v);
       b.ops.push(Op::Debug(sym, reg));
     }
     // Return

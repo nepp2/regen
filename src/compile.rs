@@ -61,7 +61,7 @@ struct Builder<'l> {
 fn find_local_in_scope(b : &mut Builder, node : Node)
   -> Option<RegIndex>
 {
-  let c = to_symbol(b.code, node);
+  let c = to_symbol(b.env.st, b.code, node);
   b.locals.iter().rev()
     .find(|&l| l.name == c).map(|l| l.reg)
 }
@@ -87,12 +87,12 @@ fn push_expr(b : &mut Builder, e : Expr) -> RegIndex{
 fn create_sequence(b : &mut Builder, name : &str) -> SeqenceId {
   // Make sure the name is unique
   let mut i = 1;
-  let mut name_candidate = symbols::to_symbol(&name);
+  let mut name_candidate = symbols::to_symbol(b.env.st, &name);
   loop {
     let name_unique = b.seq_info.iter().find(|s| s.name == name_candidate).is_none();
     if name_unique { break }
     i += 1;
-    name_candidate = symbols::to_symbol(&format!("{}_{}", name, i));
+    name_candidate = symbols::to_symbol(b.env.st, &format!("{}_{}", name, i));
   }
   let seq_id = SeqenceId(b.seq_info.len());
   b.seq_info.push(SequenceInfo {
@@ -200,7 +200,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {
       let val_reg = compile_expr_to_value(b, *value);
       // push a local variable
       let var_reg = next_reg(b);
-      let name = to_symbol(b.code, *var_name);
+      let name = to_symbol(b.env.st, b.code, *var_name);
       add_local(b, name, var_reg);
       // push a set command
       b.ops.push(Op::Set(var_reg, val_reg));
@@ -241,7 +241,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {
   // Debug
     Command("debug", [v]) => {
       let reg = compile_expr_to_value(b, *v);
-      let sym = to_symbol(b.code, *v);
+      let sym = to_symbol(b.env.st, b.code, *v);
       b.ops.push(Op::Debug(sym, reg));
       None
     }
@@ -290,7 +290,7 @@ pub fn compile_function(env: &Env, code : &str, root : Node) -> BytecodeFunction
     body = *body_node;
     b.args = arg_nodes.children.len();
     for &arg in arg_nodes.children {
-      let name = to_symbol(code, arg);
+      let name = to_symbol(env.st, code, arg);
       let reg = next_reg(&mut b);
       add_local(&mut b, name, reg);
     }
@@ -349,7 +349,7 @@ fn atom_to_value(b : &mut Builder, node : Node) -> RegIndex {
     return v;
   }
   // Assume global
-  let e = Expr::Def(symbols::to_symbol(segment));
+  let e = Expr::Def(symbols::to_symbol(b.env.st, segment));
   push_expr(b, e)
 }
 
