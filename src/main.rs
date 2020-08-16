@@ -13,8 +13,8 @@ mod ffi;
 #[cfg(test)]
 mod test;
 
-#[cfg(test)]
-#[macro_use] extern crate rusty_fork;
+// #[cfg(test)]
+// #[macro_use] extern crate rusty_fork;
 
 use interpret::run_file;
 
