@@ -1,9 +1,11 @@
 
 # Immediate TODO
 
-- Handle semicolon comments in parser
-- Define milestone 2
-- Implement milestone 2
+- turn symbols into thin pointers
+- add env reference to itself
+- add "map_insert" function
+- files are executed line by line
+- def is (temporarily) a special macro
 
 # Future
 

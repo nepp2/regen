@@ -2,7 +2,7 @@
 use crate::{symbols, parse, bytecode, env, ffi};
 
 use env::Env;
-use symbols::{to_symbol, SymbolTable};
+use symbols::{to_symbol, SymbolTable, Symbol};
 use parse::{
   Node, code_segment, node_shape, NodeShape::Command
 };
@@ -17,12 +17,31 @@ pub extern "C" fn c_add(a : u64, b : u64) -> u64 {
   a + b
 }
 
+pub extern "C" fn env_insert(env : &mut Env, sym : Symbol, value : u64) {
+  env.values.insert(sym, value);
+}
+
+pub extern "C" fn env_get(env : &mut Env, sym : Symbol) -> u64 {
+  env.values[&sym]
+}
+
 pub type CompileFunction = fn(env : &Env, code : &str, fun : Node) -> BytecodeFunction;
 
-pub fn interpret(st : SymbolTable, n : &Node, code : &str, f : CompileFunction) {
-  let mut env = Env::new(st);
-
+fn new_env(st : SymbolTable) -> Box<Env> {
+  let env_ptr = Box::into_raw(Box::new(Env {
+    values: Default::default(),
+    st
+  }));
+  let mut env = unsafe { Box::from_raw(env_ptr) };
   env.values.insert(to_symbol(st, "c_add"), c_add as u64);
+  env.values.insert(to_symbol(st, "_env"), env_ptr as u64);
+  env.values.insert(to_symbol(st, "env_insert"), env_insert as u64);
+  env.values.insert(to_symbol(st, "env_get"), env_insert as u64);
+  env
+}
+
+pub fn interpret(st : SymbolTable, n : &Node, code : &str, f : CompileFunction) {
+  let mut env = new_env(st);
 
   for &c in n.children {
     if let Command("def", [name, value]) = node_shape(&c, code) {

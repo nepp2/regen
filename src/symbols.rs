@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
-pub struct Symbol(*const str);
+pub struct Symbol(*const *const str);
 
 #[derive(Default)]
 struct Symbols {
@@ -19,14 +19,14 @@ pub struct SymbolTable(*mut Symbols);
 impl fmt::Debug for Symbol {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     // TODO
-    write!(f, "Symbol({})", unsafe { &*self.0} )
+    write!(f, "Symbol({})", unsafe { &**self.0} )
   }
 }
 
 impl fmt::Display for Symbol {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     // TODO
-    write!(f, "{}", unsafe { &*self.0} )
+    write!(f, "{}", unsafe { &**self.0} )
   }
 }
 
@@ -47,7 +47,10 @@ pub fn to_symbol(symbols : SymbolTable, s : &str) -> Symbol {
   let proxy = symbols.symbol_set.get(s);
   if proxy.is_some() { return Symbol(proxy.unwrap().0) };
   let s = make_static(s.to_string());
-  let sym = Symbol(s as *const str);
+  // TODO: replace use of Box with a bump allocator/slotmap/something
+  // OR: store the string data in an unsized struct with the size included,
+  // to reduce indirection.
+  let sym = Symbol(Box::into_raw(Box::new(s as *const str)));
   symbols.symbol_set.insert(s, sym);
   sym
 }
