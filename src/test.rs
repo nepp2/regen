@@ -24,10 +24,5 @@ use std::fs;
   fn test_milestone_1() {
     run_file("examples/milestone1_concise.gen", compile::compile_function);
   }
-  
-  #[test]
-  fn test_scratchpad() {
-    run_file("examples/scratchpad.gen", bytecode::read_bytecode);
-  }
     
 //}

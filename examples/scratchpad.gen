@@ -1,25 +1,12 @@
 
-(def foo (fun (a b) (
-  (seq run
-    (return (+ a b)))
-)))
-
 (def main (fun () (
-  (vars blah result) 
-  (seq if
-    (set blah 5)
-    (set result (+ 0 blah))
-    (cjump result then else))
-  (seq then
-    (set blah
-      (call foo 57 24))
-    (debug blah)
-    (jump continue))
-  (seq else
-    (debug blah)
-    (jump continue))
-  (seq continue
-    return)
+
+  (ccall env_insert env (sym bar) 5)
+  (debug (ccall env_get env (sym bar)))
+  (debug bar)
+
+  ;; (let hello (sym hello))
+  ;; (ccall print_symbol hello)
+  ;; (debug hello)
+  ;; (debug _env)
 )))
-
-

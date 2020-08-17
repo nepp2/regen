@@ -24,10 +24,19 @@ fn trim_token(s : &str) -> Token {
     c.is_ascii_alphanumeric() || c == '_'
   }
   fn is_bracket(c : char) -> bool {
-    "()[]{}".chars().find(|x| *x == c).is_some()
+    match c {
+      '(' | ')' | '[' | ']' | '{' | '}' => true,
+      _ => false,
+    }
   }
   fn is_operator(c : char) -> bool {
-    c.is_ascii_punctuation() && !is_bracket(c)
+    match c {
+      '!' | '"' | '#' | '$' | '%' | '&' | '\'' |
+      '*' | '+' | ',' | '-' | '.' | '/' | ':' |
+      ';' | '<' | '=' | '>' | '?' | '@' | '\\' |
+      ']' | '^' | '`' | '|' | '~' => true,
+      _ => false,
+    }
   }
   fn trim_comment<'l>(s : &'l str, mut it : CharIndices) -> &'l str {
     while let Some((i, c)) = it.next() {

@@ -19,5 +19,5 @@ mod test;
 use interpret::run_file;
 
 fn main() {
-  run_file("examples/scratchpad.gen", bytecode::read_bytecode);
+  run_file("examples/scratchpad.gen", compile::compile_function);
 }

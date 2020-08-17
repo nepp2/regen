@@ -252,6 +252,17 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {
       b.ops.push(Op::Return);
       None
     }
+    // Return
+    Command("sym", [v]) => {
+      if let Atom(s) = node_shape(v, b.code) {
+        let s = symbols::to_symbol(b.env.st, s);
+        let e = Expr::LiteralU64(s.as_u64());
+        Some(push_expr(b, e))
+      }
+      else {
+        panic!("expected atom")
+      }
+    }
     _ => {
       let r = compile_list_expr(b, node);
       Some(r)

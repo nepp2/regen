@@ -21,8 +21,12 @@ pub extern "C" fn env_insert(env : &mut Env, sym : Symbol, value : u64) {
   env.values.insert(sym, value);
 }
 
-pub extern "C" fn env_get(env : &mut Env, sym : Symbol) -> u64 {
+pub extern "C" fn env_get(env : &Env, sym : Symbol) -> u64 {
   env.values[&sym]
+}
+
+pub extern "C" fn print_symbol(sym : Symbol) {
+  println!("symbol: {}", sym)
 }
 
 pub type CompileFunction = fn(env : &Env, code : &str, fun : Node) -> BytecodeFunction;
@@ -34,9 +38,10 @@ fn new_env(st : SymbolTable) -> Box<Env> {
   }));
   let mut env = unsafe { Box::from_raw(env_ptr) };
   env.values.insert(to_symbol(st, "c_add"), c_add as u64);
-  env.values.insert(to_symbol(st, "_env"), env_ptr as u64);
+  env.values.insert(to_symbol(st, "env"), env_ptr as u64);
   env.values.insert(to_symbol(st, "env_insert"), env_insert as u64);
-  env.values.insert(to_symbol(st, "env_get"), env_insert as u64);
+  env.values.insert(to_symbol(st, "env_get"), env_get as u64);
+  env.values.insert(to_symbol(st, "print_symbol"), print_symbol as u64);
   env
 }
 

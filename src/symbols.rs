@@ -7,6 +7,12 @@ use std::fmt;
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Symbol(*const *const str);
 
+impl Symbol {
+  pub fn as_u64(self) -> u64 {
+    self.0 as u64
+  }
+}
+
 #[derive(Default)]
 struct Symbols {
   /// symbols carry an index into the strings vec

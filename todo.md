@@ -1,7 +1,6 @@
 
 # Immediate TODO
 
-- turn symbols into thin pointers
 - add env reference to itself
 - add "map_insert" function
 - files are executed line by line
