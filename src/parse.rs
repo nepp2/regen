@@ -108,8 +108,7 @@ fn parse_list(ns : &mut Vec<Node>, ts : &mut TokenStream) {
     let t = peek(ts);
     match t.0 {
       Empty => break,
-      Comment => (),
-      Whitespace => {
+      Comment | Whitespace => {
         skip(ts);
       }
       Normal => {

@@ -1,4 +1,11 @@
 
+;; This milestone introduced block scope, including "let" and scope-based branching (if/else)
+
+;; It turns blocks into expressions
+
+;; It supports loops through "repeat" and "break" keywords, which jump to the start and end
+;; of a block, respectively.
+
 (def factorial (fun (n) (
   (if (< n 2)
     (1)
