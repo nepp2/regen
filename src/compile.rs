@@ -5,10 +5,11 @@ use crate::{bytecode, parse, symbols, env};
 
 use bytecode::definition::*;
 
+use symbols::to_symbol;
 use env::Env;
 use parse::{
   Node,
-  code_segment, to_symbol,
+  code_segment,
   node_shape, NodeShape,
 };
 use NodeShape::*;
@@ -61,7 +62,7 @@ struct Builder<'l> {
 fn find_local_in_scope(b : &mut Builder, node : Node)
   -> Option<RegIndex>
 {
-  let c = to_symbol(b.env.st, b.code, node);
+  let c = build_symbol(b, node);
   b.locals.iter().rev()
     .find(|&l| l.name == c).map(|l| l.reg)
 }
@@ -82,6 +83,10 @@ fn push_expr(b : &mut Builder, e : Expr) -> RegIndex{
   let reg = next_reg(b);
   b.ops.push(Op::Expr(reg, e));
   return reg;
+}
+
+fn build_symbol(b : &mut Builder, n : Node) -> Symbol {
+  symbols::to_symbol(b.env.st, code_segment(b.code, n))
 }
 
 fn create_sequence(b : &mut Builder, name : &str) -> SeqenceId {
@@ -146,13 +151,15 @@ fn compile_if_else(b : &mut Builder, cond : Node, then_expr : Node, else_expr : 
   let cond = compile_expr_to_value(b, cond);
   b.ops.push(Op::CJump{ cond, then_seq, else_seq });
   set_current_sequence(b, then_seq);
-  let then_result = compile_block_expr(b, then_expr);
+  let then_result =
+    compile_block_expr(b, then_expr.children.as_slice());
   if let Some(v) = then_result {
     b.ops.push(Op::Set(result_reg, v));
   }
   b.ops.push(Op::Jump(exit_seq));
   set_current_sequence(b, else_seq);
-  let else_result = compile_block_expr(b, else_expr);
+  let else_result =
+    compile_block_expr(b, else_expr.children.as_slice());
   if let Some(v) = else_result {
     b.ops.push(Op::Set(result_reg, v));
   }
@@ -187,6 +194,21 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {
     Atom(_) => {
       Some(atom_to_value(b, node))
     }
+    // def
+    Command("def", [def_name, value]) => {
+      def_macro(b, *def_name, *value);
+      None
+    }
+    // fun
+    Command("fun", [arg_nodes, body]) => {
+      let f = compile_function(
+        b.env, b.code,
+        arg_nodes.children.as_slice(), body.children.as_slice());
+      let f_addr = Box::into_raw(Box::new(f)) as u64;
+      let reg = next_reg(b);
+      b.ops.push(Op::Expr(reg, Expr::LiteralU64(f_addr)));
+      Some(reg)
+    }
     // set var
     Command("set", [varname, value]) => {
       let val_reg = compile_expr_to_value(b, *value);
@@ -200,7 +222,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {
       let val_reg = compile_expr_to_value(b, *value);
       // push a local variable
       let var_reg = next_reg(b);
-      let name = to_symbol(b.env.st, b.code, *var_name);
+      let name = build_symbol(b, *var_name);
       add_local(b, name, var_reg);
       // push a set command
       b.ops.push(Op::Set(var_reg, val_reg));
@@ -213,7 +235,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {
       let cond = compile_expr_to_value(b, *cond);
       b.ops.push(Op::CJump{ cond, then_seq, else_seq: exit_seq });
       set_current_sequence(b, then_seq);
-      compile_block_expr(b, *then_expr);
+      compile_block_expr(b, then_expr.children.as_slice());
       b.ops.push(Op::Jump(exit_seq));
       set_current_sequence(b, exit_seq);
       None
@@ -232,7 +254,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {
       b.label_stack.push(
         LabelledBlockExpr{ entry_seq, exit_seq }
       );
-      let result = compile_block_expr(b, *body);
+      let result = compile_block_expr(b, body.children.as_slice());
       b.label_stack.pop();
       b.ops.push(Op::Jump(exit_seq));
       set_current_sequence(b, exit_seq);
@@ -241,7 +263,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {
   // Debug
     Command("debug", [v]) => {
       let reg = compile_expr_to_value(b, *v);
-      let sym = to_symbol(b.env.st, b.code, *v);
+      let sym = build_symbol(b, *v);
       b.ops.push(Op::Debug(sym, reg));
       None
     }
@@ -270,18 +292,17 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {
   }
 }
 
-fn compile_block_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {  
+fn compile_block_expr(b : &mut Builder, nodes : &[Node]) -> Option<RegIndex> {  
   let mut r = None;
   let num_locals = b.scoped_locals.len();
-  for &c in node.children {
+  for &c in nodes {
     r = compile_expr(b, c);
   }
   b.scoped_locals.drain(num_locals..).for_each(|_| ());
   r
 }
 
-/// Compile basic imperative language into bytecode
-pub fn compile_function(env: &Env, code : &str, root : Node) -> BytecodeFunction {
+fn compile_function(env: &Env, code : &str, args : &[Node], body : &[Node]) -> BytecodeFunction {
   let mut b = Builder {
     args: 0,
     locals: vec![],
@@ -296,18 +317,11 @@ pub fn compile_function(env: &Env, code : &str, root : Node) -> BytecodeFunction
     env,
     arg_values: vec![],
   };
-  let body;
-  if let Command("fun", [arg_nodes, body_node]) = node_shape(&root, code) {
-    body = *body_node;
-    b.args = arg_nodes.children.len();
-    for &arg in arg_nodes.children {
-      let name = to_symbol(env.st, code, arg);
-      let reg = next_reg(&mut b);
-      add_local(&mut b, name, reg);
-    }
-  }
-  else {
-    panic!("expected function")
+  b.args = args.len();
+  for &arg in args {
+    let name = build_symbol(&mut b, arg);
+    let reg = next_reg(&mut b);
+    add_local(&mut b, name, reg);
   }
   // start a sequence
   let entry_seq = create_sequence(&mut b, "entry");
@@ -317,7 +331,14 @@ pub fn compile_function(env: &Env, code : &str, root : Node) -> BytecodeFunction
     b.ops.push(Op::SetReturn(r));
   }
   b.ops.push(Op::Return);
-  complete_function(b)
+  let f = complete_function(b);
+  println!("{}", f);
+  f
+}
+
+/// Compile basic imperative language into bytecode
+pub fn compile_expr_to_function(env: &Env, code : &str, root : Node) -> BytecodeFunction {
+  compile_function(env, code, &[], &[root])
 }
 
 fn function_call(b : &mut Builder, node : Node) -> RegIndex {
@@ -416,4 +437,35 @@ fn compile_list_expr(b : &mut Builder, node : Node) -> RegIndex {
   else {
     compile_function_call(b, node.children.as_slice(), false)
   }
+}
+
+/// TODO: this is long-winded. replace it with an in-language macro!
+fn def_macro(b : &mut Builder, def_name : Node, value : Node) {
+  use Expr::*;
+  // evaluate the expression
+  let val_reg = compile_expr_to_value(b, value);
+  // call env insert
+  let env = {
+    let env = to_symbol(b.env.st, "env");
+    let r = next_reg(b);
+    b.ops.push(Op::Expr(r, Def(env)));
+    r
+  };
+  let def_sym = {
+    let def = build_symbol(b, def_name).as_u64();
+    let r = next_reg(b);
+    b.ops.push(Op::Expr(r, LiteralU64(def)));
+    r
+  };
+  let f = {
+    let env_insert = to_symbol(b.env.st, "env_insert");
+    let f = next_reg(b);
+    b.ops.push(Op::Expr(f, Def(env_insert)));
+    f
+  };
+  b.ops.push(Op::Arg{index: 0, value: env});
+  b.ops.push(Op::Arg{index: 1, value: def_sym});
+  b.ops.push(Op::Arg{index: 3, value: val_reg});
+  let r = next_reg(b);
+  b.ops.push(Op::Expr(r, InvokeC(f, 3)));
 }

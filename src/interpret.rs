@@ -1,11 +1,9 @@
 
-use crate::{symbols, parse, bytecode, env, ffi};
+use crate::{symbols, parse, bytecode, env, ffi, compile};
 
 use env::Env;
 use symbols::{to_symbol, SymbolTable, Symbol};
-use parse::{
-  Node, code_segment, node_shape, NodeShape::Command
-};
+use parse::Node;
 use bytecode::{
   BytecodeFunction, Op, Expr, RegIndex, BinOp,
 };
@@ -29,7 +27,7 @@ pub extern "C" fn print_symbol(sym : Symbol) {
   println!("symbol: {}", sym)
 }
 
-pub type CompileFunction = fn(env : &Env, code : &str, fun : Node) -> BytecodeFunction;
+pub type CompileExpression = fn(env : &Env, code : &str, fun : Node) -> BytecodeFunction;
 
 fn new_env(st : SymbolTable) -> Box<Env> {
   let env_ptr = Box::into_raw(Box::new(Env {
@@ -45,28 +43,28 @@ fn new_env(st : SymbolTable) -> Box<Env> {
   env
 }
 
-pub fn interpret(st : SymbolTable, n : &Node, code : &str, f : CompileFunction) {
+pub fn interpret(st : SymbolTable, n : &Node, code : &str) {
   let mut env = new_env(st);
-
+  let mut stack = [0 ; 2048];
+  let mut shadow_stack = vec![];
   for &c in n.children {
-    if let Command("def", [name, value]) = node_shape(&c, code) {
-      let name = code_segment(code, *name);
-      let function = f(&env, code, *value);
-      // TODO: add debug flag to enable this
-      // println!("function {}:", name);
-      // println!("{}", function);
-      let value =
-        Box::into_raw(Box::new(function)) as u64;
-      env.values.insert(to_symbol(st, name), value);
-    }
+    let f = compile::compile_expr_to_function(&env, code, c);
+    shadow_stack.clear();
+    shadow_stack.push(
+      Frame {
+        pc: 0, sbp: 0,
+        f: (&f) as *const BytecodeFunction,
+        return_addr: 0,
+      }
+    );
+    interpreter_loop(&mut stack, &mut shadow_stack, &mut env);
   }
 
   if let Some(&v) = env.values.get(&to_symbol(st, "main")) {
     let f = v as *const BytecodeFunction;
-    let mut stack = [0 ; 2048];
-    let mut shadow_stack = vec![
-      Frame { pc: 0, sbp: 0, f, return_addr: 0 }
-    ];
+    shadow_stack.clear();
+    shadow_stack.push(
+      Frame { pc: 0, sbp: 0, f, return_addr: 0 });
     interpreter_loop(&mut stack, &mut shadow_stack, &mut env);
   }
   else {
@@ -201,11 +199,11 @@ fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &m
   shadow_stack.push(frame);
 }
 
-pub fn run_file(path : impl AsRef<Path>, f : CompileFunction) {
+pub fn run_file(path : impl AsRef<Path>) {
   let code =
     fs::read_to_string(path)
     .expect("Something went wrong reading the file");
   let st = symbols::symbol_table();
   let ast = parse::parse(&code);
-  interpret(st, &ast, &code, f);
+  interpret(st, &ast, &code);
 }

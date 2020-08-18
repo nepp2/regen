@@ -1,8 +1,6 @@
 
 # Immediate TODO
 
-- add env reference to itself
-- add "map_insert" function
 - files are executed line by line
 - def is (temporarily) a special macro
 

@@ -16,8 +16,6 @@ mod test;
 // #[cfg(test)]
 // #[macro_use] extern crate rusty_fork;
 
-use interpret::run_file;
-
 fn main() {
-  run_file("examples/scratchpad.gen", compile::compile_function);
+  interpret::run_file("examples/scratchpad.gen");
 }

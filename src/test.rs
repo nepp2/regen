@@ -1,6 +1,5 @@
 
-use crate::{ compile, bytecode, interpret };
-use interpret::run_file;
+use crate::interpret::run_file;
 
 use std::fs;
 
@@ -16,13 +15,13 @@ use std::fs;
         x.path().extension() == Some(std::ffi::OsStr::new("gen"))
       );
     for f in tests {
-      run_file(f.path(), bytecode::read_bytecode);
+      run_file(f.path());
     }
   }
   
   #[test]
   fn test_milestone_1() {
-    run_file("examples/milestone1_concise.gen", compile::compile_function);
+    run_file("examples/milestone1_concise.gen");
   }
     
 //}
