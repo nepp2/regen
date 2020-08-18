@@ -40,6 +40,11 @@ fn new_env(st : SymbolTable) -> Box<Env> {
   env.values.insert(to_symbol(st, "env_insert"), env_insert as u64);
   env.values.insert(to_symbol(st, "env_get"), env_get as u64);
   env.values.insert(to_symbol(st, "print_symbol"), print_symbol as u64);
+
+  for (k, v) in env.values.iter() {
+    println!("{} value: {}, pointer: {}", *k, *v, v as *const u64 as u64)
+  }
+
   env
 }
 
