@@ -8,5 +8,5 @@
 
 (debug foo)
 (debug bar)
-(debug foo + bar) ;; should print 9
+(debug (+ foo bar)) ;; should print 9
 
