@@ -331,9 +331,7 @@ fn compile_function(env: &Env, code : &str, args : &[Node], body : &[Node]) -> B
     b.ops.push(Op::SetReturn(r));
   }
   b.ops.push(Op::Return);
-  let f = complete_function(b);
-  println!("{}", f);
-  f
+  complete_function(b)
 }
 
 /// Compile basic imperative language into bytecode
@@ -465,7 +463,7 @@ fn def_macro(b : &mut Builder, def_name : Node, value : Node) {
   };
   b.ops.push(Op::Arg{index: 0, value: env});
   b.ops.push(Op::Arg{index: 1, value: def_sym});
-  b.ops.push(Op::Arg{index: 3, value: val_reg});
+  b.ops.push(Op::Arg{index: 2, value: val_reg});
   let r = next_reg(b);
   b.ops.push(Op::Expr(r, InvokeC(f, 3)));
 }

@@ -53,11 +53,11 @@ impl fmt::Display for Expr {
       Expr::Def(sym) =>
         write!(f, "{}", sym)?,
       Expr::BinOp(op, a, b) =>
-        write!(f, "reg[{}] {} reg[{}]", a.0, op, b.0)?,
+        write!(f, "{} {} {}", a, op, b)?,
       Expr::Invoke(reg) =>
-        write!(f, "Invoke reg[{}]", reg.0)?,
+        write!(f, "Invoke {}", reg)?,
       Expr::InvokeC(reg, args) =>
-        write!(f, "InvokeC reg[{}] ({} args)", reg.0, args)?,
+        write!(f, "InvokeC {} ({} args)", reg, args)?,
     }
     Ok(())
   }
@@ -69,18 +69,18 @@ impl fmt::Display for Op {
       Op::Expr(reg, expr) =>
         write!(f, "let {} = {}", reg, expr)?,
       Op::Set(a, b) =>
-        write!(f, "set reg[{}] = reg[{}]", a, b)?,
+        write!(f, "set {} = {}", a, b)?,
       Op::SetReturn(v) =>
-        write!(f, "set RetVal = reg[{}]", v)?,
+        write!(f, "set RetVal = {}", v)?,
       Op::CJump{ cond, then_seq, else_seq } =>
         write!(f, "CJump {} to seq[{}] else seq[{}]",
           cond, then_seq.0, else_seq.0)?,
       Op::Debug(sym, reg) =>
-        write!(f, "Debug {}: reg[{}]", sym, reg)?,
+        write!(f, "Debug {}: {}", sym, reg)?,
       Op::Jump(seq) =>
         write!(f, "Jump to seq[{}]", seq.0)?,
       Op::Arg{ index, value } =>
-        write!(f, "set Arg {} = reg[{}]", index, value)?,
+        write!(f, "set Arg {} = {}", index, value)?,
       Op::Return =>
         write!(f, "Return")?,
     }
