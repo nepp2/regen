@@ -1,18 +1,19 @@
 
 # Immediate TODO
 
-- files are executed line by line
-- def is (temporarily) a special macro
+- Plan out a vertical slice in terms of milestones
+  - rethink milestone 3
+  - what are the milestones leading to?
+  - when is type checking required?
+  - when are structs required?
 
 # Future
 
-- Figure out vertical slice
-  - As a sequence of milestones 
-- eval function
-- struct support
+- eval function?
+- struct support?
   - layout based on pointer alignment
-- macro support
-- pointer dereferencing
+- macro support?
+- pointer dereferencing?
 
 # Questions
 
