@@ -172,6 +172,12 @@ fn compile_expr_to_value(b : &mut Builder, node : Node) -> RegIndex {
   compile_expr(b, node).expect("expected value, found none")
 }
 
+fn compile_store(b : &mut Builder, alignment : Alignment, pointer : Node, value : Node) {
+  let pointer = compile_expr_to_value(b, pointer);
+  let value = compile_expr_to_value(b, value);
+  b.ops.push(Op::Store{ alignment, pointer, value });
+}
+
 fn compile_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {
   match node_shape(&node, b.code) {
     // Return
@@ -216,6 +222,17 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<RegIndex> {
       b.ops.push(Op::Set(var_reg, val_reg));
       None
     }
+    // store var
+    Command("store", [pointer, value]) =>
+      { compile_store(b, Alignment::U64, *pointer, *value); None }
+    Command("store_64", [pointer, value]) =>
+      { compile_store(b, Alignment::U64, *pointer, *value); None }
+    Command("store_32", [pointer, value]) =>
+      { compile_store(b, Alignment::U32, *pointer, *value); None }
+    Command("store_16", [pointer, value]) =>
+      { compile_store(b, Alignment::U16, *pointer, *value); None }
+    Command("store_8", [pointer, value]) =>
+      { compile_store(b, Alignment::U8, *pointer, *value); None }
     // let
     Command("let", [var_name, value]) => {
       // evaluate the expression
@@ -406,27 +423,43 @@ fn compile_function_call(b : &mut Builder, list : &[Node], ccall : bool) -> RegI
   return push_expr(b, e);
 }
 
+fn str_to_operator(s : &str) -> Option<Operator> {
+  use Operator::*;
+  let op = match s {
+    "+" => Add,
+    "-" => Sub,
+    "*" => Mul,
+    "/" => Div,
+    "%" => Rem,
+    "=" => Eq,
+    "<" => LT,
+    ">" => GT,
+    "<=" => LTE,
+    ">=" => GTE,
+    "load" => Load(Alignment::U64),
+    "load_64" => Load(Alignment::U64),
+    "load_32" => Load(Alignment::U32),
+    "load_16" => Load(Alignment::U16),
+    "load_8" => Load(Alignment::U8),
+    _ => return None,
+  };
+  Some(op)
+}
+
 fn compile_list_expr(b : &mut Builder, node : Node) -> RegIndex {
   let head = code_segment(b.code, node.children[0]);
   let tail = &node.children[1..];
   // operator
-  let op : Option<BinOp> = match head {
-    "+" => Some(BinOp::Add),
-    "-" => Some(BinOp::Sub),
-    "*" => Some(BinOp::Mul),
-    "/" => Some(BinOp::Div),
-    "%" => Some(BinOp::Rem),
-    "=" => Some(BinOp::Eq),
-    "<" => Some(BinOp::LT),
-    ">" => Some(BinOp::GT),
-    "<=" => Some(BinOp::LTE),
-    ">=" => Some(BinOp::GTE),
-    _ => None,
-  };
+  let op = str_to_operator(head);
   if let (Some(op), [v1, v2]) = (op, tail) {
     let v1 = compile_expr_to_value(b, *v1);
     let v2 = compile_expr_to_value(b, *v2);
-    let e = Expr::BinOp(op, v1, v2);
+    let e = Expr::BinaryOp(op, v1, v2);
+    push_expr(b, e)
+  }
+  else if let (Some(op), [v1]) = (op, tail) {
+    let v1 = compile_expr_to_value(b, *v1);
+    let e = Expr::UnaryOp(op, v1);
     push_expr(b, e)
   }
   else if head == "ccall" {

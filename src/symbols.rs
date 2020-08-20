@@ -11,6 +11,10 @@ impl Symbol {
   pub fn as_u64(self) -> u64 {
     self.0 as u64
   }
+
+  pub fn as_str(&self) -> &str {
+    unsafe { &**self.0 }
+  }
 }
 
 #[derive(Default)]
@@ -25,7 +29,7 @@ pub struct SymbolTable(*mut Symbols);
 impl fmt::Debug for Symbol {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     // TODO
-    write!(f, "Symbol({})", unsafe { &**self.0} )
+    write!(f, "Symbol({})", unsafe { &**self.0 } )
   }
 }
 

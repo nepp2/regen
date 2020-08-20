@@ -13,17 +13,25 @@ pub struct SeqenceId(pub usize);
 pub struct RegIndex(pub usize);
 
 #[derive(Copy, Clone, Debug)]
-pub enum BinOp {
-  Add, Sub, Mul, Div, Rem, Eq, LT, GT, LTE, GTE
+pub enum Operator {
+  Add, Sub, Mul, Div, Rem, Eq, LT, GT, LTE, GTE,
+  Load(Alignment),
+  Ref,
 }
 
 #[derive(Copy, Clone, Debug)]
 pub enum Expr {
   Def(Symbol),
   LiteralU64(u64),
-  BinOp(BinOp, RegIndex, RegIndex),
+  BinaryOp(Operator, RegIndex, RegIndex),
+  UnaryOp(Operator, RegIndex),
   Invoke(RegIndex),
   InvokeC(RegIndex, usize),
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum Alignment {
+  U8, U16, U32, U64,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -35,6 +43,7 @@ pub enum Op {
   Debug(Symbol, RegIndex),
   Jump(SeqenceId),
   Arg{ index: u8, value: RegIndex },
+  Store{ alignment : Alignment, pointer : RegIndex, value : RegIndex },
   Return,
 }
 

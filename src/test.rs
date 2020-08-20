@@ -21,11 +21,12 @@ use std::fs;
   
   #[test]
   fn test_milestone_1() {
-    run_file("examples/milestone1_concise.gen");
+    run_file("examples/milestones/1_concise.gen");
   }
    
   #[test]
   fn test_milestone_2() {
-    run_file("examples/milestone2_expose_env.gen");
+    run_file("examples/milestones/2_expose_env.gen");
   }
+
 //}

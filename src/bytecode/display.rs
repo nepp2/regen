@@ -27,9 +27,9 @@ impl fmt::Display for BytecodeFunction {
   }
 }
   
-impl fmt::Display for BinOp {
+impl fmt::Display for Operator {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    use BinOp::*;
+    use Operator::*;
     match self {
       Add => write!(f, "+"),
       Sub => write!(f, "-"),
@@ -41,6 +41,8 @@ impl fmt::Display for BinOp {
       GT => write!(f, ">"),
       LTE => write!(f, "<="),
       GTE => write!(f, ">="),
+      Load(a) => write!(f, "load_{}", a),
+      Ref => write!(f, "ref"),
     }
   }
 }
@@ -52,14 +54,25 @@ impl fmt::Display for Expr {
         write!(f, "{}", v)?,
       Expr::Def(sym) =>
         write!(f, "{}", sym)?,
-      Expr::BinOp(op, a, b) =>
+      Expr::BinaryOp(op, a, b) =>
         write!(f, "{} {} {}", a, op, b)?,
+      Expr::UnaryOp(op, a) =>
+        write!(f, "{} {}", op, a)?,
       Expr::Invoke(reg) =>
         write!(f, "Invoke {}", reg)?,
       Expr::InvokeC(reg, args) =>
         write!(f, "InvokeC {} ({} args)", reg, args)?,
     }
     Ok(())
+  }
+}
+
+impl fmt::Display for Alignment {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    use Alignment::*;
+    write!(f, "{}", match self {
+      U64 => "u64", U32 => "u32", U16 => "u16", U8 => "u8", 
+    })
   }
 }
 
@@ -70,6 +83,8 @@ impl fmt::Display for Op {
         write!(f, "let {} = {}", reg, expr)?,
       Op::Set(a, b) =>
         write!(f, "set {} = {}", a, b)?,
+      Op::Store{ alignment, pointer, value } =>
+        write!(f, "mem[{}] = {} ({})", pointer, value, alignment)?,
       Op::SetReturn(v) =>
         write!(f, "set RetVal = {}", v)?,
       Op::CJump{ cond, then_seq, else_seq } =>

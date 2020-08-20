@@ -1,12 +1,76 @@
 
+(def SDL_INIT_VIDEO 32)
+(def SDL_QUIT 256)
+(def SDL_WINDOWPOS_UNDEFINED 536805376)
+(def SDL_WINDOW_SHOWN 4)
+(def SDL_RENDERER_ACCELERATED 2)
+
+(def u64_max 18446744073709551615)
+
+(def sdl2
+  (ccall load_library (sym SDL2)))
+
+;; fun(u32) => i32
+(def sdl_init
+  (ccall load_library_symbol sdl2 (sym SDL_Init)))
+
+;; fun(title: ptr(u8), x : i32, y : i32, w : i32, h : i32, flags : u32) => sdl_window_handle
+(def sdl_create_window
+  (ccall load_library_symbol sdl2 (sym SDL_CreateWindow)))
+
+;; fun(sdl_window_handle)
+(def sdl_destroy_window
+  (ccall load_library_symbol sdl2 (sym SDL_DestroyWindow)))
+
+;; fun(event : ptr(sdl_event)) => i32
+(def sdl_poll_event
+  (ccall load_library_symbol sdl2 (sym SDL_PollEvent)))
+
+;; fun(window : sdl_window_handle, index : i32, flags : u32) => sdl_renderer_handle
+(def sdl_create_renderer
+  (ccall load_library_symbol sdl2 (sym SDL_CreateRenderer)))
+
+;; fun(renderer : sdl_renderer_handle) => i32
+(def sdl_clear
+  (ccall load_library_symbol sdl2 (sym SDL_RenderClear)))
+
+;; fun(renderer : sdl_renderer_handle, r : u8, g : u8, b : u8, a : u8) => i32
+(def sdl_set_draw_color
+  (ccall load_library_symbol sdl2 (sym SDL_SetRenderDrawColor)))
+
+;; fun(renderer : sdl_renderer_handle)
+(def sdl_present
+  (ccall load_library_symbol sdl2 (sym SDL_RenderPresent)))
+
+(def title (block (
+  (let p (ccall malloc 4))
+  (store_8 p 65)
+  (store_8 (+ p 1) 65)
+  (store_8 (+ p 2) 65)
+  (store_8 (+ p 3) 0)
+  p
+)))
+
 (def main (fun () (
-
-  (ccall env_insert env (sym bar) 5)
-  (debug (ccall env_get env (sym bar)))
-  (debug bar)
-
-  ;; (let hello (sym hello))
-  ;; (ccall print_symbol hello)
-  ;; (debug hello)
-  ;; (debug _env)
+  (ccall sdl_init SDL_INIT_VIDEO)
+  (let win
+    (ccall sdl_create_window
+      title
+      SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED
+      300 200
+      SDL_WINDOW_SHOWN))
+  (let renderer
+    (ccall sdl_create_renderer win u64_max SDL_RENDERER_ACCELERATED))
+  (let event_ptr (ccall malloc 1000))
+  (block (
+    (if (= 1 (ccall sdl_poll_event event_ptr)) (
+      (if (= (load_32 event_ptr) SDL_QUIT)
+        (break)
+      )
+    ))
+    (ccall sdl_set_draw_color renderer 255 0 0 255)
+    (ccall sdl_clear renderer)
+    (ccall sdl_present renderer)
+    repeat
+  ))
 )))

@@ -1,47 +1,17 @@
 
 use crate::{symbols, parse, bytecode, env, ffi, compile};
 
-use env::Env;
-use symbols::{to_symbol, SymbolTable, Symbol};
+use env::{Env, new_env};
+use symbols::{to_symbol, SymbolTable};
 use parse::Node;
 use bytecode::{
-  BytecodeFunction, Op, Expr, RegIndex, BinOp,
+  BytecodeFunction, Op, Expr, RegIndex, Operator, Alignment,
 };
 
 use std::fs;
 use std::path::Path;
 
-pub extern "C" fn c_add(a : u64, b : u64) -> u64 {
-  a + b
-}
-
-pub extern "C" fn env_insert(env : &mut Env, sym : Symbol, value : u64) {
-  env.values.insert(sym, value);
-}
-
-pub extern "C" fn env_get(env : &Env, sym : Symbol) -> u64 {
-  env.values[&sym]
-}
-
-pub extern "C" fn print_symbol(sym : Symbol) {
-  println!("symbol: {}", sym)
-}
-
 pub type CompileExpression = fn(env : &Env, code : &str, fun : Node) -> BytecodeFunction;
-
-fn new_env(st : SymbolTable) -> Box<Env> {
-  let env_ptr = Box::into_raw(Box::new(Env {
-    values: Default::default(),
-    st
-  }));
-  let mut env = unsafe { Box::from_raw(env_ptr) };
-  env.values.insert(to_symbol(st, "c_add"), c_add as u64);
-  env.values.insert(to_symbol(st, "env"), env_ptr as u64);
-  env.values.insert(to_symbol(st, "env_insert"), env_insert as u64);
-  env.values.insert(to_symbol(st, "env_get"), env_get as u64);
-  env.values.insert(to_symbol(st, "print_symbol"), print_symbol as u64);
-  env
-}
 
 pub fn interpret(st : SymbolTable, n : &Node, code : &str) {
   let mut env = new_env(st);
@@ -91,6 +61,7 @@ fn reg(sbp : usize, i : RegIndex) -> usize {
 }
 
 fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &mut Env) {
+  use Alignment::*;
   let mut frame = shadow_stack.pop().unwrap();
   'outer: loop {
     let fun = unsafe { &*frame.f };
@@ -99,6 +70,7 @@ fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &m
       let op = fun.ops[frame.pc];
       match op {
         Op::Expr(r, e) => {
+          use Operator::*;
           let r = reg(sbp, r);
           match e {
             Expr::Def(sym) =>
@@ -111,20 +83,35 @@ fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &m
             Expr::LiteralU64(val) => {
               stack[r] = val as u64;
             }
-            Expr::BinOp(op, a, b) => {
+            Expr::BinaryOp(op, a, b) => {
               let a = stack[reg(sbp, a)];
               let b  = stack[reg(sbp, b)];
               stack[r] = match op {
-               BinOp::Add => a + b,
-               BinOp::Sub => a - b,
-               BinOp::Mul => a * b,
-               BinOp::Div => a / b,
-               BinOp::Rem => a % b,
-               BinOp::Eq => (a == b) as u64,
-               BinOp::LT => (a < b) as u64,
-               BinOp::GT => (a > b) as u64,
-               BinOp::LTE => (a <= b) as u64,
-               BinOp::GTE => (a >= b) as u64,
+               Add => a + b,
+               Sub => a - b,
+               Mul => a * b,
+               Div => a / b,
+               Rem => a % b,
+               Eq => (a == b) as u64,
+               LT => (a < b) as u64,
+               GT => (a > b) as u64,
+               LTE => (a <= b) as u64,
+               GTE => (a >= b) as u64,
+               _ => panic!("op not binary"),
+              };
+            }
+            Expr::UnaryOp(Ref, a) => {
+              stack[r] = ((&stack[reg(sbp, a)]) as *const u64) as u64;
+            }
+            Expr::UnaryOp(op, a) => {
+              let a = stack[reg(sbp, a)];
+              stack[r] = match op {
+                Sub => panic!("signed types not yet supported"),
+                Load(U64) => unsafe { *(a as *const u64) },
+                Load(U32) => unsafe { *(a as *const u32) as u64 },
+                Load(U16) => unsafe { *(a as *const u16) as u64 },
+                Load(U8) => unsafe { *(a as *const u8) as u64 },
+                _ => panic!("op not unary"),
               };
             }
             Expr::Invoke(f) => {
@@ -157,6 +144,16 @@ fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &m
         }
         Op::Set(var, val) => {
           stack[reg(sbp, var)] = stack[reg(sbp, val)];
+        }
+        Op::Store{ alignment, pointer, value } => {
+          let p = stack[reg(sbp, pointer)];
+          let v = stack[reg(sbp, value)];
+          match alignment {
+            U64 => unsafe{ *(p as *mut u64) = v},
+            U32 => unsafe{ *(p as *mut u32) = v as u32},
+            U16 => unsafe{ *(p as *mut u16) = v as u16},
+            U8 => unsafe{ *(p as *mut u8) = v as u8},
+          }
         }
         Op::SetReturn(val) => {
           stack[frame.return_addr] = stack[reg(sbp, val)];
