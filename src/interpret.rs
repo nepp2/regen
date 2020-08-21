@@ -5,7 +5,7 @@ use env::{Env, new_env};
 use symbols::{to_symbol, SymbolTable};
 use parse::Node;
 use bytecode::{
-  BytecodeFunction, Op, Expr, RegIndex, Operator, Alignment,
+  BytecodeFunction, Op, Expr, Register, Operator, Alignment,
 };
 
 use std::fs;
@@ -56,8 +56,8 @@ struct Frame {
   return_addr : usize,
 }
 
-fn reg(sbp : usize, i : RegIndex) -> usize {
-  i.0 as usize + sbp
+fn reg(sbp : usize, i : Register) -> usize {
+  i.word_offset + sbp
 }
 
 fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &mut Env) {
@@ -124,7 +124,7 @@ fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &m
               // set the new frame
               frame = Frame{
                 pc: 0,
-                sbp: sbp + fun.registers,
+                sbp: sbp + fun.frame_words,
                 f,
                 return_addr: r,
               };
@@ -133,7 +133,7 @@ fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &m
             Expr::InvokeC(f, arg_count) => {
               let fptr = stack[reg(sbp, f)] as *const ();
               let args = {
-                let offset = sbp + fun.registers;
+                let offset = sbp + fun.frame_words;
                 &stack[offset..(offset + arg_count)]
               };
               stack[r] = unsafe {
@@ -173,7 +173,7 @@ fn interpreter_loop(stack : &mut [u64], shadow_stack : &mut Vec<Frame>, env : &m
           continue;
         }
         Op::Arg{ index, value } => {
-          let index = frame.sbp + fun.registers + (index as usize);
+          let index = frame.sbp + fun.frame_words + (index as usize);
           stack[index] = stack[reg(sbp, value)];
 
         }

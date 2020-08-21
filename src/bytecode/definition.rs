@@ -8,9 +8,11 @@ use symbols::Symbol;
 #[derive(Copy, Clone, Debug)]
 pub struct SeqenceId(pub usize);
 
-/// Register local to stack frame, indexed from 0 upward
+/// Identifies a register that is local to a stack frame
 #[derive(Copy, Clone, Debug)]
-pub struct RegIndex(pub usize);
+pub struct Register {
+  pub word_offset : usize
+}
 
 #[derive(Copy, Clone, Debug)]
 pub enum Operator {
@@ -23,10 +25,10 @@ pub enum Operator {
 pub enum Expr {
   Def(Symbol),
   LiteralU64(u64),
-  BinaryOp(Operator, RegIndex, RegIndex),
-  UnaryOp(Operator, RegIndex),
-  Invoke(RegIndex),
-  InvokeC(RegIndex, usize),
+  BinaryOp(Operator, Register, Register),
+  UnaryOp(Operator, Register),
+  Invoke(Register),
+  InvokeC(Register, usize),
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -36,14 +38,14 @@ pub enum Alignment {
 
 #[derive(Copy, Clone, Debug)]
 pub enum Op {
-  Expr(RegIndex, Expr),
-  Set(RegIndex, RegIndex),
-  SetReturn(RegIndex),
-  CJump{ cond: RegIndex, then_seq: SeqenceId, else_seq: SeqenceId },
-  Debug(Symbol, RegIndex),
+  Expr(Register, Expr),
+  Set(Register, Register),
+  SetReturn(Register),
+  CJump{ cond: Register, then_seq: SeqenceId, else_seq: SeqenceId },
+  Debug(Symbol, Register),
   Jump(SeqenceId),
-  Arg{ index: u8, value: RegIndex },
-  Store{ alignment : Alignment, pointer : RegIndex, value : RegIndex },
+  Arg{ index: u8, value: Register },
+  Store{ alignment : Alignment, pointer : Register, value : Register },
   Return,
 }
 
@@ -59,7 +61,7 @@ pub struct SequenceInfo {
 #[derive(Copy, Clone)]
 pub struct LocalVar {
   pub name : Symbol,
-  pub reg : RegIndex,
+  pub reg : Register,
 }
 
 pub struct BytecodeFunction {
@@ -67,5 +69,5 @@ pub struct BytecodeFunction {
   pub ops : Vec<Op>,
   pub args : usize,
   pub locals : Vec<LocalVar>,
-  pub registers : usize,
+  pub frame_words : usize,
 }

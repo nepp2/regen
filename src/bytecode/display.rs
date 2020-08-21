@@ -15,7 +15,7 @@ impl fmt::Display for BytecodeFunction {
       write!(f, " {} ({}),", l.name, l.reg)?;
     }
     writeln!(f)?;
-    writeln!(f, "Registers: {}", self.registers)?;
+    writeln!(f, "Registers: {}", self.frame_words)?;
     for (i, b) in self.sequence_info.iter().enumerate() {
       writeln!(f, "Sequence {} ({}):", i, b.name)?;
       let end = b.start_op + b.num_ops;
@@ -103,8 +103,8 @@ impl fmt::Display for Op {
   }
 }
 
-impl fmt::Display for RegIndex {
+impl fmt::Display for Register {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "${}", self.0)
+    write!(f, "${}", self.word_offset)
   }
 }

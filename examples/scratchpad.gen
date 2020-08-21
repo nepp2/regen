@@ -43,12 +43,16 @@
   (ccall load_library_symbol sdl2 (sym SDL_RenderPresent)))
 
 ;; x y w h
-(def sdl_rect
-  (struct i32 i32 i32 i32))
+;; (def sdl_rect
+;;   (struct i32 i32 i32 i32))
 
 ;; fun(renderer : sdl_renderer_handle, rect : ptr(sdl_rect))
 (def sdl_draw_rect
-  (ccall load_library_symbol sdl2 (sym SDL_RenderDrawRect))
+  (ccall load_library_symbol sdl2 (sym SDL_RenderDrawRect)))
+
+;; fun(renderer : sdl_renderer_handle, rect : ptr(sdl_rect))
+(def sdl_fill_rect
+  (ccall load_library_symbol sdl2 (sym SDL_RenderFillRect)))
 
 (def title (block (
   (let p (ccall malloc 4))
@@ -65,7 +69,7 @@
     (ccall sdl_create_window
       title
       SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED
-      300 200
+      800 600
       SDL_WINDOW_SHOWN))
   (let renderer
     (ccall sdl_create_renderer win u64_max SDL_RENDERER_ACCELERATED))
@@ -76,11 +80,20 @@
         (break)
       )
     ))
-    (ccall sdl_set_draw_color renderer 255 255 255 255)
+    (ccall sdl_set_draw_color renderer 0 0 0 0)
     (ccall sdl_clear renderer)
     (ccall sdl_set_draw_color renderer 255 0 0 255)
-    (let r (init sdl_rect 10 10 30 20))
-    (ccall sdl_draw_rect renderer r)
+
+    (let r (block (
+      (let p (alloca 16))
+      (store_32 p 50)
+      (store_32 (+ p 4) 50)
+      (store_32 (+ p 8) 300)
+      (store_32 (+ p 12) 200)
+      p
+    )))
+
+    (ccall sdl_fill_rect renderer r)
     (ccall sdl_present renderer)
     repeat
   ))
