@@ -42,14 +42,6 @@
 (def sdl_present
   (ccall load_library_symbol sdl2 (sym SDL_RenderPresent)))
 
-;; x y w h
-(def sdl_rect
-  (struct i32 i32 i32 i32))
-
-;; fun(renderer : sdl_renderer_handle, rect : ptr(sdl_rect))
-(def sdl_draw_rect
-  (ccall load_library_symbol sdl2 (sym SDL_RenderDrawRect))
-
 (def title (block (
   (let p (ccall malloc 4))
   (store_8 p 65)
@@ -76,11 +68,8 @@
         (break)
       )
     ))
-    (ccall sdl_set_draw_color renderer 255 255 255 255)
-    (ccall sdl_clear renderer)
     (ccall sdl_set_draw_color renderer 255 0 0 255)
-    (let r (init sdl_rect 10 10 30 20))
-    (ccall sdl_draw_rect renderer r)
+    (ccall sdl_clear renderer)
     (ccall sdl_present renderer)
     repeat
   ))

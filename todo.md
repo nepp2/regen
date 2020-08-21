@@ -1,11 +1,11 @@
 
 # Immediate TODO
 
-- Plan out a vertical slice in terms of milestones
-  - rethink milestone 3
-  - what are the milestones leading to?
-  - when is type checking required?
-  - when are structs required?
+- struct support
+  - stack allocate arbitrary sized blocks
+  - return pointer to start of block
+  - set fields crudely using pointer maths
+  - make it pretty using macros
 
 # Future
 
