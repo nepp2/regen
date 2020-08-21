@@ -311,9 +311,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Register> {
     Command("alloca", [v]) => {
       if let Atom(s) = node_shape(v, b.code) {
         if let Ok(v) = s.parse::<usize>() {
-          let reg = alloca(b, v);
-          let e = Expr::UnaryOp(Operator::Ref, reg);
-          return Some(push_expr(b, e));
+          return Some(alloca(b, v));
         }
       }
       panic!("expected literal integer");
@@ -457,6 +455,7 @@ fn str_to_operator(s : &str) -> Option<Operator> {
     "load_32" => Load(Alignment::U32),
     "load_16" => Load(Alignment::U16),
     "load_8" => Load(Alignment::U8),
+    "ref" => Ref,
     _ => return None,
   };
   Some(op)

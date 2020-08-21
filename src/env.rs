@@ -14,6 +14,18 @@ pub extern "C" fn c_add(a : u64, b : u64) -> u64 {
   a + b
 }
 
+#[repr(C)]
+pub struct TestRect {
+  x : u32,
+  y : u32,
+  w : u32,
+  h : u32,
+}
+
+pub extern "C" fn test_struct(r : TestRect) -> bool {
+  r.x == 1 && r.y == 2 && r.w == 3 && r.h == 4
+}
+
 extern {
   pub fn malloc(size: usize) -> *mut u8;
   pub fn free(ptr: *mut u8);
@@ -63,6 +75,7 @@ pub fn new_env(st : SymbolTable) -> Box<Env> {
   }));
   let mut env = unsafe { Box::from_raw(env_ptr) };
   env.values.insert(to_symbol(st, "c_add"), c_add as u64);
+  env.values.insert(to_symbol(st, "test_struct"), test_struct as u64);
   env.values.insert(to_symbol(st, "malloc"), malloc as u64);
   env.values.insert(to_symbol(st, "free"), free as u64);
   env.values.insert(to_symbol(st, "memcpy"), memcpy as u64);
