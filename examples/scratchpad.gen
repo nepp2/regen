@@ -84,7 +84,7 @@
     (ccall sdl_clear renderer)
     (ccall sdl_set_draw_color renderer 255 0 0 255)
 
-    (let r (block (
+    (let rect (block (
       (let p (alloca 16))
       (store_32 p 50)
       (store_32 (+ p 4) 50)
@@ -93,7 +93,7 @@
       p
     )))
 
-    (ccall sdl_fill_rect renderer r)
+    (ccall sdl_fill_rect renderer rect)
     (ccall sdl_present renderer)
     repeat
   ))
