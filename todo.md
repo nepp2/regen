@@ -7,6 +7,12 @@
   - set fields crudely using pointer maths
   - make it pretty using macros
 
+- figure out how to unpick the bootstrapping of structs, macros and types
+
+- make it possible to store a struct in a register (and return one from a function)
+  - requires knowing the type of a def?
+  - means functions must have known return type?
+
 # Future
 
 - eval function?
