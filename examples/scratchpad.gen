@@ -70,15 +70,16 @@
 ;; (def rect
 ;;   (struct i32 i32 i32 i32))
 
+(def rect_init (fun (p x y w h) (
+  (store_32 p x)
+  (store_32 (+ p 4) y)
+  (store_32 (+ p 8) w)
+  (store_32 (+ p 12) h)
+)))
+
 (def main (fun () (
-  (let rect (block (
-    (let p (ref (alloca 16)))
-    (store_32 p 1)
-    (store_32 (+ p 4) 2)
-    (store_32 (+ p 8) 3)
-    (store_32 (+ p 12) 4)
-    p
-  )))
+  (let rect (ref (alloca 16)))
+  (rect_init rect 1 2 3 4)
 
   (let rect_type (block (
     (let fields (array_new 4))
