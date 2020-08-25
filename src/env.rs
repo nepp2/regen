@@ -1,3 +1,4 @@
+use crate::types::Type;
 use crate::symbols::{Symbol, SymbolTable, to_symbol};
 use std::collections::HashMap;
 use std::path::Path;
@@ -6,8 +7,19 @@ use libloading::{Library, Symbol as LibSymbol};
 
 /// Environment for interpreter
 pub struct Env {
-  pub values : HashMap<Symbol, u64>,
+  pub values : HashMap<Symbol, EnvVal>,
   pub st : SymbolTable,
+}
+
+impl Env {
+  pub fn insert() {
+    
+  }
+}
+
+pub struct EnvVal {
+  pub val : u64,
+  pub type_tag : Type,
 }
 
 pub extern "C" fn c_add(a : u64, b : u64) -> u64 {
@@ -68,7 +80,14 @@ pub extern "C" fn load_library_symbol(lib : &Library, symbol : Symbol) -> *const
   }
 }
 
-pub fn new_env(st : SymbolTable) -> Box<Env> {
+struct Primitives {
+  u64_tag : Type,
+  u32_tag : Type,
+  u16_tag : Type,
+  u8_tag : Type,
+}
+
+pub fn new_env(st : SymbolTable, p : &Primitives) -> Box<Env> {
   let env_ptr = Box::into_raw(Box::new(Env {
     values: Default::default(),
     st

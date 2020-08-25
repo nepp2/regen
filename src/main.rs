@@ -9,6 +9,7 @@ mod bytecode;
 mod compile;
 mod interpret;
 mod ffi;
+mod types;
 
 #[cfg(test)]
 mod test;

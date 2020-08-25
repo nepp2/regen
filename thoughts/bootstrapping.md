@@ -34,7 +34,7 @@ I want to find a starting point here for bootstrapping in the simplest way possi
 
 ## Possibilities
 
-Define the type struct clumsily using functions
+Define the type struct clumsily using functions.
 
 
 

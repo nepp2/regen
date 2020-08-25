@@ -6,16 +6,21 @@ use std::fmt;
 impl fmt::Display for BytecodeFunction {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "Args:")?;
-    for l in &self.locals.as_slice()[..self.args] {
-      write!(f, " {} ({}),", l.name, l.reg)?;
+    for v in &self.locals.as_slice()[..self.args] {
+      write!(f, " {}", v)?;
     }
     writeln!(f)?;
     write!(f, "Locals:")?;
-    for l in &self.locals.as_slice()[self.args..] {
-      write!(f, " {} ({}),", l.name, l.reg)?;
+    for v in &self.locals.as_slice()[self.args..] {
+      write!(f, " {}", v)?;
     }
     writeln!(f)?;
-    writeln!(f, "Registers: {}", self.frame_words)?;
+    write!(f, "Registers:")?;
+    for r in self.registers.as_slice() {
+      write!(f, " {}", r)?;
+    }
+    writeln!(f)?;
+    writeln!(f, "Frame bytes: {}", self.frame_bytes)?;
     for (i, b) in self.sequence_info.iter().enumerate() {
       writeln!(f, "Sequence {} ({}):", i, b.name)?;
       let end = b.start_op + b.num_ops;
@@ -67,11 +72,11 @@ impl fmt::Display for Expr {
   }
 }
 
-impl fmt::Display for Alignment {
+impl fmt::Display for ByteWidth {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    use Alignment::*;
+    use ByteWidth::*;
     write!(f, "{}", match self {
-      U64 => "u64", U32 => "u32", U16 => "u16", U8 => "u8", 
+      U64 => "64", U32 => "32", U16 => "16", U8 => "8", 
     })
   }
 }
@@ -83,8 +88,8 @@ impl fmt::Display for Op {
         write!(f, "let {} = {}", reg, expr)?,
       Op::Set(a, b) =>
         write!(f, "set {} = {}", a, b)?,
-      Op::Store{ alignment, pointer, value } =>
-        write!(f, "mem[{}] = {} ({})", pointer, value, alignment)?,
+      Op::Store{ byte_width, pointer, value } =>
+        write!(f, "mem[{}] = {} ({})", pointer, value, byte_width)?,
       Op::SetReturn(v) =>
         write!(f, "set RetVal = {}", v)?,
       Op::CJump{ cond, then_seq, else_seq } =>
@@ -103,8 +108,14 @@ impl fmt::Display for Op {
   }
 }
 
-impl fmt::Display for Register {
+impl fmt::Display for Var {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "${}", self.word_offset)
+    write!(f, "${}_{}", self.byte_offset, self.bytes)
+  }
+}
+
+impl fmt::Display for NamedVar {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "${}({})", self.name, self.var)
   }
 }

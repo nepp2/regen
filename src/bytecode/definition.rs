@@ -10,14 +10,15 @@ pub struct SeqenceId(pub usize);
 
 /// Identifies a register that is local to a stack frame
 #[derive(Copy, Clone, Debug)]
-pub struct Register {
-  pub word_offset : usize
+pub struct Var {
+  pub byte_offset : usize,
+  pub bytes : usize,
 }
 
 #[derive(Copy, Clone, Debug)]
 pub enum Operator {
   Add, Sub, Mul, Div, Rem, Eq, LT, GT, LTE, GTE,
-  Load(Alignment),
+  Load(ByteWidth),
   Ref,
 }
 
@@ -25,27 +26,27 @@ pub enum Operator {
 pub enum Expr {
   Def(Symbol),
   LiteralU64(u64),
-  BinaryOp(Operator, Register, Register),
-  UnaryOp(Operator, Register),
-  Invoke(Register),
-  InvokeC(Register, usize),
+  BinaryOp(Operator, Var, Var),
+  UnaryOp(Operator, Var),
+  Invoke(Var),
+  InvokeC(Var, usize),
 }
 
 #[derive(Copy, Clone, Debug)]
-pub enum Alignment {
+pub enum ByteWidth {
   U8, U16, U32, U64,
 }
 
 #[derive(Copy, Clone, Debug)]
 pub enum Op {
-  Expr(Register, Expr),
-  Set(Register, Register),
-  SetReturn(Register),
-  CJump{ cond: Register, then_seq: SeqenceId, else_seq: SeqenceId },
-  Debug(Symbol, Register),
+  Expr(Var, Expr),
+  Set(Var, Var),
+  SetReturn(Var),
+  CJump{ cond: Var, then_seq: SeqenceId, else_seq: SeqenceId },
+  Debug(Symbol, Var),
   Jump(SeqenceId),
-  Arg{ index: u8, value: Register },
-  Store{ alignment : Alignment, pointer : Register, value : Register },
+  Arg{ index: u8, value: Var },
+  Store{ byte_width : ByteWidth, pointer : Var, value : Var },
   Return,
 }
 
@@ -59,15 +60,16 @@ pub struct SequenceInfo {
 }
 
 #[derive(Copy, Clone)]
-pub struct LocalVar {
+pub struct NamedVar {
   pub name : Symbol,
-  pub reg : Register,
+  pub var : Var,
 }
 
 pub struct BytecodeFunction {
   pub sequence_info : Vec<SequenceInfo>,
   pub ops : Vec<Op>,
   pub args : usize,
-  pub locals : Vec<LocalVar>,
-  pub frame_words : usize,
+  pub locals : Vec<NamedVar>,
+  pub registers : Vec<Var>,
+  pub frame_bytes : usize,
 }
