@@ -1,4 +1,3 @@
-
 ;; { x : i32, y : i32, w : i32, h : i32 }
 (def rect_init (fun (p x y w h) (
   (store_32 p x)

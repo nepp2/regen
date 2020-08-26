@@ -1,43 +1,101 @@
+;; *{ size : u64, id : symbol, kind : symbol, type_info : *void }
+(def new_type (fun (size id kind type_info) (
+  ;; allocate type
+  (let p (ccall malloc 32))
+  (store_64 p size)
+  (store_64 (+ p 8) id)
+  (store_64 (+ p 16) kind)
+  (store_64 (+ p 24) type_info)
+  p
+)))
 
-; Core types:
-; - Byte
-; - Tuple
-; - Name
-; - Array
-; - Function
+(def size_of (fun (type) (
+  (load_64 type)
+)))
 
-; The `type` type is built in, because it would have to be
-; recursively defined. This is a way of specifying its memory
-; layout, more than anything:
-(type :i32 (name :i32 (array 4 byte)))
-(type :i32 (name :i32 (array 4 byte)))
-(type :type (name :type (tuple i32 ptr)))
+(def type_id (fun (type) (
+  (load_64 (+ type 8))
+)))
 
-; name type (tuple i32 )
+(def type_kind (fun (type) (
+  (load_64 (+ type 16))
+)))
 
-; There are only values, but some special values can
-; be used to define new types of value.
+(def new_primitive_type (fun (size id) (
+  (new_type size id (sym primitive) 0)
+)))
 
-; Intrinsic calls:
-; - tuple_type: creates a new tuple type
-; - fun_type: creates a new function type
-; - name_type: creates a new named type
-; - array_type: creates a new array type
-; - fun : creates a new function
+(def u8 (new_primitive_type 1 (sym u8)))
+(def u16 (new_primitive_type 2 (sym u16)))
+(def u32 (new_primitive_type 4 (sym u32)))
+(def u64 (new_primitive_type 8 (sym u64)))
 
-; Definition syntax:
-; def symbol_name : symbol_type = symbol_value
+;; *{ num_elements : u64, elements ... }
+(def array_new (fun (num_elements) (
+  (let bytes (+ 8 (* 8 num_elements)))
+  (let p (ccall malloc bytes))
+  (store_64 p num_elements)
+  p
+)))
 
-(defs
-  type i32 (name i32 (array 4 byte))
+(def array_len (fun (array) (
+  (load_64 array)
+)))
 
-  i32 a 3
+(def array_set (fun (array index value) (
+  (store_64 (+ array (* 8 (+ index 1))) value)
+)))
 
+(def array_get (fun (array index) (
+  (load_64 (+ array (* 8 (+ index 1))))
+)))
 
-)
+(def new_struct_type (fun (id field_array) (
+  (let size 0)
+  (let i 0)
+  (let limit (array_len field_array))
+  (block (
+    (if (>= i limit)
+     (break))
+    (let t (array_get field_array i))
+    (set size (+ size (size_of t)))
+    (set i (+ i 1))
+    repeat
+  ))
+  (new_type size id (sym struct) field_array)
+)))
 
-type i32 = name i32 (array 4 byte)
+;; x y w h
+;; (def rect
+;;   (struct i32 i32 i32 i32))
 
-i32 a = 3
+(def rect_init (fun (p x y w h) (
+  (store_32 p x)
+  (store_32 (+ p 4) y)
+  (store_32 (+ p 8) w)
+  (store_32 (+ p 12) h)
+)))
 
+(def main (fun () (
+  (let rect (ref (alloca 16)))
+  (rect_init rect 1 2 3 4)
 
+  (let rect_type (block (
+    (let fields (array_new 4))
+    (array_set fields 0 u32)
+    (array_set fields 1 u32)
+    (array_set fields 2 u32)
+    (array_set fields 3 u32)
+    (new_struct_type (sym rect) fields)
+  )))
+
+  (debug (size_of rect_type))
+  (ccall print_symbol (type_id rect_type))
+
+  ;; (let rect2 (rect 1 2 3 4))
+
+  (if (ccall test_struct rect)
+    ((ccall print_symbol (sym SUCCESS)))
+    ((ccall print_symbol (sym FAILED)))
+  )
+)))
