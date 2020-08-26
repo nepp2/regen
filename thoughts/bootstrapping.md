@@ -32,13 +32,12 @@ I want to find a starting point here for bootstrapping in the simplest way possi
 - Macros
   - these need to process the AST, which may require structs
 
-## Possibilities
+## Plan
 
-Define the type struct clumsily using functions.
+I can define, initialise, and return structs, it's just very ugly.
 
+I have defined a generic "type" struct which should be extensible enough for defining most other stuff.
 
+It would be less ugly if I had array literals, and less ugly still if I had macros. If macros can take variable length arguments, they can be used to define array literals too.
 
-Type:
- - int
- - id
- - tuple
+So the plan going forward should be to try and get macros running. First I need to expose the node graph, and quotations.
