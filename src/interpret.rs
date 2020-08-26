@@ -2,7 +2,7 @@
 use crate::{symbols, parse, bytecode, env, ffi, compile};
 
 use env::{Env, new_env};
-use symbols::{to_symbol, SymbolTable};
+use symbols::SymbolTable;
 use parse::Node;
 use bytecode::{
   BytecodeFunction, Op, Expr, Var, Operator, ByteWidth,
@@ -36,8 +36,8 @@ pub fn interpret(st : SymbolTable, n : &Node, code : &str) {
     interpreter_loop(&mut shadow_stack, &mut env);
   }
 
-  if let Some(&v) = env.values.get(&to_symbol(st, "main")) {
-    let f = v as *const BytecodeFunction;
+  if let Some(v) = env.get_str("main") {
+    let f = v.value as *const BytecodeFunction;
     shadow_stack.clear();
     shadow_stack.push(
       Frame { pc: 0,
@@ -83,8 +83,8 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : &mut Env) {
           use Operator::*;
           match e {
             Expr::Def(sym) =>
-              if let Some(&f) = env.values.get(&sym) {
-                set_var(sbp, var, f);
+              if let Some(f) = env.get(sym) {
+                set_var(sbp, var, f.value);
               }
               else {
                 panic!("Symbol '{}' not present in env", sym);

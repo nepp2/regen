@@ -1,6 +1,6 @@
 
-use crate::symbols::{Symbol, to_symbol, symbol_table};
-use crate::env::{Env, new_env};
+use crate::symbols;
+use symbols::{Symbol, to_symbol, SymbolTable};
 
 #[derive(Copy, Clone)]
 pub struct Type(*const TypeInfo);
@@ -21,11 +21,12 @@ pub struct TypeInfo {
 }
 
 pub struct CoreTypes {
-  type_tag : Type,
-  u64_tag : Type,
-  u32_tag : Type,
-  u16_tag : Type,
-  u8_tag : Type,
+  pub type_tag : Type,
+  pub u64_tag : Type,
+  pub u32_tag : Type,
+  pub u16_tag : Type,
+  pub u8_tag : Type,
+  pub core_types : Vec<Type>,
 }
 
 struct Field {
@@ -71,35 +72,33 @@ fn struct_offsets(field_types : &[Type]) -> (Vec<Field>, u64) {
   (fields, size)
 }
 
-fn new_type(env : &mut Env, name : &str, kind : &str, size : u64, info : *const ()) -> Type {
-  let id = to_symbol(env.st, name);
-  let kind = to_symbol(env.st, kind);
+fn new_type(st : SymbolTable, name : &str, kind : &str, size : u64, info : *const ()) -> Type {
+  let id = to_symbol(st, name);
+  let kind = to_symbol(st, kind);
   let info = TypeInfo { size, id, kind, info };
-  let t = Box::into_raw(Box::new(info));
-  env.values.insert(id, t as u64);
-  Type(t)
+  Type(Box::into_raw(Box::new(info)))
 }
 
-fn struct_type(env : &mut Env, name : &str, fields : &[Type]) -> Type {
+fn struct_type(st : SymbolTable, name : &str, fields : &[Type]) -> Type {
   let (fields, size) = struct_offsets(fields);
   let info = Box::into_raw(Box::new(to_packed_array(fields))) as *const ();
-  new_type(env, name, "struct", size, info)
+  new_type(st, name, "struct", size, info)
 }
 
-fn primitive(env : &mut Env, name : &str, size : u64) -> Type {
-  new_type(env, name, "primitive", size, std::ptr::null())
+fn primitive(st : SymbolTable, name : &str, size : u64) -> Type {
+  new_type(st, name, "primitive", size, std::ptr::null())
 }
 
-pub fn core_types(env : &mut Env) -> CoreTypes {
+pub fn core_types(st : SymbolTable) -> CoreTypes {
 
-  let u64_tag = primitive(env, "u64", 8);
-  let u32_tag = primitive(env, "u32", 4);
-  let u16_tag = primitive(env, "u16", 2);
-  let u8_tag = primitive(env, "u8", 1);
-  let symbol_tag = primitive(env, "symbol", 8);
-  let ptr_tag = primitive(env, "ptr", 8);
+  let u64_tag = primitive(st, "u64", 8);
+  let u32_tag = primitive(st, "u32", 4);
+  let u16_tag = primitive(st, "u16", 2);
+  let u8_tag = primitive(st, "u8", 1);
+  let symbol_tag = primitive(st, "symbol", 8);
+  let ptr_tag = primitive(st, "ptr", 8);
 
-  let type_tag = struct_type(env, "type", &[
+  let type_tag = struct_type(st, "type", &[
     u64_tag,
     symbol_tag,
     symbol_tag,
@@ -108,20 +107,20 @@ pub fn core_types(env : &mut Env) -> CoreTypes {
 
   CoreTypes {
     type_tag, u64_tag, u32_tag, u16_tag, u8_tag,
+    core_types: vec![type_tag, u64_tag, u32_tag, u16_tag, u8_tag],
   }
 }
 
 #[test]
 fn test_types() {
-  let st = symbol_table();
-  let mut env = new_env(st);
-  let c = core_types(&mut env);
+  let st = symbols::symbol_table();
+  let c = core_types(st);
 
   let a =
-    struct_type(&mut env, "type",
+    struct_type(st, "a",
       &[c.u16_tag, c.u32_tag, c.u16_tag, c.u64_tag]);
   let b =
-    struct_type(&mut env, "type",
+    struct_type(st, "b",
       &[c.u16_tag, c.u16_tag, c.u32_tag, c.u64_tag]);
 
   if a.get().size != 24 { panic!("struct A alignment incorrect") }
