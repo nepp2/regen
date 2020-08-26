@@ -1,5 +1,4 @@
-
-/// Transform structured if/let format into labelled sequence format
+/// Compiles core language into bytecode
 
 use crate::{bytecode, parse, symbols, env};
 

@@ -1,4 +1,4 @@
-
+/// Parse basic s-expressions into a tree of nodes
 
 use std::str::CharIndices;
 

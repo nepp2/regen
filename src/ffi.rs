@@ -1,3 +1,9 @@
+/// Bare bones C foreign function interface
+/// 
+/// This is currently based on the observation that windows C calls
+/// seem to pass all parameters and return values in 64 bit registers.
+/// When something is bigger than 64 bit, a pointer is passed instead.
+//
 
 #[test]
 fn ffi_test() {

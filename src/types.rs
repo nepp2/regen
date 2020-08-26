@@ -1,3 +1,5 @@
+/// Defines the an extensible Type data structure to be used by the
+/// compiler & interpreter.
 
 use crate::symbols;
 use symbols::{Symbol, to_symbol, SymbolTable};

@@ -1,3 +1,5 @@
+/// Defines the environment (the global hashmap that defs are added to)
+
 use crate::symbols::{Symbol, SymbolTable, to_symbol};
 use crate::types::{Type, CoreTypes, core_types};
 use std::collections::HashMap;

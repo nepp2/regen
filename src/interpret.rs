@@ -1,3 +1,7 @@
+/// Bytecode interpreter
+///
+/// Receives a sexp node tree and compiles/interprets the top level
+/// nodes one at a time.
 
 use crate::{symbols, parse, bytecode, env, ffi, compile};
 

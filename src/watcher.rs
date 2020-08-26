@@ -1,3 +1,6 @@
+/// Runs scripts in child processes, and restarts them when
+/// the script changes.
+
 use notify::{Watcher, RecursiveMode, watcher, DebouncedEvent};
 use std::sync::mpsc::{channel, TryRecvError};
 use std::time::Duration;

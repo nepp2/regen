@@ -1,3 +1,4 @@
+/// Bytecode data structure is defined here
 
 use crate::symbols;
 use symbols::Symbol;

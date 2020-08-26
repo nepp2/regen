@@ -1,8 +1,6 @@
-
 /// Some allocation facilities to simplify borrow checking by relying
 /// on the fact that these allocations will live until the process
 /// terminates.
-///
 /// In future this may be adapted into a region-allocation system, in which
 /// regions can be dropped. This will be unsafe from Rust's perspective, but
 /// will instead reflect the semantics of the Regen language.

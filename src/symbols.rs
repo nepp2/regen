@@ -1,5 +1,6 @@
-
-// A lot of crazy unsafe stuff happens here
+/// A symbol table. Hashes & caches strings so that they can
+/// be passed around as a pointer, which can then be compared
+/// without dereferencing.
 
 use std::collections::HashMap;
 use std::fmt;
