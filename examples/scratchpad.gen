@@ -1,5 +1,64 @@
+;; *{ size : u64, id : symbol, kind : symbol, type_info : *void }
+(def new_type (fun (size id kind type_info) (
+  ;; allocate type
+  (let p (ccall malloc 32))
+  (store_64 p size)
+  (store_64 (+ p 8) id)
+  (store_64 (+ p 16) kind)
+  (store_64 (+ p 24) type_info)
+  p
+)))
 
-;; { x : i32, y : i32, w : i32, h : i32 }
+(def size_of (fun (type) (
+  (load_64 type)
+)))
+
+(def type_id (fun (type) (
+  (load_64 (+ type 8))
+)))
+
+(def type_kind (fun (type) (
+  (load_64 (+ type 16))
+)))
+
+;; *{ element_count : u64, element_size : u64, data : *void }
+(def array_init (fun (p element_count element_size) (
+  (let data (ccall malloc (* element_count element_size)))
+  (store_64 p element_count)
+  (store_64 (+ p 8) element_size)
+  (store_64 (+ p 16) data)
+  p
+)))
+
+(def array_len (fun (array) (
+  (load_64 array)
+)))
+
+(def array_index (fun (array index) (
+  (let element_size (load_64 (+ array 8)))
+  (let data (load_64 (+ array 16)))
+  (+ data (* element_size index))
+)))
+
+(def new_struct_type (fun (id field_array) (
+  (let size 0)
+  (let i 0)
+  (let limit (array_len field_array))
+  (block (
+    (if (>= i limit)
+     (break))
+    (let t (load_64 (array_index field_array i)))
+    (set size (+ size (size_of t)))
+    (set i (+ i 1))
+    repeat
+  ))
+  (new_type size id (sym struct) field_array)
+)))
+
+;; x y w h
+;; (def rect
+;;   (struct i32 i32 i32 i32))
+
 (def rect_init (fun (p x y w h) (
   (store_32 p x)
   (store_32 (+ p 4) y)
@@ -11,8 +70,25 @@
   (let rect (ref (alloca 16)))
   (rect_init rect 1 2 3 4)
 
+  (let rect_type (block (
+    (let fields (ref (alloca 24)))
+    (array_init fields 4 8)
+    (store_64 (array_index fields 0) u32)
+    (store_64 (array_index fields 1) u32)
+    (store_64 (array_index fields 2) u32)
+    (store_64 (array_index fields 3) u32)
+    (new_struct_type (sym rect) fields)
+  )))
+
+  (debug (size_of rect_type))
+  (ccall print_symbol (type_id rect_type))
+
+  ;; (let rect2 (rect 1 2 3 4))
+
   (if (ccall test_struct rect)
     ((ccall print_symbol (sym SUCCESS)))
     ((ccall print_symbol (sym FAILED)))
   )
+
+  (debug (size_of type))
 )))

@@ -103,6 +103,10 @@ pub fn new_env(st : SymbolTable) -> Box<Env> {
     c: core_types(st),
   }));
   let mut env = unsafe { Box::from_raw(env_ptr) };
+  for &t in &env.c.core_types {
+    env.values.insert(t.get().id,
+      EnvEntry { value: t.as_u64(), tag: env.c.type_tag });
+  }
   env.insert_str("c_add", c_add as u64, env.c.u64_tag);
   env.insert_str("test_struct", test_struct as u64, env.c.u64_tag);
   env.insert_str("malloc", malloc as u64, env.c.u64_tag);

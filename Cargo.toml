@@ -9,3 +9,5 @@ rusty-fork = "0.2.1"
 
 [dependencies]
 libloading = "0.6.2"
+notify = "4.0.10"
+subprocess = "0.1.18"

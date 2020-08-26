@@ -6,8 +6,12 @@ use symbols::{Symbol, to_symbol, SymbolTable};
 pub struct Type(*const TypeInfo);
 
 impl Type {
-  fn get(&self) -> &TypeInfo {
+  pub fn get(&self) -> &TypeInfo {
     unsafe { &*self.0 }
+  }
+
+  pub fn as_u64(self) -> u64 {
+    self.0 as u64
   }
 }
 
