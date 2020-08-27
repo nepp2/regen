@@ -26,6 +26,25 @@ pub struct TypeInfo {
   pub info : *const (),
 }
 
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct StructInfo {
+  fields : PackedArray,
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct PointerInfo {
+  points_to : Type,
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct FunctionInfo {
+  args : WordArray,
+  returns : Type,
+}
+
 pub struct CoreTypes {
   pub type_tag : Type,
   pub u64_tag : Type,
@@ -53,6 +72,19 @@ fn to_packed_array<T>(types : Vec<T>) -> PackedArray {
   let data = types.as_slice().as_ptr() as *const ();
   std::mem::forget(types);
   PackedArray { element_count, element_size, data }
+}
+
+#[derive(Copy, Clone)]
+struct WordArray {
+  element_count : u64,
+  data : *const (),
+}
+
+fn to_word_array<T>(types : Vec<T>) -> WordArray {
+  let element_count = types.len() as u64;
+  let data = types.as_slice().as_ptr() as *const ();
+  std::mem::forget(types);
+  WordArray { element_count, data }
 }
 
 fn round_up_multiple(v : u64, multiple_of : u64) -> u64 {

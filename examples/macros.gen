@@ -1,0 +1,56 @@
+
+;; milestone: implement macro evaluation
+
+;; features required:
+;; - defmacro support
+;; - aggressive macro expansion
+
+;; intrinsics required: compile_function, to_symbol
+
+(defmacro def (env symbol_expr value_expr) (
+  (let sym (to_symbol symbol_expr))
+  (let f (compile_function env () value_expr))
+  (let v (f))
+  (env_insert symbol v)
+))
+
+(defmacro eval (env expr) (
+  (let f (compile_function env () expr))
+  (f)
+))
+
+(defmacro fun (env args body) (
+  (compile_function env args body)
+))
+
+
+;; (let rect_type (block (
+;;   (let fields (ref (alloca 16)))
+;;   (warray_init fields 4 8)
+;;   (warray_set fields 0 u32)
+;;   (warray_set fields 1 u32)
+;;   (warray_set fields 2 u32)
+;;   (warray_set fields 3 u32)
+;;   (new_struct_type (sym r) fields)
+;; )))
+
+(def init (macro nodes (
+  ;; do all the shit
+)))
+
+(def rect (struct i32 i32 i32 i32))
+
+(defun main ()
+  (let r (init rect 1 2 3 4))
+
+  (print "size of ")
+  (println size_of rect)
+
+  (debug (size_of rect_type))
+  (print_symbol (type_id rect_type))
+
+  (if (test_struct r)
+    ((print_symbol (sym SUCCESS)))
+    ((print_symbol (sym FAILED)))
+  )
+)
