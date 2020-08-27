@@ -61,40 +61,64 @@ struct Builder<'l> {
   arg_values : Vec<Var>,
 }
 
+#[derive(Eq, PartialEq, Copy, Clone)]
+enum RefTag {
+  Local, Register
+}
+
+use RefTag::*;
+
+#[derive(Copy, Clone)]
+struct Ref {
+  var : Var,
+  tag : RefTag,
+}
+
+fn to_local(var : Var) -> Ref {
+  Ref { var, tag: Local }
+}
+
 fn find_local_in_scope(b : &mut Builder, node : Node)
-  -> Option<Var>
+  -> Option<Ref>
 {
   let c = build_symbol(b, node);
   b.locals.iter().rev()
-    .find(|&l| l.name == c).map(|l| l.var)
+    .find(|&l| l.name == c)
+    .map(|l| Ref { var: l.var, tag: Local })
 }
 
-fn add_local(b : &mut Builder, name : Symbol, var : Var) {
+fn add_local(b : &mut Builder, name : Symbol, var : Var) -> Ref {
   let local = NamedVar{ name, var };
   b.locals.push(local);
   b.scoped_locals.push(local);
+  Ref { var, tag: Local }
 }
 
-fn next_var(b : &mut Builder) -> Var {
+fn new_var(b : &mut Builder) -> Var {
   // TODO: this should take a byte width!
-  let r = Var{ byte_offset: b.frame_bytes, bytes: 8 };
-  b.registers.push(r);
-  b.frame_bytes += r.bytes;
-  r
+  let var = Var{ byte_offset: b.frame_bytes, bytes: 8 };
+  b.registers.push(var);
+  b.frame_bytes += var.bytes;
+  var
 }
 
-fn alloca(b : &mut Builder, bytes : usize) -> Var {
+fn new_register(b : &mut Builder) -> Ref {
+  let var = new_var(b);
+  Ref { var, tag: Register }
+}
+
+fn alloca(b : &mut Builder, bytes : usize) -> Ref {
   // TODO: this should be deleted
-  let r = Var{ byte_offset: b.frame_bytes, bytes };
-  b.registers.push(r);
+  let var = Var{ byte_offset: b.frame_bytes, bytes };
+  b.registers.push(var);
   b.frame_bytes += bytes;
-  r
+  Ref { var, tag: Register }
 }
 
-fn push_expr(b : &mut Builder, e : Expr) -> Var{
-  let var = next_var(b);
-  b.ops.push(Op::Expr(var, e));
-  return var;
+fn push_expr(b : &mut Builder, e : Expr) -> Ref {
+  let r = new_register(b);
+  b.ops.push(Op::Expr(r.var, e));
+  return r;
 }
 
 fn build_symbol(b : &mut Builder, n : Node) -> Symbol {
@@ -156,42 +180,42 @@ fn complete_function(mut b : Builder) -> BytecodeFunction {
   }
 }
 
-fn compile_if_else(b : &mut Builder, cond : Node, then_expr : Node, else_expr : Node) -> Var {
-  let result_reg = next_var(b);
+fn compile_if_else(b : &mut Builder, cond : Node, then_expr : Node, else_expr : Node) -> Ref {
+  let result_reg = new_register(b);
   let then_seq = create_sequence(b, "then");
   let else_seq = create_sequence(b, "else");
   let exit_seq = create_sequence(b, "exit");
-  let cond = compile_expr_to_value(b, cond);
+  let cond = compile_expr_to_value(b, cond).var;
   b.ops.push(Op::CJump{ cond, then_seq, else_seq });
   set_current_sequence(b, then_seq);
   let then_result =
     compile_block_expr(b, then_expr.children.as_slice());
   if let Some(v) = then_result {
-    b.ops.push(Op::Set(result_reg, v));
+    b.ops.push(Op::Set(result_reg.var, v.var));
   }
   b.ops.push(Op::Jump(exit_seq));
   set_current_sequence(b, else_seq);
   let else_result =
     compile_block_expr(b, else_expr.children.as_slice());
   if let Some(v) = else_result {
-    b.ops.push(Op::Set(result_reg, v));
+    b.ops.push(Op::Set(result_reg.var, v.var));
   }
   b.ops.push(Op::Jump(exit_seq));
   set_current_sequence(b, exit_seq);
   result_reg
 }
 
-fn compile_expr_to_value(b : &mut Builder, node : Node) -> Var {
+fn compile_expr_to_value(b : &mut Builder, node : Node) -> Ref {
   compile_expr(b, node).expect("expected value, found none")
 }
 
 fn compile_store(b : &mut Builder, byte_width : ByteWidth, pointer : Node, value : Node) {
-  let pointer = compile_expr_to_value(b, pointer);
-  let value = compile_expr_to_value(b, value);
+  let pointer = compile_expr_to_value(b, pointer).var;
+  let value = compile_expr_to_value(b, value).var;
   b.ops.push(Op::Store{ byte_width, pointer, value });
 }
 
-fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
+fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
   match node_shape(&node, b.code) {
     // Return
     Atom("return") => {
@@ -224,15 +248,15 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
         b.env, b.code,
         arg_nodes.children.as_slice(), body.children.as_slice());
       let f_addr = Box::into_raw(Box::new(f)) as u64;
-      let var = next_var(b);
-      b.ops.push(Op::Expr(var, Expr::LiteralU64(f_addr)));
-      Some(var)
+      let r = new_register(b);
+      b.ops.push(Op::Expr(r.var, Expr::LiteralU64(f_addr)));
+      Some(r)
     }
     // set var
     Command("set", [varname, value]) => {
       let val_reg = compile_expr_to_value(b, *value);
       let var_reg = find_local_in_scope(b, *varname).expect("no variable found");
-      b.ops.push(Op::Set(var_reg, val_reg));
+      b.ops.push(Op::Set(var_reg.var, val_reg.var));
       None
     }
     // store var
@@ -248,21 +272,26 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       { compile_store(b, ByteWidth::U8, *pointer, *value); None }
     // let
     Command("let", [var_name, value]) => {
-      // evaluate the expression
-      let val_reg = compile_expr_to_value(b, *value);
-      // push a local variable
-      let var_reg = next_var(b);
       let name = build_symbol(b, *var_name);
-      add_local(b, name, var_reg);
-      // push a set command
-      b.ops.push(Op::Set(var_reg, val_reg));
+      // evaluate the expression
+      let val = compile_expr_to_value(b, *value);
+      match val.tag {
+        Local => {
+          add_local(b, name, val.var);
+        }
+        Register => {
+          let var = new_register(b).var;
+          add_local(b, name, var);
+          b.ops.push(Op::Set(var, val.var));
+        }
+      }
       None
     }
     // if then
     Command("if", [cond, then_expr]) => {
       let then_seq = create_sequence(b, "then");
       let exit_seq = create_sequence(b, "exit");
-      let cond = compile_expr_to_value(b, *cond);
+      let cond = compile_expr_to_value(b, *cond).var;
       b.ops.push(Op::CJump{ cond, then_seq, else_seq: exit_seq });
       set_current_sequence(b, then_seq);
       compile_block_expr(b, then_expr.children.as_slice());
@@ -292,15 +321,15 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     }
   // Debug
     Command("debug", [v]) => {
-      let var = compile_expr_to_value(b, *v);
+      let r = compile_expr_to_value(b, *v);
       let sym = build_symbol(b, *v);
-      b.ops.push(Op::Debug(sym, var));
+      b.ops.push(Op::Debug(sym, r.var));
       None
     }
     // Return
     Command("return", [v]) => {
-      let var = compile_expr_to_value(b, *v);
-      b.ops.push(Op::SetReturn(var));
+      let r = compile_expr_to_value(b, *v);
+      b.ops.push(Op::SetReturn(r.var));
       b.ops.push(Op::Return);
       None
     }
@@ -329,7 +358,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
   }
 }
 
-fn compile_block_expr(b : &mut Builder, nodes : &[Node]) -> Option<Var> {  
+fn compile_block_expr(b : &mut Builder, nodes : &[Node]) -> Option<Ref> {  
   let mut r = None;
   let num_locals = b.scoped_locals.len();
   for &c in nodes {
@@ -358,7 +387,7 @@ fn compile_function(env: &Env, code : &str, args : &[Node], body : &[Node]) -> B
   b.args = args.len();
   for &arg in args {
     let name = build_symbol(&mut b, arg);
-    let var = next_var(&mut b);
+    let var = new_var(&mut b);
     add_local(&mut b, name, var);
   }
   // start a sequence
@@ -366,7 +395,7 @@ fn compile_function(env: &Env, code : &str, args : &[Node], body : &[Node]) -> B
   set_current_sequence(&mut b, entry_seq);
   let r = compile_block_expr(&mut b, body);
   if let Some(r) = r {
-    b.ops.push(Op::SetReturn(r));
+    b.ops.push(Op::SetReturn(r.var));
   }
   b.ops.push(Op::Return);
   complete_function(b)
@@ -377,23 +406,23 @@ pub fn compile_expr_to_function(env: &Env, code : &str, root : Node) -> Bytecode
   compile_function(env, code, &[], &[root])
 }
 
-fn function_call(b : &mut Builder, node : Node) -> Var {
+fn function_call(b : &mut Builder, node : Node) -> Ref {
   let function_val = node.children[0];
   let args = &node.children[1..];
   b.arg_values.clear();
   for &arg in args {
     let v = compile_expr_to_value(b, arg);
-    b.arg_values.push(v);
+    b.arg_values.push(v.var);
   }
-  let var = compile_expr_to_value(b, function_val);
+  let f = compile_expr_to_value(b, function_val);
   for (i, value) in b.arg_values.drain(..).enumerate() {
     b.ops.push(Op::Arg{ index: i as u8, value });
   }
-  let e = Expr::Invoke(var);
+  let e = Expr::Invoke(f.var);
   push_expr(b, e)
 }
 
-fn atom_to_value(b : &mut Builder, node : Node) -> Var {
+fn atom_to_value(b : &mut Builder, node : Node) -> Ref {
   let segment = code_segment(b.code, node);
   // boolean literals
   match segment {
@@ -413,32 +442,32 @@ fn atom_to_value(b : &mut Builder, node : Node) -> Var {
     return push_expr(b, e);
   }
   // Look for local
-  if let Some(v) = find_local_in_scope(b, node) {
-    return v;
+  if let Some(r) = find_local_in_scope(b, node) {
+    return r;
   }
   // Assume global
   let e = Expr::Def(symbols::to_symbol(b.env.st, segment));
   push_expr(b, e)
 }
 
-fn compile_function_call(b : &mut Builder, list : &[Node], ccall : bool) -> Var {
+fn compile_function_call(b : &mut Builder, list : &[Node], ccall : bool) -> Ref {
   let function = list[0];
   let args = &list[1..];
   b.arg_values.clear();
   for &arg in args {
     let v = compile_expr_to_value(b, arg);
-    b.arg_values.push(v);
+    b.arg_values.push(v.var);
   }
-  let var = compile_expr_to_value(b, function);
+  let f = compile_expr_to_value(b, function);
   for (i, value) in b.arg_values.drain(..).enumerate() {
     b.ops.push(Op::Arg{ index: i as u8, value });
   }
   let e = {
     if ccall {
-      Expr::InvokeC(var, args.len())
+      Expr::InvokeC(f.var, args.len())
     }
     else {
-      Expr::Invoke(var)
+      Expr::Invoke(f.var)
     }
   };
   return push_expr(b, e);
@@ -468,7 +497,7 @@ fn str_to_operator(s : &str) -> Option<Operator> {
   Some(op)
 }
 
-fn compile_list_expr(b : &mut Builder, node : Node) -> Var {
+fn compile_list_expr(b : &mut Builder, node : Node) -> Ref {
   let head = code_segment(b.code, node.children[0]);
   let tail = &node.children[1..];
   // operator
@@ -476,12 +505,12 @@ fn compile_list_expr(b : &mut Builder, node : Node) -> Var {
   if let (Some(op), [v1, v2]) = (op, tail) {
     let v1 = compile_expr_to_value(b, *v1);
     let v2 = compile_expr_to_value(b, *v2);
-    let e = Expr::BinaryOp(op, v1, v2);
+    let e = Expr::BinaryOp(op, v1.var, v2.var);
     push_expr(b, e)
   }
   else if let (Some(op), [v1]) = (op, tail) {
     let v1 = compile_expr_to_value(b, *v1);
-    let e = Expr::UnaryOp(op, v1);
+    let e = Expr::UnaryOp(op, v1.var);
     push_expr(b, e)
   }
   else if head == "ccall" {
@@ -500,25 +529,25 @@ fn def_macro(b : &mut Builder, def_name : Node, value : Node) {
   // call env insert
   let env = {
     let env = to_symbol(b.env.st, "env");
-    let r = next_var(b);
+    let r = new_var(b);
     b.ops.push(Op::Expr(r, Def(env)));
     r
   };
   let def_sym = {
     let def = build_symbol(b, def_name).as_u64();
-    let r = next_var(b);
+    let r = new_var(b);
     b.ops.push(Op::Expr(r, LiteralU64(def)));
     r
   };
   let f = {
     let env_insert = to_symbol(b.env.st, "env_insert");
-    let f = next_var(b);
+    let f = new_var(b);
     b.ops.push(Op::Expr(f, Def(env_insert)));
     f
   };
   b.ops.push(Op::Arg{index: 0, value: env});
   b.ops.push(Op::Arg{index: 1, value: def_sym});
-  b.ops.push(Op::Arg{index: 2, value: val_reg});
-  let r = next_var(b);
+  b.ops.push(Op::Arg{index: 2, value: val_reg.var});
+  let r = new_var(b);
   b.ops.push(Op::Expr(r, InvokeC(f, 3)));
 }
