@@ -500,6 +500,7 @@ fn str_to_operator(s : &str) -> Option<Operator> {
 fn compile_list_expr(b : &mut Builder, node : Node) -> Ref {
   let head = code_segment(b.code, node.children[0]);
   let tail = &node.children[1..];
+  // macro
   // operator
   let op = str_to_operator(head);
   if let (Some(op), [v1, v2]) = (op, tail) {

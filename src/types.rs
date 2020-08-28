@@ -51,6 +51,8 @@ pub struct CoreTypes {
   pub u32_tag : Type,
   pub u16_tag : Type,
   pub u8_tag : Type,
+  pub void_ptr_tag : Type,
+  pub macro_tag : Type,
   pub core_types : Vec<Type>,
 }
 
@@ -134,18 +136,21 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
   let u16_tag = primitive(st, "u16", 2);
   let u8_tag = primitive(st, "u8", 1);
   let symbol_tag = primitive(st, "symbol", 8);
-  let ptr_tag = primitive(st, "ptr", 8);
+  let void_ptr_tag = primitive(st, "void_ptr", 8);
+
+  let macro_tag = primitive(st, "macro_flag", 8);
 
   let type_tag = struct_type(st, "type", &[
     u64_tag,
     symbol_tag,
     symbol_tag,
-    ptr_tag
+    void_ptr_tag
   ]);
 
   CoreTypes {
-    type_tag, u64_tag, u32_tag, u16_tag, u8_tag,
-    core_types: vec![type_tag, u64_tag, u32_tag, u16_tag, u8_tag],
+    type_tag, u64_tag, u32_tag, u16_tag, u8_tag, void_ptr_tag, macro_tag,
+    core_types:
+     vec![type_tag, u64_tag, u32_tag, u16_tag, u8_tag, void_ptr_tag, macro_tag],
   }
 }
 

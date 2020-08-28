@@ -2,6 +2,7 @@
 
 use std::str::CharIndices;
 
+use crate::symbols::Symbol;
 use crate::perm_alloc::{perm, perm_slice, Perm, PermSlice};
 
 struct TokenStream<'l>{
@@ -101,10 +102,26 @@ fn skip<'l>(ts : &mut TokenStream<'l>) {
 pub type Node = Perm<NodeInfo>;
 
 #[derive(Clone, Copy, Debug)]
-pub struct NodeInfo {
+pub enum NodeContent {
+  List(PermSlice<Node>),
+  Sym(Symbol),
+  Literal(u64),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SrcLocation {
   pub start : usize,
-  pub end : usize,
-  pub children : PermSlice<Node>,
+  pub end : usize,  
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct NodeInfo {
+  pub loc : SrcLocation,
+  pub content : NodeContent,
+}
+
+fn parse_atom(s : &str) -> NodeContent {
+  panic!()
 }
 
 /// parse sexp list
@@ -133,11 +150,12 @@ fn parse_list(ns : &mut Vec<Node>, ts : &mut TokenStream) {
             skip(ts);
           }
           _ => {
-            let atom = NodeInfo {
+            let loc = SrcLocation {
               start: ts.next_start,
-              end: ts.next_start + ts.next_len,
-              children: perm_slice(&[])
+              end: ts.next_start + ts.next_len
             };
+            let content = parse_atom(&ts.code[loc.start..loc.end]);
+            let atom = NodeInfo { loc, content };
             skip(ts);
             ns.push(perm(atom));
           }
@@ -147,7 +165,8 @@ fn parse_list(ns : &mut Vec<Node>, ts : &mut TokenStream) {
   }
   let children = perm_slice(&ns[node_index..]);
   ns.truncate(node_index);
-  ns.push(perm(NodeInfo{ start, end: ts.next_start, children }));
+  let loc = SrcLocation { start, end: ts.next_start };
+  ns.push(perm(NodeInfo{ loc, content: NodeContent::List(children) }));
 }
 
 pub enum NodeShape<'l> {

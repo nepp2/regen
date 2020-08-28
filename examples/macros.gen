@@ -7,6 +7,18 @@
 
 ;; intrinsics required: compile_function, to_symbol
 
+(block (
+  (let f (fun (ns) (
+    (let name (index ns 0))
+    (let val (index ns 1))
+    (template
+      (ccall env_insert env ($ name) ($ val) u64)
+    )
+  )))
+  (ccall env_insert env (sym def) f macro_flag)
+))
+
+
 (defmacro def (env symbol_expr value_expr) (
   (let sym (to_symbol symbol_expr))
   (let f (compile_function env () value_expr))
@@ -34,13 +46,24 @@
 ;;   (new_struct_type (sym r) fields)
 ;; )))
 
-(def init (macro nodes (
-  ;; do all the shit
+;; (def init (macro ns (
+;;   (let name (index ns 0))
+;;   (let args (index ns 1))
+;;   (let body (index ns 2))
+;; )))
+
+;; (def rect (struct i32 i32 i32 i32))
+
+(def function (macro ns (
+  (let name (index ns 0))
+  (let args (index ns 1))
+  (let body (index ns 2))
+  (template
+    (def #name (fun #args #body))
+  )
 )))
 
-(def rect (struct i32 i32 i32 i32))
-
-(defun main ()
+(function main ()
   (let r (init rect 1 2 3 4))
 
   (print "size of ")

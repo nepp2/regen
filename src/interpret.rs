@@ -44,7 +44,8 @@ pub fn interpret(st : SymbolTable, n : &Node, code : &str) {
     let f = v.value as *const BytecodeFunction;
     shadow_stack.clear();
     shadow_stack.push(
-      Frame { pc: 0,
+      Frame {
+        pc: 0,
         sbp: stack_ptr,
         f,
         return_addr: stack_ptr.byte_offset(0),
