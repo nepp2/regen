@@ -11,10 +11,12 @@ use core::hash::{Hash, Hasher};
 use std::borrow;
 use std::ops::RangeFrom;
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct Perm<T> {
   p : *const T
 }
+
+impl <T : Clone> Copy for Perm<T> { }
 
 #[derive(Copy, Clone)]
 pub struct PermSlice<T> {

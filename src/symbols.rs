@@ -13,7 +13,7 @@ impl Symbol {
     self.0 as u64
   }
 
-  pub fn as_str(&self) -> &str {
+  pub fn as_str(self) -> &'static str {
     unsafe { &**self.0 }
   }
 }

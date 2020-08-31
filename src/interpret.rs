@@ -15,9 +15,9 @@ use bytecode::{
 use std::fs;
 use std::path::Path;
 
-pub type CompileExpression = fn(env : &Env, code : &str, fun : Node) -> BytecodeFunction;
+pub type CompileExpression = fn(env : &Env, fun : Node) -> BytecodeFunction;
 
-pub fn interpret(st : SymbolTable, n : &Node, code : &str) {
+pub fn interpret(st : SymbolTable, n : &Node) {
   let mut env = new_env(st);
   let mut stack = [0 as u8 ; 16384];
   let mut shadow_stack = vec![];
@@ -26,8 +26,8 @@ pub fn interpret(st : SymbolTable, n : &Node, code : &str) {
     byte_pos: 0,
     max_bytes: stack.len() as u32,
   };
-  for &c in n.children {
-    let f = compile::compile_expr_to_function(&env, code, c);
+  for &c in n.children() {
+    let f = compile::compile_expr_to_function(&env, c);
     shadow_stack.clear();
     shadow_stack.push(
       Frame {
@@ -220,8 +220,8 @@ pub fn run_file(path : impl AsRef<Path>) {
     fs::read_to_string(path)
     .expect("Something went wrong reading the file");
   let st = symbols::symbol_table();
-  let ast = parse::parse(&code);
-  interpret(st, &ast, &code);
+  let ast = parse::parse(st, &code);
+  interpret(st, &ast);
 }
 
 #[derive(Copy, Clone)]

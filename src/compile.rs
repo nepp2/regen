@@ -8,7 +8,6 @@ use symbols::to_symbol;
 use env::Env;
 use parse::{
   Node,
-  code_segment,
   node_shape, NodeShape,
 };
 use NodeShape::*;
@@ -51,9 +50,6 @@ struct Builder<'l> {
   /// labels indicating the start and end of a labelled block expression
   label_stack : Vec<LabelledBlockExpr>,
 
-  /// the code text
-  code : &'l str,
-
   /// the environment containing all visible symbols
   env : &'l Env,
 
@@ -78,12 +74,11 @@ fn to_local(var : Var) -> Ref {
   Ref { var, tag: Local }
 }
 
-fn find_local_in_scope(b : &mut Builder, node : Node)
+fn find_local_in_scope(b : &mut Builder, name : Symbol)
   -> Option<Ref>
 {
-  let c = build_symbol(b, node);
   b.locals.iter().rev()
-    .find(|&l| l.name == c)
+    .find(|&l| l.name == name)
     .map(|l| Ref { var: l.var, tag: Local })
 }
 
@@ -121,9 +116,9 @@ fn push_expr(b : &mut Builder, e : Expr) -> Ref {
   return r;
 }
 
-fn build_symbol(b : &mut Builder, n : Node) -> Symbol {
-  symbols::to_symbol(b.env.st, code_segment(b.code, n))
-}
+// fn build_symbol(b : &mut Builder, n : Node) -> Symbol {
+//   symbols::to_symbol(b.env.st, code_segment(b.code, n))
+// }
 
 fn create_sequence(b : &mut Builder, name : &str) -> SeqenceId {
   // Make sure the name is unique
@@ -189,14 +184,14 @@ fn compile_if_else(b : &mut Builder, cond : Node, then_expr : Node, else_expr : 
   b.ops.push(Op::CJump{ cond, then_seq, else_seq });
   set_current_sequence(b, then_seq);
   let then_result =
-    compile_block_expr(b, then_expr.children.as_slice());
+    compile_block_expr(b, then_expr.children());
   if let Some(v) = then_result {
     b.ops.push(Op::Set(result_reg.var, v.var));
   }
   b.ops.push(Op::Jump(exit_seq));
   set_current_sequence(b, else_seq);
   let else_result =
-    compile_block_expr(b, else_expr.children.as_slice());
+    compile_block_expr(b, else_expr.children());
   if let Some(v) = else_result {
     b.ops.push(Op::Set(result_reg.var, v.var));
   }
@@ -216,26 +211,31 @@ fn compile_store(b : &mut Builder, byte_width : ByteWidth, pointer : Node, value
 }
 
 fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
-  match node_shape(&node, b.code) {
+  match node_shape(&node) {
     // Return
-    Atom("return") => {
+    Atom("return", _) => {
       b.ops.push(Op::Return);
       None
     }
     // Break
-    Atom("break") => {
+    Atom("break", _) => {
       let break_to = b.label_stack.last().unwrap().exit_seq;
       b.ops.push(Op::Jump(break_to));
       None
     }
     // Repeat
-    Atom("repeat") => {
+    Atom("repeat", _) => {
       let loop_back_to = b.label_stack.last().unwrap().entry_seq;
       b.ops.push(Op::Jump(loop_back_to));
       None
     }
-    Atom(_) => {
-      Some(atom_to_value(b, node))
+    Atom(string, sym) => {
+      Some(atom_to_value(b, string, sym))
+    }
+    // Literal
+    Literal(v) => {
+      let e = Expr::LiteralU64(v);
+      Some(push_expr(b, e))
     }
     // def
     Command("def", [def_name, value]) => {
@@ -245,8 +245,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
     // fun
     Command("fun", [arg_nodes, body]) => {
       let f = compile_function(
-        b.env, b.code,
-        arg_nodes.children.as_slice(), body.children.as_slice());
+        b.env, arg_nodes.children(), body.children());
       let f_addr = Box::into_raw(Box::new(f)) as u64;
       let r = new_register(b);
       b.ops.push(Op::Expr(r.var, Expr::LiteralU64(f_addr)));
@@ -255,7 +254,9 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
     // set var
     Command("set", [varname, value]) => {
       let val_reg = compile_expr_to_value(b, *value);
-      let var_reg = find_local_in_scope(b, *varname).expect("no variable found");
+      let var_reg =
+        find_local_in_scope(b, varname.as_symbol())
+        .expect("no variable found");
       b.ops.push(Op::Set(var_reg.var, val_reg.var));
       None
     }
@@ -272,7 +273,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
       { compile_store(b, ByteWidth::U8, *pointer, *value); None }
     // let
     Command("let", [var_name, value]) => {
-      let name = build_symbol(b, *var_name);
+      let name = var_name.as_symbol();
       // evaluate the expression
       let val = compile_expr_to_value(b, *value);
       match val.tag {
@@ -294,7 +295,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
       let cond = compile_expr_to_value(b, *cond).var;
       b.ops.push(Op::CJump{ cond, then_seq, else_seq: exit_seq });
       set_current_sequence(b, then_seq);
-      compile_block_expr(b, then_expr.children.as_slice());
+      compile_block_expr(b, then_expr.children());
       b.ops.push(Op::Jump(exit_seq));
       set_current_sequence(b, exit_seq);
       None
@@ -313,7 +314,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
       b.label_stack.push(
         LabelledBlockExpr{ entry_seq, exit_seq }
       );
-      let result = compile_block_expr(b, body.children.as_slice());
+      let result = compile_block_expr(b, body.children());
       b.label_stack.pop();
       b.ops.push(Op::Jump(exit_seq));
       set_current_sequence(b, exit_seq);
@@ -322,7 +323,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
   // Debug
     Command("debug", [v]) => {
       let r = compile_expr_to_value(b, *v);
-      let sym = build_symbol(b, *v);
+      let sym = to_symbol(b.env.st, parse::code_segment(&*v.loc.code, *v));
       b.ops.push(Op::Debug(sym, r.var));
       None
     }
@@ -335,21 +336,13 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
     }
     // symbol
     Command("sym", [v]) => {
-      if let Atom(s) = node_shape(v, b.code) {
-        let s = symbols::to_symbol(b.env.st, s);
-        let e = Expr::LiteralU64(s.as_u64());
-        return Some(push_expr(b, e));
-      }
-      panic!("expected atom")
+      let s = v.as_symbol();
+      let e = Expr::LiteralU64(s.as_u64());
+      return Some(push_expr(b, e));
     }
     // symbol
     Command("alloca", [v]) => {
-      if let Atom(s) = node_shape(v, b.code) {
-        if let Ok(v) = s.parse::<usize>() {
-          return Some(alloca(b, v));
-        }
-      }
-      panic!("expected literal integer");
+      return Some(alloca(b, v.as_literal() as usize));
     }
     _ => {
       let r = compile_list_expr(b, node);
@@ -368,7 +361,7 @@ fn compile_block_expr(b : &mut Builder, nodes : &[Node]) -> Option<Ref> {
   r
 }
 
-fn compile_function(env: &Env, code : &str, args : &[Node], body : &[Node]) -> BytecodeFunction {
+fn compile_function(env: &Env, args : &[Node], body : &[Node]) -> BytecodeFunction {
   let mut b = Builder {
     args: 0,
     locals: vec![],
@@ -380,13 +373,12 @@ fn compile_function(env: &Env, code : &str, args : &[Node], body : &[Node]) -> B
     seq_info: vec![],
     ops: vec![],
     label_stack: vec![],
-    code,
     env,
     arg_values: vec![],
   };
   b.args = args.len();
   for &arg in args {
-    let name = build_symbol(&mut b, arg);
+    let name = arg.as_symbol();
     let var = new_var(&mut b);
     add_local(&mut b, name, var);
   }
@@ -402,13 +394,14 @@ fn compile_function(env: &Env, code : &str, args : &[Node], body : &[Node]) -> B
 }
 
 /// Compile basic imperative language into bytecode
-pub fn compile_expr_to_function(env: &Env, code : &str, root : Node) -> BytecodeFunction {
-  compile_function(env, code, &[], &[root])
+pub fn compile_expr_to_function(env: &Env, root : Node) -> BytecodeFunction {
+  compile_function(env, &[], &[root])
 }
 
 fn function_call(b : &mut Builder, node : Node) -> Ref {
-  let function_val = node.children[0];
-  let args = &node.children[1..];
+  let children = node.children();
+  let function_val = children[0];
+  let args = &children[1..];
   b.arg_values.clear();
   for &arg in args {
     let v = compile_expr_to_value(b, arg);
@@ -422,10 +415,9 @@ fn function_call(b : &mut Builder, node : Node) -> Ref {
   push_expr(b, e)
 }
 
-fn atom_to_value(b : &mut Builder, node : Node) -> Ref {
-  let segment = code_segment(b.code, node);
+fn atom_to_value(b : &mut Builder, string : &str, sym : Symbol) -> Ref {
   // boolean literals
-  match segment {
+  match string {
     "true" => {
       let e = Expr::LiteralU64(1);
       return push_expr(b, e);
@@ -436,17 +428,12 @@ fn atom_to_value(b : &mut Builder, node : Node) -> Ref {
     }
     _ => (),
   }
-  // integer literals
-  if let Ok(v) = segment.parse::<u64>() {
-    let e = Expr::LiteralU64(v);
-    return push_expr(b, e);
-  }
   // Look for local
-  if let Some(r) = find_local_in_scope(b, node) {
+  if let Some(r) = find_local_in_scope(b, sym) {
     return r;
   }
   // Assume global
-  let e = Expr::Def(symbols::to_symbol(b.env.st, segment));
+  let e = Expr::Def(sym);
   push_expr(b, e)
 }
 
@@ -498,28 +485,27 @@ fn str_to_operator(s : &str) -> Option<Operator> {
 }
 
 fn compile_list_expr(b : &mut Builder, node : Node) -> Ref {
-  let head = code_segment(b.code, node.children[0]);
-  let tail = &node.children[1..];
-  // macro
-  // operator
-  let op = str_to_operator(head);
-  if let (Some(op), [v1, v2]) = (op, tail) {
-    let v1 = compile_expr_to_value(b, *v1);
-    let v2 = compile_expr_to_value(b, *v2);
-    let e = Expr::BinaryOp(op, v1.var, v2.var);
-    push_expr(b, e)
+  match node_shape(&node) {
+    Command(head, tail) => {
+      let op = str_to_operator(head);
+      if let (Some(op), [v1, v2]) = (op, tail) {
+        let v1 = compile_expr_to_value(b, *v1);
+        let v2 = compile_expr_to_value(b, *v2);
+        let e = Expr::BinaryOp(op, v1.var, v2.var);
+        return push_expr(b, e);
+      }
+      else if let (Some(op), [v1]) = (op, tail) {
+        let v1 = compile_expr_to_value(b, *v1);
+        let e = Expr::UnaryOp(op, v1.var);
+        return push_expr(b, e);
+      }
+      else if head == "ccall" {
+        return compile_function_call(b, tail, true);
+      }
+    }
+    _ => (),
   }
-  else if let (Some(op), [v1]) = (op, tail) {
-    let v1 = compile_expr_to_value(b, *v1);
-    let e = Expr::UnaryOp(op, v1.var);
-    push_expr(b, e)
-  }
-  else if head == "ccall" {
-    compile_function_call(b, tail, true)
-  }
-  else {
-    compile_function_call(b, node.children.as_slice(), false)
-  }
+  compile_function_call(b, node.children(), false)
 }
 
 /// TODO: this is long-winded. replace it with an in-language macro!
@@ -535,7 +521,7 @@ fn def_macro(b : &mut Builder, def_name : Node, value : Node) {
     r
   };
   let def_sym = {
-    let def = build_symbol(b, def_name).as_u64();
+    let def = def_name.as_symbol().as_u64();
     let r = new_var(b);
     b.ops.push(Op::Expr(r, LiteralU64(def)));
     r

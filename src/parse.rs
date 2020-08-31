@@ -2,13 +2,15 @@
 
 use std::str::CharIndices;
 
-use crate::symbols::Symbol;
+use crate::symbols::{Symbol, SymbolTable, to_symbol};
 use crate::perm_alloc::{perm, perm_slice, Perm, PermSlice};
 
 struct TokenStream<'l>{
   code : &'l str,
+  st : SymbolTable,
   next_start : usize,
   next_len : usize,
+  perm_code : Perm<String>,
 }
 
 #[derive(Copy, Clone)]
@@ -108,10 +110,13 @@ pub enum NodeContent {
   Literal(u64),
 }
 
+use NodeContent::*;
+
 #[derive(Clone, Copy, Debug)]
 pub struct SrcLocation {
   pub start : usize,
   pub end : usize,  
+  pub code : Perm<String>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -120,8 +125,43 @@ pub struct NodeInfo {
   pub content : NodeContent,
 }
 
-fn parse_atom(s : &str) -> NodeContent {
-  panic!()
+impl NodeInfo {
+  pub fn children(&self) -> &[Node] {
+    match self.content {
+      NodeContent::List(l) => l.as_slice(),
+      _ => &[],
+    }
+  }
+
+  pub fn is_list(&self) -> bool {
+    match self.content {
+      NodeContent::List(_) => true,
+      _ => false,
+    }
+  }
+
+  pub fn as_symbol(&self) -> Symbol {
+    match self.content {
+      NodeContent::Sym(s) => s,
+      _ => panic!("expected symbol, found {:?}", self),
+    }
+  }
+
+  pub fn as_literal(&self) -> u64 {
+    match self.content {
+      NodeContent::Literal(v) => v,
+      _ => panic!("expected literal"),
+    }
+  }
+}
+
+fn parse_atom(st : SymbolTable, s : &str) -> NodeContent {
+  if let Ok(v) = s.parse::<u64>() {
+    Literal(v)
+  }
+  else {
+    Sym(to_symbol(st, s))
+  }
 }
 
 /// parse sexp list
@@ -152,9 +192,10 @@ fn parse_list(ns : &mut Vec<Node>, ts : &mut TokenStream) {
           _ => {
             let loc = SrcLocation {
               start: ts.next_start,
-              end: ts.next_start + ts.next_len
+              end: ts.next_start + ts.next_len,
+              code: ts.perm_code,
             };
-            let content = parse_atom(&ts.code[loc.start..loc.end]);
+            let content = parse_atom(ts.st, &ts.code[loc.start..loc.end]);
             let atom = NodeInfo { loc, content };
             skip(ts);
             ns.push(perm(atom));
@@ -165,88 +206,81 @@ fn parse_list(ns : &mut Vec<Node>, ts : &mut TokenStream) {
   }
   let children = perm_slice(&ns[node_index..]);
   ns.truncate(node_index);
-  let loc = SrcLocation { start, end: ts.next_start };
+  let loc = SrcLocation { start, end: ts.next_start, code: ts.perm_code };
   ns.push(perm(NodeInfo{ loc, content: NodeContent::List(children) }));
 }
 
 pub enum NodeShape<'l> {
   Command(&'l str, &'l [Node]),
-  Atom(&'l str),
+  Atom(&'l str, Symbol),
+  Literal(u64),
   Other,
 }
 
-pub fn node_shape<'l>(n : &'l Node, code : &'l str) -> NodeShape<'l> {
-  if n.children.len() > 0 {
-    let head = n.children[0];
-    if head.children.len() == 0 {    
-      let s = code_segment(code, head);
-      NodeShape::Command(s, &n.children[1..])
+pub fn node_shape<'l>(n : &'l Node) -> NodeShape<'l> {
+  match n.content {
+    List(children) => {
+      let head = children[0];
+      if let Sym(s) = head.content {    
+        NodeShape::Command(s.as_str(), &children.as_slice()[1..])
+      }
+      else {
+        NodeShape::Other
+      }
     }
-    else {
-      NodeShape::Other
-    }
+    Sym(s) => NodeShape::Atom(s.as_str(), s),
+    Literal(v) => NodeShape::Literal(v),
   }
-  else {
-    NodeShape::Atom(code_segment(code, *n))
-  }
-}
-
-pub fn head_tail<'l>(n : &'l Node, code : &'l str) -> Option<(&'l str, &'l [Node])> {
-  if n.children.len() > 0 {
-    let s = code_segment(code, n.children[0]);
-    return Some((s, &n.children[1..]));
-  }
-  None
 }
 
 pub fn code_segment(code : &str, n : Node) -> &str {
-  &code[n.start..n.end]
+  &code[n.loc.start..n.loc.end]
 }
 
-pub fn parse(code : &str) -> Node {
+pub fn parse(st : SymbolTable, code : &str) -> Node {
   let mut ns = vec!();
-  let mut ts = TokenStream { code, next_start: 0, next_len: 0 };
+  let perm_code = perm(code.to_string());
+  let mut ts = TokenStream { code, st, next_start: 0, next_len: 0, perm_code };
   parse_list(&mut ns, &mut ts);
   // display(code, 0, ns[0], &mut false);
   // println!();
   ns.pop().unwrap()
 }
 
-fn display(code : &str, depth: usize, n : Node, newline : &mut bool) {
-  if n.children.len() == 0 {
-    print!("{}", &code[n.start..n.end]);
-  }
-  else {
-    display_list(code, depth, n.children.as_slice(), newline);
+fn display(depth: usize, n : Node, newline : &mut bool) {
+  match n.content {
+    List(children) => display_list(depth, children.as_slice(), newline),
+    Sym(s) => print!("{}", s),
+    Literal(l) => print!("{}", l),
   }
 }
 
-fn display_list(code : &str, depth: usize, ns : &[Node], newline : &mut bool) {
+fn display_list(depth: usize, ns : &[Node], newline : &mut bool) {
   print!("(");
   for i in 0..ns.len() {
     let n = ns[i];
-    if n.children.len() > 0 && (ns.len() > 3 || i == 0) {
-      display_list_newline(code, depth + 1, ns, i, true);
+    if n.children().len() > 0 && (ns.len() > 3 || i == 0) {
+      display_list_newline(depth + 1, ns, i, true);
       *newline = true;
       return;
     }
     if i > 0 {
       print!(" ");
     }
-    display(code, depth, n, newline);
+    display(depth, n, newline);
     if *newline {
-      display_list_newline(code, depth + 1, ns, i + 1, false);
+      display_list_newline(depth + 1, ns, i + 1, false);
       return;
     }
   }
   print!(")");
 }
 
-fn display_list_newline(code : &str, depth: usize, ns : &[Node], mut i : usize, indent_newline : bool) {
+fn display_list_newline(depth: usize, ns : &[Node], mut i : usize, indent_newline : bool) {
   while i < ns.len() {
     println!();
     print_indent(depth * 2);
-    display(code, depth, ns[i], &mut false);
+    display(depth, ns[i], &mut false);
     i += 1;
   }
   if indent_newline {
