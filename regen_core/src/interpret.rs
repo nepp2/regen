@@ -8,7 +8,7 @@ use crate::{parse, bytecode, env, ffi, compile};
 use env::Env;
 use parse::Node;
 use bytecode::{
-  BytecodeFunction, Op, Expr, Var, Operator, ByteWidth,
+  BytecodeFunction, Op, Expr, FrameVar, Operator, ByteWidth,
 };
 
 pub type CompileExpression = fn(env : &Env, fun : Node) -> BytecodeFunction;
@@ -67,7 +67,7 @@ struct Frame {
   return_addr : *mut u64,
 }
 
-fn reg(sbp : usize, i : Var) -> usize {
+fn reg(sbp : usize, i : FrameVar) -> usize {
   i.byte_offset + sbp
 }
 
@@ -236,16 +236,16 @@ impl StackPtr {
   }
 }
 
-fn var_addr(sbp : StackPtr, v : Var) -> *mut u64 {
+fn var_addr(sbp : StackPtr, v : FrameVar) -> *mut u64 {
   sbp.byte_offset(v.byte_offset)
 }
 
-fn set_var(sbp : StackPtr, v : Var, val : u64) {
+fn set_var(sbp : StackPtr, v : FrameVar, val : u64) {
   unsafe {
     *var_addr(sbp, v) = val;
   }
 }
 
-fn get_var(sbp : StackPtr, v : Var) -> u64 {
+fn get_var(sbp : StackPtr, v : FrameVar) -> u64 {
   unsafe { *var_addr(sbp, v) }
 }

@@ -109,7 +109,7 @@ impl fmt::Display for Op {
   }
 }
 
-impl fmt::Display for Var {
+impl fmt::Display for FrameVar {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "${}_{}", self.byte_offset, self.bytes)
   }

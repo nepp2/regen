@@ -9,9 +9,9 @@ use symbols::Symbol;
 #[derive(Copy, Clone, Debug)]
 pub struct SeqenceId(pub usize);
 
-/// Identifies a register that is local to a stack frame
+/// Identifies a storage location that is local to a stack frame
 #[derive(Copy, Clone, Debug)]
-pub struct Var {
+pub struct FrameVar {
   pub byte_offset : usize,
   pub bytes : usize,
 }
@@ -27,10 +27,10 @@ pub enum Operator {
 pub enum Expr {
   Def(Symbol),
   LiteralU64(u64),
-  BinaryOp(Operator, Var, Var),
-  UnaryOp(Operator, Var),
-  Invoke(Var),
-  InvokeC(Var, usize),
+  BinaryOp(Operator, FrameVar, FrameVar),
+  UnaryOp(Operator, FrameVar),
+  Invoke(FrameVar),
+  InvokeC(FrameVar, usize),
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -40,14 +40,14 @@ pub enum ByteWidth {
 
 #[derive(Copy, Clone, Debug)]
 pub enum Op {
-  Expr(Var, Expr),
-  Set(Var, Var),
-  SetReturn(Var),
-  CJump{ cond: Var, then_seq: SeqenceId, else_seq: SeqenceId },
-  Debug(Symbol, Var),
+  Expr(FrameVar, Expr),
+  Set(FrameVar, FrameVar),
+  SetReturn(FrameVar),
+  CJump{ cond: FrameVar, then_seq: SeqenceId, else_seq: SeqenceId },
+  Debug(Symbol, FrameVar),
   Jump(SeqenceId),
-  Arg{ index: u8, value: Var },
-  Store{ byte_width : ByteWidth, pointer : Var, value : Var },
+  Arg{ index: u8, value: FrameVar },
+  Store{ byte_width : ByteWidth, pointer : FrameVar, value : FrameVar },
   Return,
 }
 
@@ -63,7 +63,7 @@ pub struct SequenceInfo {
 #[derive(Copy, Clone)]
 pub struct NamedVar {
   pub name : Symbol,
-  pub var : Var,
+  pub var : FrameVar,
 }
 
 pub struct BytecodeFunction {
@@ -71,6 +71,6 @@ pub struct BytecodeFunction {
   pub ops : Vec<Op>,
   pub args : usize,
   pub locals : Vec<NamedVar>,
-  pub registers : Vec<Var>,
+  pub registers : Vec<FrameVar>,
   pub frame_bytes : usize,
 }
