@@ -1,11 +1,13 @@
 /// Compiles core language into bytecode
 
-use crate::{bytecode, parse, symbols, env, perm_alloc};
+use crate::{bytecode, parse, symbols, env, perm_alloc, types};
 
 use bytecode::{
   SeqenceId, SequenceInfo, Expr, BytecodeFunction,
   ByteWidth, NamedVar, Op, Operator, FrameVar,
 };
+
+use types::Type;
 
 use perm_alloc::Perm;
 
@@ -32,7 +34,7 @@ struct Builder<'l> {
   locals : Vec<NamedVar>,
   
   /// local variables in scope
-  scoped_locals : Vec<NamedVar>,
+  scoped_locals : Vec<(NamedVar, Type)>,
   
   /// registers
   registers : Vec<FrameVar>,
@@ -63,56 +65,49 @@ struct Builder<'l> {
 }
 
 #[derive(Eq, PartialEq, Copy, Clone)]
-enum RefTag {
+enum VarType {
   Local, Register
 }
 
-use RefTag::*;
+use VarType::*;
 
 #[derive(Copy, Clone)]
 struct Var {
   fv : FrameVar,
-  tag : RefTag,
+  var_type : VarType,
+  data_type : Type,
 }
 
-fn to_local(var : FrameVar) -> Var {
-  Var { fv: var, tag: Local }
+fn to_local(var : FrameVar, data_type : Type) -> Var {
+  Var { fv: var, var_type: Local, data_type }
 }
 
 fn find_local_in_scope(b : &mut Builder, name : Symbol)
   -> Option<Var>
 {
-  b.locals.iter().rev()
-    .find(|&l| l.name == name)
-    .map(|l| Var { fv: l.var, tag: Local })
+  b.scoped_locals.iter().rev()
+    .find(|&l| l.0.name == name)
+    .map(|(l, t)| Var { fv: l.var, var_type: Local, data_type: *t})
 }
 
-fn add_local(b : &mut Builder, name : Symbol, var : FrameVar) -> Var {
+fn add_local(b : &mut Builder, name : Symbol, var : FrameVar, t : Type) -> Var {
   let local = NamedVar{ name, var };
   b.locals.push(local);
-  b.scoped_locals.push(local);
-  Var { fv: var, tag: Local }
+  b.scoped_locals.push((local, t));
+  Var { fv: var, var_type: Local, data_type: t }
 }
 
-fn new_frame_var(b : &mut Builder) -> FrameVar {
+fn new_frame_var(b : &mut Builder, bytes : usize) -> FrameVar {
   // TODO: this should take a byte width!
-  let var = FrameVar{ byte_offset: b.frame_bytes, bytes: 8 };
+  let var = FrameVar{ byte_offset: b.frame_bytes, bytes };
   b.registers.push(var);
   b.frame_bytes += var.bytes;
   var
 }
 
-fn new_var(b : &mut Builder) -> Var {
-  let var = new_frame_var(b);
-  Var { fv: var, tag: Register }
-}
-
-fn alloca(b : &mut Builder, bytes : usize) -> Var {
-  // TODO: this should be deleted
-  let var = FrameVar{ byte_offset: b.frame_bytes, bytes };
-  b.registers.push(var);
-  b.frame_bytes += bytes;
-  Var { fv: var, tag: Register }
+fn new_var(b : &mut Builder, t : Type) -> Var {
+  let var = new_frame_var(b, t.get().size as usize);
+  Var { fv: var, var_type: Register, data_type: t }
 }
 
 fn push_expr(b : &mut Builder, e : Expr) -> Var {
@@ -286,7 +281,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       let name = var_name.as_symbol();
       // evaluate the expression
       let val = compile_expr_to_value(b, *value);
-      match val.tag {
+      match val.var_type {
         Local => {
           add_local(b, name, val.fv);
         }
