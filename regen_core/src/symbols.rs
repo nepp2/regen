@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[repr(C)]
 pub struct Symbol(*const *const str);
 
 impl Symbol {

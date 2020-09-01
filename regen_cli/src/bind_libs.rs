@@ -11,7 +11,7 @@ pub extern "C" fn load_library(path : Symbol) -> *const Library {
   load_library_str(path.as_str())
 }
 
-pub extern "C" fn load_library_str(path : &str) -> *const Library {
+fn load_library_str(path : &str) -> *const Library {
   let path = Path::new(path);
   let r = Library::new(path);
   if r.is_err() {
