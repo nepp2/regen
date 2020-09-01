@@ -32,9 +32,9 @@
   (let name (warray_get ns 0))
   (let args (warray_get ns 1))
   (let body (warray_get ns 2))
-  (ccall display_node name)
-  (ccall display_node args)
-  (ccall display_node body)
+  (ccall node_display name)
+  (ccall node_display args)
+  (ccall node_display body)
   ;; (template
   ;;   (def #name (fun #args #body))
   ;; )

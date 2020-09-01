@@ -82,7 +82,7 @@ pub extern "C" fn node_children(out : &mut PermSlice<Node>, node : Node) {
   *out = s;
 }
 
-pub extern "C" fn display_node(node : Node) {
+pub extern "C" fn node_display(node : Node) {
   println!("{}", node);
 }
 
@@ -107,7 +107,7 @@ pub fn new_env(st : SymbolTable) -> Box<Env> {
   env.insert_str("env_get", env_get as u64, env.c.u64_tag);
   env.insert_str("print_symbol", print_symbol as u64, env.c.u64_tag);
   env.insert_str("node_children", node_children as u64, env.c.u64_tag);
-  env.insert_str("display_node", display_node as u64, env.c.u64_tag);
+  env.insert_str("node_display", node_display as u64, env.c.u64_tag);
   env
 }
 
