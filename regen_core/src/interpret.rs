@@ -3,22 +3,18 @@
 /// Receives a sexp node tree and compiles/interprets the top level
 /// nodes one at a time.
 
-use crate::{symbols, parse, bytecode, env, ffi, compile};
+use crate::{parse, bytecode, env, ffi, compile};
 
-use env::{Env, new_env};
-use symbols::SymbolTable;
+use env::Env;
 use parse::Node;
 use bytecode::{
   BytecodeFunction, Op, Expr, Var, Operator, ByteWidth,
 };
 
-use std::fs;
-use std::path::Path;
-
 pub type CompileExpression = fn(env : &Env, fun : Node) -> BytecodeFunction;
 
-pub fn interpret(st : SymbolTable, n : &Node) {
-  let mut env = new_env(st);
+pub fn interpret(code : &str, env : &mut Env) {
+  let n = parse::parse(env.st, &code);
   let mut stack = [0 as u8 ; 16384];
   let mut shadow_stack = vec![];
   let stack_ptr = StackPtr {
@@ -27,7 +23,7 @@ pub fn interpret(st : SymbolTable, n : &Node) {
     max_bytes: stack.len() as u32,
   };
   for &c in n.children() {
-    let f = compile::compile_expr_to_function(&env, c);
+    let f = compile::compile_expr_to_function(env, c);
     shadow_stack.clear();
     shadow_stack.push(
       Frame {
@@ -37,7 +33,7 @@ pub fn interpret(st : SymbolTable, n : &Node) {
         return_addr: stack_ptr.byte_offset(0),
       }
     );
-    interpreter_loop(&mut shadow_stack, &mut env);
+    interpreter_loop(&mut shadow_stack, env);
   }
 
   if let Some(v) = env.get_str("main") {
@@ -50,7 +46,7 @@ pub fn interpret(st : SymbolTable, n : &Node) {
         f,
         return_addr: stack_ptr.byte_offset(0),
       });
-    interpreter_loop(&mut shadow_stack, &mut env);
+    interpreter_loop(&mut shadow_stack, env);
   }
   else {
     println!("No main function found.");
@@ -213,15 +209,6 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : &mut Env) {
     }
   }
   shadow_stack.push(frame);
-}
-
-pub fn run_file(path : impl AsRef<Path>) {
-  let code =
-    fs::read_to_string(path)
-    .expect("Something went wrong reading the file");
-  let st = symbols::symbol_table();
-  let ast = parse::parse(st, &code);
-  interpret(st, &ast);
 }
 
 #[derive(Copy, Clone)]

@@ -1,21 +1,20 @@
 #![allow(dead_code)]
 
-mod perm_alloc;
-mod symbols;
-mod parse;
-mod env;
-mod bytecode;
-mod compile;
-mod interpret;
-mod ffi;
-mod types;
 mod watcher;
+mod bind_libs;
 
-#[cfg(test)]
-mod test;
+use regen_core::{interpret, new_env};
+use std::fs;
+use std::path::Path;
 
-// #[cfg(test)]
-// #[macro_use] extern crate rusty_fork;
+fn run_file(path : impl AsRef<Path>) {
+  let code =
+    fs::read_to_string(path)
+    .expect("Something went wrong reading the file");
+  let mut env = new_env();
+  bind_libs::bind_libs(&mut env);
+  interpret(&code, &mut env);
+}
 
 fn main(){
   let args: Vec<String> = std::env::args().collect();
@@ -24,9 +23,9 @@ fn main(){
     ["watch", path] => {
       watcher::watch(path.as_ref())
     }
-    ["watch"] => watcher::watch("code/scratchpad.code"),
+    ["watch"] => watcher::watch("examples/scratchpad.gen"),
     ["run", path] => {
-      interpret::run_file(path);
+      run_file(path);
     }
     [] => {
       watcher::watch("examples/scratchpad.gen");
