@@ -37,7 +37,7 @@
 
 
 ;; (let rect_type (block (
-;;   (let fields (ref (alloca 16)))
+;;   (let fields (alloca 16))
 ;;   (warray_init fields 4 8)
 ;;   (warray_set fields 0 u32)
 ;;   (warray_set fields 1 u32)

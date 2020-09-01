@@ -348,7 +348,9 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
     }
     // symbol
     Command("alloca", [v]) => {
-      return Some(alloca(b, v.as_literal() as usize));
+      let r = alloca(b, v.as_literal() as usize);
+      let e = push_expr(b, Expr::UnaryOp(Operator::Ref, r.var));
+      return Some(e);
     }
     _ => {
       let r = compile_list_expr(b, node);

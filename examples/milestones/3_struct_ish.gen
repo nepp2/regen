@@ -7,7 +7,7 @@
 )))
 
 (def main (fun () (
-  (let rect (ref (alloca 16)))
+  (let rect (alloca 16))
   (rect_init rect 1 2 3 4)
 
   (if (ccall test_struct rect)

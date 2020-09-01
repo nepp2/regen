@@ -95,11 +95,11 @@
 )))
 
 (def main (fun () (
-  (let rect (ref (alloca 16)))
+  (let rect (alloca 16))
   (rect_init rect 1 2 3 4)
 
   (let rect_type (block (
-    (let fields (ref (alloca 16)))
+    (let fields (alloca 16))
     (warray_init fields 4 8)
     (warray_set fields 0 u32)
     (warray_set fields 1 u32)

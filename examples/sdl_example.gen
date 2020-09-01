@@ -85,7 +85,7 @@
     (ccall sdl_set_draw_color renderer 255 0 0 255)
 
     (let rect (block (
-      (let p (ref (alloca 16)))
+      (let p (alloca 16))
       (store_32 p 50)
       (store_32 (+ p 4) 50)
       (store_32 (+ p 8) 300)

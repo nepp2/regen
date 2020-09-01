@@ -26,8 +26,8 @@
 )))
 
 (def function (fun (n) (
-  (ccall display_node n)
-  (let ns (ref (alloca 16)))
+  (ccall node_display n)
+  (let ns (alloca 16))
   (ccall node_children ns n)
   (let name (warray_get ns 0))
   (let args (warray_get ns 1))
