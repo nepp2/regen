@@ -1,27 +1,4 @@
 
-;; *{ size : u64, id : symbol, kind : symbol, type_info : *void }
-(def new_type (fun (size id kind type_info) (
-  ;; allocate type
-  (let p (ccall malloc 32))
-  (store_64 p size)
-  (store_64 (+ p 8) id)
-  (store_64 (+ p 16) kind)
-  (store_64 (+ p 24) type_info)
-  p
-)))
-
-(def size_of (fun (type) (
-  (load_64 type)
-)))
-
-(def type_id (fun (type) (
-  (load_64 (+ type 8))
-)))
-
-(def type_kind (fun (type) (
-  (load_64 (+ type 16))
-)))
-
 ;; word array - all elements are 64bit
 ;; *{ element_count : u64, data : *void }
 (def warray_init (fun (p element_count) (
@@ -48,73 +25,25 @@
   (load_64 (warray_index array index))
 )))
 
-;; packed array - can have arbitrarily sized elements
-;; *{ element_count : u64, element_size : u64, data : *void }
-(def parray_init (fun (p element_count element_size) (
-  (let data (ccall malloc (* element_count element_size)))
-  (store_64 p element_count)
-  (store_64 (+ p 8) element_size)
-  (store_64 (+ p 16) data)
-  p
-)))
-
-(def parray_len (fun (array) (
-  (load_64 array)
-)))
-
-(def parray_index (fun (array index) (
-  (let element_size (load_64 (+ array 8)))
-  (let data (load_64 (+ array 16)))
-  (+ data (* element_size index))
-)))
-
-(def new_struct_type (fun (id field_warray) (
-  (let size 0)
-  (let i 0)
-  (let limit (warray_len field_warray))
-  (block (
-    (if (>= i limit)
-     (break))
-    (let t (warray_get field_warray i))
-    (set size (+ size (size_of t)))
-    (set i (+ i 1))
-    repeat
-  ))
-  (new_type size id (sym struct) field_warray)
-)))
-
-;; x y w h
-;; (def rect
-;;   (struct i32 i32 i32 i32))
-
-(def rect_init (fun (p x y w h) (
-  (store_32 p x)
-  (store_32 (+ p 4) y)
-  (store_32 (+ p 8) w)
-  (store_32 (+ p 12) h)
+(def function (fun (n) (
+  (ccall display_node n)
+  (let ns (ref (alloca 16)))
+  (ccall node_children ns n)
+  (let name (warray_get ns 0))
+  (let args (warray_get ns 1))
+  (let body (warray_get ns 2))
+  (ccall display_node name)
+  (ccall display_node args)
+  (ccall display_node body)
+  ;; (template
+  ;;   (def #name (fun #args #body))
+  ;; )
 )))
 
 (def main (fun () (
-  (let rect (ref (alloca 16)))
-  (rect_init rect 1 2 3 4)
-
-  (let rect_type (block (
-    (let fields (ref (alloca 16)))
-    (warray_init fields 4 8)
-    (warray_set fields 0 u32)
-    (warray_set fields 1 u32)
-    (warray_set fields 2 u32)
-    (warray_set fields 3 u32)
-    (new_struct_type (sym rect) fields)
+  (function (# (
+    add (a b) (
+      (+ a b)
+    )
   )))
-
-  (debug (size_of rect_type))
-  (ccall print_symbol (type_id rect_type))
-
-  (if (ccall test_struct rect)
-    ((ccall print_symbol (sym SUCCESS)))
-    ((ccall print_symbol (sym FAILED)))
-  )
-
-  (debug (size_of type))
 )))

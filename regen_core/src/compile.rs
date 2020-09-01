@@ -1,8 +1,9 @@
 /// Compiles core language into bytecode
 
-use crate::{bytecode, parse, symbols, env};
+use crate::{bytecode, parse, symbols, env, perm_alloc};
 
 use bytecode::definition::*;
+use perm_alloc::Perm;
 
 use symbols::to_symbol;
 use env::Env;
@@ -235,6 +236,11 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
     // Literal
     Literal(v) => {
       let e = Expr::LiteralU64(v);
+      Some(push_expr(b, e))
+    }
+    // quotation
+    Command("#", [n]) => {
+      let e = Expr::LiteralU64(Perm::to_ptr(*n) as u64);
       Some(push_expr(b, e))
     }
     // def

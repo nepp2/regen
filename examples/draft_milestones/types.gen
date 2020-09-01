@@ -1,3 +1,4 @@
+
 ;; *{ size : u64, id : symbol, kind : symbol, type_info : *void }
 (def new_type (fun (size id kind type_info) (
   ;; allocate type
@@ -21,48 +22,65 @@
   (load_64 (+ type 16))
 )))
 
-(def new_primitive_type (fun (size id) (
-  (new_type size id (sym primitive) 0)
-)))
-
-(def u8 (new_primitive_type 1 (sym u8)))
-(def u16 (new_primitive_type 2 (sym u16)))
-(def u32 (new_primitive_type 4 (sym u32)))
-(def u64 (new_primitive_type 8 (sym u64)))
-
-;; *{ num_elements : u64, elements ... }
-(def array_new (fun (num_elements) (
-  (let bytes (+ 8 (* 8 num_elements)))
-  (let p (ccall malloc bytes))
-  (store_64 p num_elements)
+;; word array - all elements are 64bit
+;; *{ element_count : u64, data : *void }
+(def warray_init (fun (p element_count) (
+  (let data (ccall malloc (* element_count 8)))
+  (store_64 p element_count)
+  (store_64 (+ p 8) data)
   p
 )))
 
-(def array_len (fun (array) (
+(def warray_len (fun (array) (
   (load_64 array)
 )))
 
-(def array_set (fun (array index value) (
-  (store_64 (+ array (* 8 (+ index 1))) value)
+(def warray_index (fun (array index) (
+  (let data (load_64 (+ array 8)))
+  (+ data (* 8 index))
 )))
 
-(def array_get (fun (array index) (
-  (load_64 (+ array (* 8 (+ index 1))))
+(def warray_set (fun (array index value) (
+  (store_64 (warray_index array index) value)
 )))
 
-(def new_struct_type (fun (id field_array) (
+(def warray_get (fun (array index value) (
+  (load_64 (warray_index array index))
+)))
+
+;; packed array - can have arbitrarily sized elements
+;; *{ element_count : u64, element_size : u64, data : *void }
+(def parray_init (fun (p element_count element_size) (
+  (let data (ccall malloc (* element_count element_size)))
+  (store_64 p element_count)
+  (store_64 (+ p 8) element_size)
+  (store_64 (+ p 16) data)
+  p
+)))
+
+(def parray_len (fun (array) (
+  (load_64 array)
+)))
+
+(def parray_index (fun (array index) (
+  (let element_size (load_64 (+ array 8)))
+  (let data (load_64 (+ array 16)))
+  (+ data (* element_size index))
+)))
+
+(def new_struct_type (fun (id field_warray) (
   (let size 0)
   (let i 0)
-  (let limit (array_len field_array))
+  (let limit (warray_len field_warray))
   (block (
     (if (>= i limit)
      (break))
-    (let t (array_get field_array i))
+    (let t (warray_get field_warray i))
     (set size (+ size (size_of t)))
     (set i (+ i 1))
     repeat
   ))
-  (new_type size id (sym struct) field_array)
+  (new_type size id (sym struct) field_warray)
 )))
 
 ;; x y w h
@@ -81,21 +99,22 @@
   (rect_init rect 1 2 3 4)
 
   (let rect_type (block (
-    (let fields (array_new 4))
-    (array_set fields 0 u32)
-    (array_set fields 1 u32)
-    (array_set fields 2 u32)
-    (array_set fields 3 u32)
+    (let fields (ref (alloca 16)))
+    (warray_init fields 4 8)
+    (warray_set fields 0 u32)
+    (warray_set fields 1 u32)
+    (warray_set fields 2 u32)
+    (warray_set fields 3 u32)
     (new_struct_type (sym rect) fields)
   )))
 
   (debug (size_of rect_type))
   (ccall print_symbol (type_id rect_type))
 
-  ;; (let rect2 (rect 1 2 3 4))
-
   (if (ccall test_struct rect)
     ((ccall print_symbol (sym SUCCESS)))
     ((ccall print_symbol (sym FAILED)))
   )
+
+  (debug (size_of type))
 )))

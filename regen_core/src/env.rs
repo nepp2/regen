@@ -2,6 +2,9 @@
 
 use crate::symbols::{Symbol, SymbolTable, to_symbol};
 use crate::types::{Type, CoreTypes, core_types};
+use crate::parse;
+use parse::{Node, NodeContent};
+use crate::perm_alloc::{PermSlice, perm_slice};
 use std::collections::HashMap;
 
 /// Environment for interpreter
@@ -71,6 +74,18 @@ pub extern "C" fn print_symbol(sym : Symbol) {
   println!("symbol: {}", sym)
 }
 
+pub extern "C" fn node_children(out : &mut PermSlice<Node>, node : Node) {
+  let s = match node.content {
+    NodeContent::List(l) => l,
+    _ => perm_slice(&[]),
+  };
+  *out = s;
+}
+
+pub extern "C" fn display_node(node : Node) {
+  println!("{}", node);
+}
+
 pub fn new_env(st : SymbolTable) -> Box<Env> {
   let env_ptr = Box::into_raw(Box::new(Env {
     values: Default::default(),
@@ -91,6 +106,8 @@ pub fn new_env(st : SymbolTable) -> Box<Env> {
   env.insert_str("env_insert", env_insert as u64, env.c.u64_tag);
   env.insert_str("env_get", env_get as u64, env.c.u64_tag);
   env.insert_str("print_symbol", print_symbol as u64, env.c.u64_tag);
+  env.insert_str("node_children", node_children as u64, env.c.u64_tag);
+  env.insert_str("display_node", display_node as u64, env.c.u64_tag);
   env
 }
 

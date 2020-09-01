@@ -247,49 +247,57 @@ pub fn parse(st : SymbolTable, code : &str) -> Node {
   ns.pop().unwrap()
 }
 
-fn display(depth: usize, n : Node, newline : &mut bool) {
-  match n.content {
-    List(children) => display_list(depth, children.as_slice(), newline),
-    Sym(s) => print!("{}", s),
-    Literal(l) => print!("{}", l),
+use std::fmt;
+
+impl fmt::Display for Node {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    display(f, 0, *self, &mut false)
   }
 }
 
-fn display_list(depth: usize, ns : &[Node], newline : &mut bool) {
-  print!("(");
+fn display(f: &mut fmt::Formatter<'_>, depth: usize, n : Node, newline : &mut bool) -> fmt::Result {
+  match n.content {
+    List(children) => display_list(f, depth, children.as_slice(), newline),
+    Sym(s) => write!(f, "{}", s),
+    Literal(l) => write!(f, "{}", l),
+  }
+}
+
+fn display_list(f: &mut fmt::Formatter<'_>, depth: usize, ns : &[Node], newline : &mut bool) -> fmt::Result {
+  write!(f, "(")?;
   for i in 0..ns.len() {
     let n = ns[i];
     if n.children().len() > 0 && (ns.len() > 3 || i == 0) {
-      display_list_newline(depth + 1, ns, i, true);
+      display_list_newline(f, depth + 1, ns, i, true)?;
       *newline = true;
-      return;
+      return Ok(());
     }
     if i > 0 {
-      print!(" ");
+      write!(f, " ")?;
     }
-    display(depth, n, newline);
+    display(f, depth, n, newline)?;
     if *newline {
-      display_list_newline(depth + 1, ns, i + 1, false);
-      return;
+      return display_list_newline(f, depth + 1, ns, i + 1, false);
     }
   }
-  print!(")");
+  write!(f, ")")
 }
 
-fn display_list_newline(depth: usize, ns : &[Node], mut i : usize, indent_newline : bool) {
+fn display_list_newline(f: &mut fmt::Formatter<'_>, depth: usize, ns : &[Node], mut i : usize, indent_newline : bool) -> fmt::Result {
   while i < ns.len() {
-    println!();
-    print_indent(depth * 2);
-    display(depth, ns[i], &mut false);
+    writeln!(f)?;
+    print_indent(f, depth * 2)?;
+    display(f, depth, ns[i], &mut false)?;
     i += 1;
   }
   if indent_newline {
-    println!();
-    print_indent((depth-1) * 2);
+    writeln!(f)?;
+    print_indent(f, (depth-1) * 2)?;
   }
-  print!(")");
+  write!(f, ")")
 }
 
-fn print_indent(indent : usize) {
-  for _ in 0..indent { print!(" ") }
+fn print_indent(f: &mut fmt::Formatter<'_>, indent : usize) -> fmt::Result {
+  for _ in 0..indent { write!(f, " ")? }
+  Ok(())
 }

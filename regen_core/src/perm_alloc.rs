@@ -12,17 +12,27 @@ use std::borrow;
 use std::ops::RangeFrom;
 
 #[derive(Clone)]
+#[repr(C)]
 pub struct Perm<T> {
   p : *const T
 }
 
+impl <T> Perm<T> {
+  pub fn to_ptr(v : Self) -> *const T {
+    v.p
+  }
+}
+
 impl <T : Clone> Copy for Perm<T> { }
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
+#[repr(C)]
 pub struct PermSlice<T> {
-  p : *const T,
   len : usize,
+  p : *const T,
 }
+
+impl <T : Clone> Copy for PermSlice<T> { }
 
 pub fn perm<T>(t : T) -> Perm<T> {
   Perm { p : Box::into_raw(Box::new(t)) }
