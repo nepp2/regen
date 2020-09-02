@@ -1,6 +1,7 @@
 /// Defines the an extensible Type data structure to be used by the
 /// compiler & interpreter.
 
+use crate::perm_alloc::{PermSlice, perm_slice};
 use crate::symbols;
 use symbols::{Symbol, to_symbol, SymbolTable};
 
@@ -28,21 +29,28 @@ pub struct TypeInfo {
 
 #[derive(Copy, Clone)]
 #[repr(C)]
+pub struct Field {
+  pub t : Type,
+  pub offset : u64,
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
 pub struct StructInfo {
-  fields : PackedArray,
+  pub fields : PermSlice<Field>,
 }
 
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct PointerInfo {
-  points_to : Type,
+  pub points_to : Type,
 }
 
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct FunctionInfo {
-  args : WordArray,
-  returns : Type,
+  pub args : PermSlice<Type>,
+  pub returns : Type,
 }
 
 pub struct CoreTypes {
@@ -53,40 +61,20 @@ pub struct CoreTypes {
   pub u8_tag : Type,
   pub void_ptr_tag : Type,
   pub macro_tag : Type,
+
+  pub function_kind : Symbol,
+
   pub core_types : Vec<Type>,
 }
 
-struct Field {
-  t : Type,
-  offset : u64,
-}
-
-#[derive(Copy, Clone)]
-struct PackedArray {
-  element_count : u64,
-  element_size : u64,
-  data : *const (),
-}
-
-fn to_packed_array<T>(types : Vec<T>) -> PackedArray {
-  let element_count = types.len() as u64;
-  let element_size = std::mem::size_of::<T>() as u64;
-  let data = types.as_slice().as_ptr() as *const ();
-  std::mem::forget(types);
-  PackedArray { element_count, element_size, data }
-}
-
-#[derive(Copy, Clone)]
-struct WordArray {
-  element_count : u64,
-  data : *const (),
-}
-
-fn to_word_array<T>(types : Vec<T>) -> WordArray {
-  let element_count = types.len() as u64;
-  let data = types.as_slice().as_ptr() as *const ();
-  std::mem::forget(types);
-  WordArray { element_count, data }
+impl CoreTypes {
+  pub fn as_function(&self, t : Type) -> &FunctionInfo {
+    let t = t.get();
+    if t.kind != self.function_kind {
+      panic!("expected function type");
+    }
+    unsafe { &*(t.info as *const FunctionInfo) }
+  }
 }
 
 fn round_up_multiple(v : u64, multiple_of : u64) -> u64 {
@@ -121,8 +109,19 @@ fn new_type(st : SymbolTable, name : &str, kind : &str, size : u64, info : *cons
 
 fn struct_type(st : SymbolTable, name : &str, fields : &[Type]) -> Type {
   let (fields, size) = struct_offsets(fields);
-  let info = Box::into_raw(Box::new(to_packed_array(fields))) as *const ();
+  let info =
+    Box::into_raw(Box::new(
+      StructInfo { fields: perm_slice(&fields)}))
+    as *const ();
   new_type(st, name, "struct", size, info)
+}
+
+fn function_type(st : SymbolTable, args : &[Type], returns : Type) -> Type {
+  let info =
+    Box::into_raw(Box::new(
+      FunctionInfo { args: perm_slice(args), returns }))
+    as *const ();
+  new_type(st, name, "function", 8, info)
 }
 
 fn primitive(st : SymbolTable, name : &str, size : u64) -> Type {
@@ -140,6 +139,8 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
 
   let macro_tag = primitive(st, "macro_flag", 8);
 
+  let function_kind = to_symbol(st, "function");
+
   let type_tag = struct_type(st, "type", &[
     u64_tag,
     symbol_tag,
@@ -149,6 +150,7 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
 
   CoreTypes {
     type_tag, u64_tag, u32_tag, u16_tag, u8_tag, void_ptr_tag, macro_tag,
+    function_kind,
     core_types:
      vec![type_tag, u64_tag, u32_tag, u16_tag, u8_tag, void_ptr_tag, macro_tag],
   }

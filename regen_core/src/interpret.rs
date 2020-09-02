@@ -23,7 +23,7 @@ pub fn interpret(code : &str, env : &mut Env) {
     max_bytes: stack.len() as u32,
   };
   for &c in n.children() {
-    let f = compile::compile_expr_to_function(env, c);
+    let (f, _) = compile::compile_expr_to_function(env, c);
     shadow_stack.clear();
     shadow_stack.push(
       Frame {
