@@ -62,8 +62,8 @@ extern {
   pub fn memcpy(dest : *mut u8, src: *const u8, count : usize) -> *mut u8;
 }
 
-pub extern "C" fn env_insert(env : &mut Env, sym : Symbol, value : u64) {
-  env.insert(sym, value, env.c.u64_tag);
+pub extern "C" fn env_insert(env : &mut Env, sym : Symbol, value : u64, t : Type) {
+  env.insert(sym, value, t);
 }
 
 pub extern "C" fn env_get(env : &Env, sym : Symbol) -> u64 {

@@ -6,6 +6,7 @@ use crate::symbols;
 use symbols::{Symbol, to_symbol, SymbolTable};
 
 #[derive(Copy, Clone)]
+#[repr(C)]
 pub struct Type(*const TypeInfo);
 
 impl Type {
@@ -24,7 +25,7 @@ pub struct TypeInfo {
   pub size : u64,
   pub name : Symbol,
   pub kind : Symbol,
-  pub info : *const (),
+  pub kind_info : *const (),
 }
 
 #[derive(Copy, Clone)]
@@ -74,11 +75,11 @@ pub struct CoreTypes {
 
 impl CoreTypes {
   pub fn as_function(&self, t : Type) -> &FunctionInfo {
-    let t = t.get();
-    if t.kind != self.function_kind {
-      panic!("expected function type");
+    let info = t.get();
+    if info.kind != self.function_kind {
+      panic!("expected function type, found {}", t.as_u64());
     }
-    unsafe { &*(t.info as *const FunctionInfo) }
+    unsafe { &*(info.kind_info as *const FunctionInfo) }
   }
 }
 
@@ -106,7 +107,7 @@ fn struct_offsets(field_types : &[Type]) -> (Vec<Field>, u64) {
 }
 
 fn new_type(name : Symbol, kind : Symbol, size : u64, info : *const ()) -> Type {
-  let info = TypeInfo { size, name, kind, info };
+  let info = TypeInfo { size, name, kind, kind_info: info };
   Type(Box::into_raw(Box::new(info)))
 }
 

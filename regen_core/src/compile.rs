@@ -98,7 +98,6 @@ fn add_local(b : &mut Builder, name : Symbol, var : FrameVar, t : Type) -> Var {
 }
 
 fn new_frame_var(b : &mut Builder, bytes : usize) -> FrameVar {
-  // TODO: this should take a byte width!
   let var = FrameVar{ byte_offset: b.frame_bytes, bytes };
   b.registers.push(var);
   b.frame_bytes += var.bytes;
@@ -539,15 +538,22 @@ fn def_macro(b : &mut Builder, def_name : Node, value : Node) {
     b.ops.push(Op::Expr(v, LiteralU64(def)));
     v
   };
+  let type_tag = {
+    let t = val_reg.data_type.as_u64();
+    let v = new_frame_var(b, 8);
+    b.ops.push(Op::Expr(v, LiteralU64(t)));
+    v
+  };
   let f = {
     let env_insert = to_symbol(b.env.st, "env_insert");
     let f = new_frame_var(b, 8);
     b.ops.push(Op::Expr(f, Def(env_insert)));
     f
   };
-  b.ops.push(Op::Arg{index: 0, value: env});
-  b.ops.push(Op::Arg{index: 1, value: def_sym});
-  b.ops.push(Op::Arg{index: 2, value: val_reg.fv});
+  b.ops.push(Op::Arg{index: 0, value: env}); // env
+  b.ops.push(Op::Arg{index: 1, value: def_sym}); // symbol name
+  b.ops.push(Op::Arg{index: 2, value: val_reg.fv}); // value
+  b.ops.push(Op::Arg{index: 3, value: type_tag}); // type
   let v = new_frame_var(b, 8);
   b.ops.push(Op::Expr(v, InvokeC(f, 3)));
 }
