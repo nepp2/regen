@@ -22,7 +22,7 @@ impl Type {
 #[repr(C)]
 pub struct TypeInfo {
   pub size : u64,
-  pub id : Symbol,
+  pub name : Symbol,
   pub kind : Symbol,
   pub info : *const (),
 }
@@ -54,15 +54,20 @@ pub struct FunctionInfo {
 }
 
 pub struct CoreTypes {
+  pub primitive_kind : Symbol,
+  pub struct_kind : Symbol,
+  pub function_kind : Symbol,
+
+  pub structural_type_marker : Symbol,
+
   pub type_tag : Type,
   pub u64_tag : Type,
   pub u32_tag : Type,
   pub u16_tag : Type,
   pub u8_tag : Type,
+  pub void_tag : Type,
   pub void_ptr_tag : Type,
   pub macro_tag : Type,
-
-  pub function_kind : Symbol,
 
   pub core_types : Vec<Type>,
 }
@@ -100,48 +105,55 @@ fn struct_offsets(field_types : &[Type]) -> (Vec<Field>, u64) {
   (fields, size)
 }
 
-fn new_type(st : SymbolTable, name : &str, kind : &str, size : u64, info : *const ()) -> Type {
-  let id = to_symbol(st, name);
-  let kind = to_symbol(st, kind);
-  let info = TypeInfo { size, id, kind, info };
+fn new_type(name : Symbol, kind : Symbol, size : u64, info : *const ()) -> Type {
+  let info = TypeInfo { size, name, kind, info };
   Type(Box::into_raw(Box::new(info)))
 }
 
-fn struct_type(st : SymbolTable, name : &str, fields : &[Type]) -> Type {
+fn new_simple_type(st : SymbolTable, name : &str, kind : Symbol, size : u64) -> Type {
+  let name = to_symbol(st, name);
+  new_type(name, kind, size, std::ptr::null())
+}
+
+pub fn composite_type(name : Symbol, kind : Symbol, fields : &[Type]) -> Type {
   let (fields, size) = struct_offsets(fields);
   let info =
     Box::into_raw(Box::new(
       StructInfo { fields: perm_slice(&fields)}))
     as *const ();
-  new_type(st, name, "struct", size, info)
+  new_type(name, kind, size, info)
 }
 
-fn function_type(st : SymbolTable, args : &[Type], returns : Type) -> Type {
+pub fn struct_type(c : &CoreTypes, name : Symbol, fields : &[Type]) -> Type {
+  composite_type(name, c.struct_kind, fields)
+}
+
+pub fn function_type(c : &CoreTypes, args : &[Type], returns : Type) -> Type {
   let info =
     Box::into_raw(Box::new(
       FunctionInfo { args: perm_slice(args), returns }))
     as *const ();
-  new_type(st, name, "function", 8, info)
-}
-
-fn primitive(st : SymbolTable, name : &str, size : u64) -> Type {
-  new_type(st, name, "primitive", size, std::ptr::null())
+  new_type(c.structural_type_marker, c.function_kind, 8, info)
 }
 
 pub fn core_types(st : SymbolTable) -> CoreTypes {
 
-  let u64_tag = primitive(st, "u64", 8);
-  let u32_tag = primitive(st, "u32", 4);
-  let u16_tag = primitive(st, "u16", 2);
-  let u8_tag = primitive(st, "u8", 1);
-  let symbol_tag = primitive(st, "symbol", 8);
-  let void_ptr_tag = primitive(st, "void_ptr", 8);
-
-  let macro_tag = primitive(st, "macro_flag", 8);
-
+  let primitive_kind = to_symbol(st, "primitive");
+  let struct_kind = to_symbol(st, "struct");
   let function_kind = to_symbol(st, "function");
 
-  let type_tag = struct_type(st, "type", &[
+  let structural_type_marker = to_symbol(st, "#structural");
+
+  let u64_tag = new_simple_type(st, "u64", primitive_kind, 8);
+  let u32_tag = new_simple_type(st, "u32", primitive_kind, 4);
+  let u16_tag = new_simple_type(st, "u16", primitive_kind, 2);
+  let u8_tag = new_simple_type(st, "u8", primitive_kind, 1);
+  let void_tag = new_simple_type(st, "void", primitive_kind, 0);
+  let symbol_tag = new_simple_type(st, "symbol", primitive_kind, 8);
+  let void_ptr_tag = new_simple_type(st, "void_ptr", primitive_kind, 8);
+  let macro_tag = new_simple_type(st, "macro_flag", primitive_kind, 8);
+
+  let type_tag = composite_type(to_symbol(st, "type"), struct_kind, &[
     u64_tag,
     symbol_tag,
     symbol_tag,
@@ -149,8 +161,9 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
   ]);
 
   CoreTypes {
-    type_tag, u64_tag, u32_tag, u16_tag, u8_tag, void_ptr_tag, macro_tag,
-    function_kind,
+    primitive_kind, struct_kind, function_kind,
+    structural_type_marker,
+    type_tag, u64_tag, u32_tag, u16_tag, u8_tag, void_tag, void_ptr_tag, macro_tag,
     core_types:
      vec![type_tag, u64_tag, u32_tag, u16_tag, u8_tag, void_ptr_tag, macro_tag],
   }
@@ -162,10 +175,10 @@ fn test_types() {
   let c = core_types(st);
 
   let a =
-    struct_type(st, "a",
+    struct_type(&c, to_symbol(st, "a"),
       &[c.u16_tag, c.u32_tag, c.u16_tag, c.u64_tag]);
   let b =
-    struct_type(st, "b",
+    struct_type(&c, to_symbol(st, "b"),
       &[c.u16_tag, c.u16_tag, c.u32_tag, c.u64_tag]);
 
   if a.get().size != 24 { panic!("struct A alignment incorrect") }

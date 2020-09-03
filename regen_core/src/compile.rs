@@ -390,12 +390,15 @@ fn compile_function(env: &Env, args : &[Node], body : &[Node]) -> (BytecodeFunct
   let entry_seq = create_sequence(&mut b, "entry");
   set_current_sequence(&mut b, entry_seq);
   let v = compile_block_expr(&mut b, body);
+  let mut return_type = b.env.c.void_tag;
   if let Some(v) = v {
+    return_type = v.data_type;
     b.ops.push(Op::SetReturn(v.fv));
   }
   b.ops.push(Op::Return);
+  let t = types::function_type(&b.env.c, &[], return_type); // TODO: fix arg types!
   let f = complete_function(b);
-  panic!("function types not implemented")
+  (f, t)
 }
 
 /// Compile basic imperative language into bytecode

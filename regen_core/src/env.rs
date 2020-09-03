@@ -94,7 +94,7 @@ pub fn new_env(st : SymbolTable) -> Box<Env> {
   }));
   let mut env = unsafe { Box::from_raw(env_ptr) };
   for &t in &env.c.core_types {
-    env.values.insert(t.get().id,
+    env.values.insert(t.get().name,
       EnvEntry { value: t.as_u64(), tag: env.c.type_tag });
   }
   env.insert_str("c_add", c_add as u64, env.c.u64_tag);
