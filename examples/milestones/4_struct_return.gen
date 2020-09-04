@@ -1,16 +1,18 @@
 ;; { x : i32, y : i32, w : i32, h : i32 }
-(def rect_init (fun (p x y w h) (
+(def new_rect (fun (x y w h) (
+  (let rect (stack_alloc 16))
+  (let p (ref rect))
   (store_32 p x)
   (store_32 (+ p 4) y)
   (store_32 (+ p 8) w)
   (store_32 (+ p 12) h)
+  rect
 )))
 
 (def main (fun () (
-  (let rect (ref (stack_alloc 16)))
-  (rect_init rect 1 2 3 4)
+  (let rect (new_rect 1 2 3 4))
 
-  (if (test_struct rect)
+  (if (test_struct (ref rect))
     ((print_symbol (sym SUCCESS)))
     ((print_symbol (sym FAILED)))
   )

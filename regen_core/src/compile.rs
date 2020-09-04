@@ -7,7 +7,7 @@ use bytecode::{
   ByteWidth, NamedVar, Op, Operator, FrameVar,
 };
 
-use types::{Type, CoreTypes};
+use types::{Type, TypeHandle, CoreTypes};
 
 use perm_alloc::Perm;
 
@@ -97,7 +97,8 @@ fn add_local(b : &mut Builder, name : Symbol, var : FrameVar, t : Type) -> Var {
   Var { fv: var, var_type: Local, data_type: t }
 }
 
-fn new_frame_var(b : &mut Builder, bytes : usize) -> FrameVar {
+fn new_frame_var(b : &mut Builder, minimum_bytes : usize) -> FrameVar {
+  let bytes = types::round_up_multiple(minimum_bytes as u64, 8) as usize;
   let var = FrameVar{ byte_offset: b.frame_bytes, bytes };
   b.registers.push(var);
   b.frame_bytes += var.bytes;
@@ -105,7 +106,7 @@ fn new_frame_var(b : &mut Builder, bytes : usize) -> FrameVar {
 }
 
 fn new_var(b : &mut Builder, t : Type) -> Var {
-  let var = new_frame_var(b, t.get().size as usize);
+  let var = new_frame_var(b, t.size as usize);
   Var { fv: var, var_type: Register, data_type: t }
 }
 
@@ -278,6 +279,11 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       { compile_store(b, ByteWidth::U16, *pointer, *value); None }
     Command("store_8", [pointer, value]) =>
       { compile_store(b, ByteWidth::U8, *pointer, *value); None }
+    // stack allocate
+    Command("stack_alloc", [value]) => {
+      let array = types::array_type(&b.env.c, value.as_literal());
+      Some(new_var(b, array))
+    }
     // let
     Command("let", [var_name, value]) => {
       let name = var_name.as_symbol();
@@ -382,7 +388,7 @@ fn compile_function(env: &Env, args : &[Node], body : &[Node]) -> (BytecodeFunct
   for &arg in args {
     let name = arg.as_symbol();
     let t = env.c.u64_tag; // TODO: fix type
-    let var = new_frame_var(&mut b, t.get().size as usize);
+    let var = new_frame_var(&mut b, t.size as usize);
     add_local(&mut b, name, var, t);
   }
   // start a sequence
@@ -427,10 +433,10 @@ fn atom_to_value(b : &mut Builder, string : &str, sym : Symbol) -> Var {
     let e = Expr::Def(sym);
     return push_expr(b, e, entry.tag);
   }
-  panic!("symbol not defined")
+  panic!("symbol '{}' not defined", sym)
 }
 
-fn compile_function_call(b : &mut Builder, list : &[Node], ccall : bool) -> Var {
+fn compile_function_call(b : &mut Builder, list : &[Node]) -> Var {
   let function = list[0];
   let args = &list[1..];
   b.arg_values.clear();
@@ -439,19 +445,25 @@ fn compile_function_call(b : &mut Builder, list : &[Node], ccall : bool) -> Var 
     b.arg_values.push(v.fv);
   }
   let f = compile_expr_to_value(b, function);
+  let info = if let Some(i) = b.env.c.as_function(&f.data_type) {
+    i
+  }
+  else {
+    panic!("expected function, found {} expression '{}' at {}",
+      f.data_type.kind, function, function.loc);
+  };
   for (i, value) in b.arg_values.drain(..).enumerate() {
     // TODO: check arg values
     b.ops.push(Op::Arg{ index: i as u8, value });
   }
   let e = {
-    if ccall {
+    if info.c_function {
       Expr::InvokeC(f.fv, args.len())
     }
     else {
       Expr::Invoke(f.fv)
     }
   };
-  let info = b.env.c.as_function(f.data_type);
   return push_expr(b, e, info.returns);
 }
 
@@ -473,7 +485,7 @@ fn str_to_operator(s : &str) -> Option<Operator> {
     "load_32" => Load(ByteWidth::U32),
     "load_16" => Load(ByteWidth::U16),
     "load_8" => Load(ByteWidth::U8),
-    "Var" => Ref,
+    "ref" => Ref,
     _ => return None,
   };
   Some(op)
@@ -490,7 +502,7 @@ fn op_result_type(c : &CoreTypes, op : Operator) -> Type {
     Load(ByteWidth::U32) => c.u32_tag,
     Load(ByteWidth::U16) => c.u16_tag,
     Load(ByteWidth::U8) => c.u8_tag,
-    Ref => c.void_ptr_tag,
+    Ref => c.u64_tag,
   }
 }
 
@@ -511,13 +523,10 @@ fn compile_list_expr(b : &mut Builder, node : Node) -> Var {
           return push_expr(b, e, t);
         }
       }
-      if head == "ccall" {
-        return compile_function_call(b, tail, true);
-      }
     }
     _ => (),
   }
-  compile_function_call(b, node.children(), false)
+  compile_function_call(b, node.children())
 }
 
 /// TODO: this is long-winded. replace it with an in-language macro!
@@ -539,7 +548,7 @@ fn def_macro(b : &mut Builder, def_name : Node, value : Node) {
     v
   };
   let type_tag = {
-    let t = val_reg.data_type.as_u64();
+    let t = TypeHandle::alloc_type(val_reg.data_type).as_u64(); // TODO: this is very inefficient
     let v = new_frame_var(b, 8);
     b.ops.push(Op::Expr(v, LiteralU64(t)));
     v
@@ -555,5 +564,5 @@ fn def_macro(b : &mut Builder, def_name : Node, value : Node) {
   b.ops.push(Op::Arg{index: 2, value: val_reg.fv}); // value
   b.ops.push(Op::Arg{index: 3, value: type_tag}); // type
   let v = new_frame_var(b, 8);
-  b.ops.push(Op::Expr(v, InvokeC(f, 3)));
+  b.ops.push(Op::Expr(v, InvokeC(f, 4)));
 }

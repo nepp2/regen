@@ -12,10 +12,10 @@
     (let name (index ns 0))
     (let val (index ns 1))
     (template
-      (ccall env_insert env ($ name) ($ val) u64)
+      (env_insert env ($ name) ($ val) u64)
     )
   )))
-  (ccall env_insert env (sym def) f macro_flag)
+  (env_insert env (sym def) f macro_flag)
 ))
 
 

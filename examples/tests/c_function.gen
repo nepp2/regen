@@ -1,4 +1,4 @@
 
 (def main (fun () (
-  (debug (ccall c_add 12 24))
+  (debug (c_add 12 24))
 )))

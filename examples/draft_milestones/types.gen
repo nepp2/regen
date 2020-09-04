@@ -2,7 +2,7 @@
 ;; *{ size : u64, id : symbol, kind : symbol, type_info : *void }
 (def new_type (fun (size id kind type_info) (
   ;; allocate type
-  (let p (ccall malloc 32))
+  (let p (malloc 32))
   (store_64 p size)
   (store_64 (+ p 8) id)
   (store_64 (+ p 16) kind)
@@ -25,7 +25,7 @@
 ;; word array - all elements are 64bit
 ;; *{ element_count : u64, data : *void }
 (def warray_init (fun (p element_count) (
-  (let data (ccall malloc (* element_count 8)))
+  (let data (malloc (* element_count 8)))
   (store_64 p element_count)
   (store_64 (+ p 8) data)
   p
@@ -51,7 +51,7 @@
 ;; packed array - can have arbitrarily sized elements
 ;; *{ element_count : u64, element_size : u64, data : *void }
 (def parray_init (fun (p element_count element_size) (
-  (let data (ccall malloc (* element_count element_size)))
+  (let data (malloc (* element_count element_size)))
   (store_64 p element_count)
   (store_64 (+ p 8) element_size)
   (store_64 (+ p 16) data)
@@ -109,11 +109,11 @@
   )))
 
   (debug (size_of rect_type))
-  (ccall print_symbol (type_id rect_type))
+  (print_symbol (type_id rect_type))
 
-  (if (ccall test_struct rect)
-    ((ccall print_symbol (sym SUCCESS)))
-    ((ccall print_symbol (sym FAILED)))
+  (if (test_struct rect)
+    ((print_symbol (sym SUCCESS)))
+    ((print_symbol (sym FAILED)))
   )
 
   (debug (size_of type))

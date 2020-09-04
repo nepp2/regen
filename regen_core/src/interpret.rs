@@ -35,7 +35,6 @@ pub fn interpret(code : &str, env : &mut Env) {
     );
     interpreter_loop(&mut shadow_stack, env);
   }
-
   if let Some(v) = env.get_str("main") {
     let f = v.value as *const BytecodeFunction;
     shadow_stack.clear();

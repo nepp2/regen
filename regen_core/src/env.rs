@@ -1,7 +1,7 @@
 /// Defines the environment (the global hashmap that defs are added to)
 
 use crate::symbols::{Symbol, SymbolTable, to_symbol};
-use crate::types::{Type, CoreTypes, core_types};
+use crate::types::{Type, TypeHandle, CoreTypes, core_types, c_function_type};
 use crate::parse;
 use parse::{Node, NodeContent};
 use crate::perm_alloc::{PermSlice, perm_slice};
@@ -93,21 +93,48 @@ pub fn new_env(st : SymbolTable) -> Box<Env> {
     c: core_types(st),
   }));
   let mut env = unsafe { Box::from_raw(env_ptr) };
-  for &t in &env.c.core_types {
-    env.values.insert(t.get().name,
-      EnvEntry { value: t.as_u64(), tag: env.c.type_tag });
+  for (n, t) in &env.c.core_types {
+    let type_handle = TypeHandle::alloc_type(*t);
+    let e = EnvEntry { value: type_handle.as_u64(), tag: env.c.type_tag };
+    env.values.insert(*n, e);
   }
-  env.insert_str("c_add", c_add as u64, env.c.u64_tag);
-  env.insert_str("test_struct", test_struct as u64, env.c.u64_tag);
-  env.insert_str("malloc", malloc as u64, env.c.u64_tag);
-  env.insert_str("free", free as u64, env.c.u64_tag);
-  env.insert_str("memcpy", memcpy as u64, env.c.u64_tag);
-  env.insert_str("env", env_ptr as u64, env.c.u64_tag);
-  env.insert_str("env_insert", env_insert as u64, env.c.u64_tag);
-  env.insert_str("env_get", env_get as u64, env.c.u64_tag);
-  env.insert_str("print_symbol", print_symbol as u64, env.c.u64_tag);
-  env.insert_str("node_children", node_children as u64, env.c.u64_tag);
-  env.insert_str("node_display", node_display as u64, env.c.u64_tag);
+
+  let u64 = env.c.u64_tag;
+  let void = env.c.void_tag;
+  let slice = env.c.slice_tag;
+
+  env.insert_str("c_add", c_add as u64,
+    c_function_type(&env.c, &[u64, u64], u64));
+
+  env.insert_str("test_struct", test_struct as u64,
+    c_function_type(&env.c, &[u64], u64));
+
+  env.insert_str("malloc", malloc as u64,
+    c_function_type(&env.c, &[u64], u64));
+
+  env.insert_str("free", free as u64,
+    c_function_type(&env.c, &[u64], void));
+
+  env.insert_str("memcpy", memcpy as u64,
+    c_function_type(&env.c, &[u64, u64, u64], void));
+
+  env.insert_str("env", env_ptr as u64, u64);
+
+  env.insert_str("env_insert", env_insert as u64,
+    c_function_type(&env.c, &[u64, u64, u64, u64], void));
+
+  env.insert_str("env_get", env_get as u64, 
+    c_function_type(&env.c, &[u64, u64], u64));
+
+  env.insert_str("print_symbol", print_symbol as u64,
+    c_function_type(&env.c, &[u64], void));
+
+  env.insert_str("node_children", node_children as u64,
+    c_function_type(&env.c, &[u64], slice));
+
+  env.insert_str("node_display", node_display as u64,
+    c_function_type(&env.c, &[u64], void));
+
   env
 }
 

@@ -6,7 +6,7 @@
 ;; It supports loops through "repeat" and "break" keywords, which jump to the start and end
 ;; of a block, respectively.
 
-(def factorial (fun (n) ((0)))) ;; this is a hack to make the recursion work
+(def factorial (fun (n) (0))) ;; this is a hack to make the recursion work
 (def factorial (fun (n) (
   (if (< n 2)
     (1)

@@ -2,7 +2,7 @@
 ;; word array - all elements are 64bit
 ;; *{ element_count : u64, data : *void }
 (def warray_init (fun (p element_count) (
-  (let data (ccall malloc (* element_count 8)))
+  (let data (malloc (* element_count 8)))
   (store_64 p element_count)
   (store_64 (+ p 8) data)
   p
@@ -26,15 +26,15 @@
 )))
 
 (def function (fun (n) (
-  (ccall node_display n)
+  (node_display n)
   (let ns (alloca 16))
-  (ccall node_children ns n)
+  (node_children ns n)
   (let name (warray_get ns 0))
   (let args (warray_get ns 1))
   (let body (warray_get ns 2))
-  (ccall node_display name)
-  (ccall node_display args)
-  (ccall node_display body)
+  (node_display name)
+  (node_display args)
+  (node_display body)
   ;; (template
   ;;   (def #name (fun #args #body))
   ;; )
