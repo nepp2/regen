@@ -56,6 +56,10 @@ pub extern "C" fn test_struct(r : TestRect) -> bool {
   r.x == 1 && r.y == 2 && r.w == 3 && r.h == 4
 }
 
+pub extern "C" fn fail(s : Symbol) -> bool {
+  panic!("failed with symbol {}", s)
+}
+
 extern {
   pub fn malloc(size: usize) -> *mut u8;
   pub fn free(ptr: *mut u8);
@@ -107,6 +111,9 @@ pub fn new_env(st : SymbolTable) -> Box<Env> {
     c_function_type(&env.c, &[u64, u64], u64));
 
   env.insert_str("test_struct", test_struct as u64,
+    c_function_type(&env.c, &[u64], u64));
+
+  env.insert_str("fail", fail as u64,
     c_function_type(&env.c, &[u64], u64));
 
   env.insert_str("malloc", malloc as u64,

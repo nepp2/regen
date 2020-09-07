@@ -12,6 +12,7 @@ pub struct SeqenceId(pub usize);
 /// Identifies a storage location that is local to a stack frame
 #[derive(Copy, Clone, Debug)]
 pub struct FrameVar {
+  pub id : usize,
   pub byte_offset : usize,
   pub bytes : usize,
 }

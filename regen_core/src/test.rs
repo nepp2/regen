@@ -47,7 +47,6 @@ fn run_file(path : impl AsRef<Path>) {
   #[test]
   fn test_milestone_4() {
     run_file("../examples/milestones/4_struct_return.gen");
-    panic!("this test actually works but i don't know why");
   }
 
 //}

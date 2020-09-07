@@ -14,6 +14,6 @@
 
   (if (test_struct (ref rect))
     ((print_symbol (sym SUCCESS)))
-    ((print_symbol (sym FAILED)))
+    ((fail (sym RECT_INCORRECT)))
   )
 )))

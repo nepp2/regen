@@ -6,22 +6,19 @@ use std::fmt;
 
 impl fmt::Display for BytecodeFunction {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "Args:")?;
+    writeln!(f, "Args:")?;
     for v in &self.locals.as_slice()[..self.args] {
-      write!(f, " {}", v)?;
+      writeln!(f, " {}: {}", v.name, v.var)?;
     }
-    writeln!(f)?;
-    write!(f, "Locals:")?;
+    writeln!(f, "Locals:")?;
     for v in &self.locals.as_slice()[self.args..] {
-      write!(f, " {}", v)?;
+      writeln!(f, " {}: {}", v.name, v.var)?;
     }
-    writeln!(f)?;
-    write!(f, "Registers:")?;
+    writeln!(f, "Frame vars:")?;
     for r in self.registers.as_slice() {
-      write!(f, " {}", r)?;
+      writeln!(f, " {} (sbp+{}, u{})", r, r.byte_offset, r.bytes)?;
     }
-    writeln!(f)?;
-    writeln!(f, "Frame bytes: {}", self.frame_bytes)?;
+    writeln!(f, "Frame size: {}", self.frame_bytes)?;
     for (i, b) in self.sequence_info.iter().enumerate() {
       writeln!(f, "Sequence {} ({}):", i, b.name)?;
       let end = b.start_op + b.num_ops;
@@ -88,11 +85,11 @@ impl fmt::Display for Op {
       Op::Expr(reg, expr) =>
         write!(f, "let {} = {}", reg, expr)?,
       Op::Set(a, b) =>
-        write!(f, "set {} = {}", a, b)?,
+        write!(f, "set {} = {} (u64)", a, b)?,
       Op::Store{ byte_width, pointer, value } =>
-        write!(f, "mem[{}] = {} ({})", pointer, value, byte_width)?,
+        write!(f, "store *{} = {} (u{})", pointer, value, byte_width)?,
       Op::SetReturn(v) =>
-        write!(f, "set RetVal = {}", v)?,
+        write!(f, "set RetVal = {} (u64)", v)?,
       Op::CJump{ cond, then_seq, else_seq } =>
         write!(f, "CJump {} to seq[{}] else seq[{}]",
           cond, then_seq.0, else_seq.0)?,
@@ -101,7 +98,7 @@ impl fmt::Display for Op {
       Op::Jump(seq) =>
         write!(f, "Jump to seq[{}]", seq.0)?,
       Op::Arg{ index, value } =>
-        write!(f, "set Arg {} = {}", index, value)?,
+        write!(f, "set Arg{} = {} (u64)", index, value)?,
       Op::Return =>
         write!(f, "Return")?,
     }
@@ -111,12 +108,6 @@ impl fmt::Display for Op {
 
 impl fmt::Display for FrameVar {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "${}_{}", self.byte_offset, self.bytes)
-  }
-}
-
-impl fmt::Display for NamedVar {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "${}({})", self.name, self.var)
+    write!(f, "${}", self.id)
   }
 }

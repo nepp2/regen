@@ -99,7 +99,8 @@ fn add_local(b : &mut Builder, name : Symbol, var : FrameVar, t : Type) -> Var {
 
 fn new_frame_var(b : &mut Builder, minimum_bytes : usize) -> FrameVar {
   let bytes = types::round_up_multiple(minimum_bytes as u64, 8) as usize;
-  let var = FrameVar{ byte_offset: b.frame_bytes, bytes };
+  let id = b.registers.len();
+  let var = FrameVar{ id, byte_offset: b.frame_bytes, bytes };
   b.registers.push(var);
   b.frame_bytes += var.bytes;
   var
@@ -291,12 +292,12 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       let val = compile_expr_to_value(b, *value);
       match val.var_type {
         Local => {
-          add_local(b, name, val.fv, val.data_type);
-        }
-        Register => {
           let var = new_var(b, val.data_type).fv;
           add_local(b, name, var, val.data_type);
           b.ops.push(Op::Set(var, val.fv));
+        }
+        Register => {
+          add_local(b, name, val.fv, val.data_type);
         }
       }
       None
@@ -403,6 +404,9 @@ fn compile_function(env: &Env, args : &[Node], body : &[Node]) -> (BytecodeFunct
   b.ops.push(Op::Return);
   let t = types::function_type(&b.env.c, &[], return_type); // TODO: fix arg types!
   let f = complete_function(b);
+  for n in body { println!("{}", n) }
+  println!("{}", f);
+  //println!("{}", )
   (f, t)
 }
 
