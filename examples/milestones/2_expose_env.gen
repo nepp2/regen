@@ -8,5 +8,7 @@
 
 (debug foo)
 (debug bar)
-(debug (+ foo bar)) ;; should print 9
+(if (= (+ foo bar) 9)
+  ()
+  ((fail (sym EXPECTED_9))))
 

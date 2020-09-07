@@ -1,6 +1,6 @@
 ;; { x : i32, y : i32, w : i32, h : i32 }
 (def new_rect (fun (x y w h) (
-  (let rect (stack_alloc 16))
+  (let rect (byte_chunk 16))
   (let p (ref rect))
   (store_32 p x)
   (store_32 (+ p 4) y)

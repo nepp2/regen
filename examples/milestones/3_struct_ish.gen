@@ -7,11 +7,11 @@
 )))
 
 (def main (fun () (
-  (let rect (ref (stack_alloc 16)))
+  (let rect (ref (byte_chunk 16)))
   (rect_init rect 1 2 3 4)
 
   (if (test_struct rect)
     ((print_symbol (sym SUCCESS)))
-    ((print_symbol (sym FAILED)))
+    ((fail (sym RECT_INCORRECT)))
   )
 )))

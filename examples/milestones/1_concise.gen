@@ -30,6 +30,10 @@
 )))
 
 (def main (fun () (
-  (debug (factorial 3))
-  (debug (factorial_loop 3))
+  (if (= (factorial 5) 120)
+    ()
+    ((fail (sym FACTORIAL_BROKEN))))
+  (if (= (factorial_loop 5) 120)
+    ()
+    ((fail (sym FACTORIAL_LOOP_BROKEN))))
 )))

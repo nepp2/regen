@@ -1,4 +1,6 @@
 
 (def main (fun () (
-  (debug (c_add 12 24))
+  (if (= (c_add 12 24) 36)
+    ()
+    ((fail (sym WRONG_VALUE))))
 )))
