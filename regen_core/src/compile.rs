@@ -3,7 +3,7 @@
 use crate::{bytecode, parse, symbols, env, perm_alloc, types};
 
 use bytecode::{
-  SeqenceId, SequenceInfo, Expr, BytecodeFunction,
+  SequenceId, SequenceInfo, Expr, BytecodeFunction,
   ByteWidth, NamedVar, Op, Operator, FrameVar,
 };
 
@@ -21,8 +21,8 @@ use NodeShape::*;
 use symbols::Symbol;
 
 struct LabelledBlockExpr {
-  entry_seq: SeqenceId,
-  exit_seq: SeqenceId,
+  entry_seq: SequenceId,
+  exit_seq: SequenceId,
 }
 
 /// Function builder
@@ -43,7 +43,7 @@ struct Builder<'l> {
   frame_bytes : usize,
 
   /// the instruction sequence currently being built
-  cur_seq : Option<SeqenceId>,
+  cur_seq : Option<SequenceId>,
 
   /// flags indicating which sequences have been finalised
   seq_completion : Vec<bool>,
@@ -121,7 +121,7 @@ fn push_expr(b : &mut Builder, e : Expr, t : Type) -> Var {
 //   symbols::to_symbol(b.env.st, code_segment(b.code, n))
 // }
 
-fn create_sequence(b : &mut Builder, name : &str) -> SeqenceId {
+fn create_sequence(b : &mut Builder, name : &str) -> SequenceId {
   // Make sure the name is unique
   let mut i = 1;
   let mut name_candidate = symbols::to_symbol(b.env.st, &name);
@@ -131,7 +131,7 @@ fn create_sequence(b : &mut Builder, name : &str) -> SeqenceId {
     i += 1;
     name_candidate = symbols::to_symbol(b.env.st, &format!("{}_{}", name, i));
   }
-  let seq_id = SeqenceId(b.seq_info.len());
+  let seq_id = SequenceId(b.seq_info.len());
   b.seq_info.push(SequenceInfo {
     name: name_candidate,
     start_op: 0, num_ops: 0,
@@ -140,7 +140,7 @@ fn create_sequence(b : &mut Builder, name : &str) -> SeqenceId {
   seq_id
 }
 
-fn set_current_sequence(b : &mut Builder, sequence : SeqenceId) {
+fn set_current_sequence(b : &mut Builder, sequence : SequenceId) {
   // complete the current sequence (if there is one)
   complete_sequence(b);
   // check that the sequence isn't done yet
@@ -281,7 +281,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     Command("store_8", [pointer, value]) =>
       { compile_store(b, ByteWidth::U8, *pointer, *value); None }
     // stack allocate
-    Command("stack_alloc", [value]) => {
+    Command("byte_chunk", [value]) => {
       let array = types::array_type(&b.env.c, value.as_literal());
       Some(new_var(b, array))
     }
@@ -456,9 +456,11 @@ fn compile_function_call(b : &mut Builder, list : &[Node]) -> Var {
     panic!("expected function, found {} expression '{}' at {}",
       f.data_type.kind, function, function.loc);
   };
-  for (i, value) in b.arg_values.drain(..).enumerate() {
+  let mut byte_offset = 0;
+  for value in b.arg_values.drain(..) {
     // TODO: check arg values
-    b.ops.push(Op::Arg{ index: i as u8, value });
+    b.ops.push(Op::Arg{ byte_offset, value });
+    byte_offset += types::round_up_multiple(value.bytes as u64, 8);
   }
   let e = {
     if info.c_function {
@@ -563,10 +565,10 @@ fn def_macro(b : &mut Builder, def_name : Node, value : Node) {
     b.ops.push(Op::Expr(f, Def(env_insert)));
     f
   };
-  b.ops.push(Op::Arg{index: 0, value: env}); // env
-  b.ops.push(Op::Arg{index: 1, value: def_sym}); // symbol name
-  b.ops.push(Op::Arg{index: 2, value: val_reg.fv}); // value
-  b.ops.push(Op::Arg{index: 3, value: type_tag}); // type
+  b.ops.push(Op::Arg{byte_offset: 0, value: env}); // env
+  b.ops.push(Op::Arg{byte_offset: 8, value: def_sym}); // symbol name
+  b.ops.push(Op::Arg{byte_offset: 16, value: val_reg.fv}); // value
+  b.ops.push(Op::Arg{byte_offset: 24, value: type_tag}); // type
   let v = new_frame_var(b, 8);
   b.ops.push(Op::Expr(v, InvokeC(f, 4)));
 }

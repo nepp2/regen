@@ -185,8 +185,8 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : &mut Env) {
           frame.pc = fun.sequence_info[seq.0].start_op;
           continue;
         }
-        Op::Arg{ index, value } => {
-          let arg_ptr = sbp.advance_frame(fun.frame_bytes).u64_offset(index as usize);
+        Op::Arg{ byte_offset, value } => {
+          let arg_ptr = sbp.advance_frame(fun.frame_bytes).byte_offset(byte_offset as usize);
           unsafe {
             *arg_ptr = get_var(sbp, value);
           }

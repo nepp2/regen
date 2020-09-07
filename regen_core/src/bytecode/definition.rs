@@ -7,7 +7,7 @@ use symbols::Symbol;
 /// the function it belongs to; this ID is only unique within
 /// the function.
 #[derive(Copy, Clone, Debug)]
-pub struct SeqenceId(pub usize);
+pub struct SequenceId(pub usize);
 
 /// Identifies a storage location that is local to a stack frame
 #[derive(Copy, Clone, Debug)]
@@ -44,10 +44,10 @@ pub enum Op {
   Expr(FrameVar, Expr),
   Set(FrameVar, FrameVar),
   SetReturn(FrameVar),
-  CJump{ cond: FrameVar, then_seq: SeqenceId, else_seq: SeqenceId },
+  CJump{ cond: FrameVar, then_seq: SequenceId, else_seq: SequenceId },
   Debug(Symbol, FrameVar),
-  Jump(SeqenceId),
-  Arg{ index: u8, value: FrameVar },
+  Jump(SequenceId),
+  Arg{ byte_offset: u64, value: FrameVar },
   Store{ byte_width : ByteWidth, pointer : FrameVar, value : FrameVar },
   Return,
 }
