@@ -4,11 +4,14 @@ use super::definition::*;
 
 use std::fmt;
 
-
-
 impl fmt::Display for BytecodeFunction {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     writeln!(f, ";; Frame size: {}", self.frame_bytes)?;
+    write!(f, ";; Frame vars: {{ ")?;
+    for v in self.registers.as_slice() {
+      write!(f, "{} : u{}, ", self.d(v), v.bytes * 8)?;
+    }
+    writeln!(f, "}}")?;
     write!(f, "(fun (")?;
     for v in &self.locals.as_slice()[..self.args] {
       write!(f, " (u{} ${})", v.var.bytes * 8, v.name)?;
@@ -80,12 +83,10 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Op> {
     match self.x {
       Op::Expr(reg, expr) =>
         write!(f, "(let {} {})", bc.d(reg), bc.d(expr))?,
-      Op::Set(a, b) =>
-        write!(f, "(set {} (u64 {}))", bc.d(a), bc.d(b))?,
+      Op::Set(dest, src) =>
+        write!(f, "(set {} (u{} {}))", bc.d(dest), dest.bytes * 8, bc.d(src))?,
       Op::Store{ byte_width, pointer, value } =>
         write!(f, "(store {} (u{} {}) )", bc.d(pointer), byte_width, bc.d(value))?,
-      Op::SetReturn(v) =>
-        write!(f, "(set RetVal (u64 {}))", bc.d(v))?,
       Op::CJump{ cond, then_seq, else_seq } =>
         write!(f, "(cjump {} {} {})",
           bc.d(cond), bc.d(then_seq), bc.d(else_seq))?,
@@ -95,7 +96,9 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Op> {
         write!(f, "(jump {})", bc.d(seq))?,
       Op::Arg{ byte_offset, value } =>
         write!(f, "(set (+ Arg {}) (u64 {}))", byte_offset, bc.d(value))?,
-      Op::Return =>
+      Op::Return(Some(v)) =>
+        write!(f, "(return (u64 {}))", bc.d(v))?,
+      Op::Return(None) =>
         write!(f, "return")?,
     }
     Ok(())

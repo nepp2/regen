@@ -27,7 +27,7 @@ impl TypeHandle {
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct Type {
-  pub size : u64,
+  pub size_of : u64,
   pub kind : Symbol,
   pub kind_info : *const (),
 }
@@ -100,7 +100,7 @@ fn struct_offsets(field_types : &[Type]) -> (Vec<Field>, u64) {
   let mut fields = vec![];
   let mut offset = 0;
   for &t in field_types {
-    let field_size = round_up_power_of_2(t.size);
+    let field_size = round_up_power_of_2(t.size_of);
     offset = round_up_multiple(offset, std::cmp::min(field_size, 8));
     fields.push(Field { t, offset });
     offset += field_size;
@@ -109,8 +109,8 @@ fn struct_offsets(field_types : &[Type]) -> (Vec<Field>, u64) {
   (fields, size)
 }
 
-fn new_type(kind : Symbol, size : u64, info : *const ()) -> Type {
-  Type { size, kind, kind_info: info }
+fn new_type(kind : Symbol, size_of : u64, info : *const ()) -> Type {
+  Type { size_of, kind, kind_info: info }
 }
 
 fn new_simple_type(kind : Symbol, size : u64) -> Type {
@@ -201,6 +201,6 @@ fn test_types() {
   let b =
     tuple_type(&c, &[c.u16_tag, c.u16_tag, c.u32_tag, c.u64_tag]);
 
-  if a.size != 24 { panic!("tuple A alignment incorrect") }
-  if b.size != 16 { panic!("tuple B alignment incorrect") }
+  if a.size_of != 24 { panic!("tuple A alignment incorrect") }
+  if b.size_of != 16 { panic!("tuple B alignment incorrect") }
 }

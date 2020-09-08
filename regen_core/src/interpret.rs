@@ -165,12 +165,6 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : &mut Env) {
             U8 => unsafe{ *(p as *mut u8) = v as u8},
           }
         }
-        Op::SetReturn(val) => {
-          let v = get_var(sbp, val);
-          unsafe {
-            *frame.return_addr = v;
-          }
-        }
         Op::CJump{ cond, then_seq, else_seq } => {
           let v = get_var(sbp, cond);
           if v != 0 {
@@ -194,7 +188,13 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : &mut Env) {
         Op::Debug(sym, r) => {
           println!("{}: {}", sym, get_var(sbp, r));
         }
-        Op::Return => {
+        Op::Return(val) => {
+          if let Some(val) = val {
+            let v = get_var(sbp, val);
+            unsafe {
+              *frame.return_addr = v;
+            }
+          }
           if let Some(prev_frame) = shadow_stack.pop() {
             frame = prev_frame;
             break;
@@ -237,6 +237,13 @@ impl StackPtr {
 
 fn var_addr(sbp : StackPtr, v : FrameVar) -> *mut u64 {
   sbp.byte_offset(v.byte_offset)
+}
+
+fn copy_var(sbp : StackPtr, v : FrameVar, val : u64) {
+  let p = var_addr(sbp, v);
+  unsafe {
+    *p = val;
+  }
 }
 
 fn set_var(sbp : StackPtr, v : FrameVar, val : u64) {

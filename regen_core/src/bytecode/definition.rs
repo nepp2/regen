@@ -43,13 +43,12 @@ pub enum ByteWidth {
 pub enum Op {
   Expr(FrameVar, Expr),
   Set(FrameVar, FrameVar),
-  SetReturn(FrameVar),
   CJump{ cond: FrameVar, then_seq: SequenceId, else_seq: SequenceId },
   Debug(Symbol, FrameVar),
   Jump(SequenceId),
   Arg{ byte_offset: u64, value: FrameVar },
   Store{ byte_width : ByteWidth, pointer : FrameVar, value : FrameVar },
-  Return,
+  Return(Option<FrameVar>),
 }
 
 /// A sequence of instructions. Equivalent to a basic block,

@@ -107,7 +107,7 @@ fn new_frame_var(b : &mut Builder, minimum_bytes : usize) -> FrameVar {
 }
 
 fn new_var(b : &mut Builder, t : Type) -> Var {
-  let var = new_frame_var(b, t.size as usize);
+  let var = new_frame_var(b, t.size_of as usize);
   Var { fv: var, var_type: Register, data_type: t }
 }
 
@@ -218,7 +218,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
   match node_shape(&node) {
     // Return
     Atom("return", _) => {
-      b.ops.push(Op::Return);
+      b.ops.push(Op::Return(None));
       None
     }
     // Break
@@ -343,8 +343,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     // Return
     Command("return", [v]) => {
       let r = compile_expr_to_value(b, *v);
-      b.ops.push(Op::SetReturn(r.fv));
-      b.ops.push(Op::Return);
+      b.ops.push(Op::Return(Some(r.fv)));
       None
     }
     // symbol
@@ -389,7 +388,7 @@ fn compile_function(env: &Env, args : &[Node], body : &[Node]) -> (BytecodeFunct
   for &arg in args {
     let name = arg.as_symbol();
     let t = env.c.u64_tag; // TODO: fix type
-    let var = new_frame_var(&mut b, t.size as usize);
+    let var = new_frame_var(&mut b, t.size_of as usize);
     add_local(&mut b, name, var, t);
   }
   // start a sequence
@@ -399,9 +398,11 @@ fn compile_function(env: &Env, args : &[Node], body : &[Node]) -> (BytecodeFunct
   let mut return_type = b.env.c.void_tag;
   if let Some(v) = v {
     return_type = v.data_type;
-    b.ops.push(Op::SetReturn(v.fv));
+    b.ops.push(Op::Return(Some(v.fv)));
   }
-  b.ops.push(Op::Return);
+  else {
+    b.ops.push(Op::Return(None));
+  }
   let t = types::function_type(&b.env.c, &[], return_type); // TODO: fix arg types!
   let f = complete_function(b);
   for n in body { println!("{}", n) }
