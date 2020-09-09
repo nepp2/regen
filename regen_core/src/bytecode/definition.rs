@@ -20,8 +20,7 @@ pub struct FrameVar {
 #[derive(Copy, Clone, Debug)]
 pub enum Operator {
   Add, Sub, Mul, Div, Rem, Eq, LT, GT, LTE, GTE,
-  Load(ByteWidth),
-  Ref,
+  Ref, Not,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -32,11 +31,7 @@ pub enum Expr {
   UnaryOp(Operator, FrameVar),
   Invoke(FrameVar),
   InvokeC(FrameVar, usize),
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum ByteWidth {
-  U8, U16, U32, U64,
+  Load{ bytes: u64, ptr : FrameVar }
 }
 
 #[derive(Copy, Clone, Debug)]

@@ -8,7 +8,7 @@ mod bytecode;
 mod compile;
 mod interpret;
 mod ffi;
-mod types;
+pub mod types;
 
 #[cfg(test)]
 mod test;

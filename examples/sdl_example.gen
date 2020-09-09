@@ -56,10 +56,10 @@
 
 (def title (block (
   (let p (malloc 4))
-  (store_8 p 65)
-  (store_8 (+ p 1) 65)
-  (store_8 (+ p 2) 65)
-  (store_8 (+ p 3) 0)
+  (store u8 p 65)
+  (store u8 (+ p 1) 65)
+  (store u8 (+ p 2) 65)
+  (store u8 (+ p 3) 0)
   p
 )))
 

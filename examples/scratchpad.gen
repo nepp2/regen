@@ -3,31 +3,31 @@
 ;; *{ element_count : u64, data : *void }
 (def warray_init (fun (p element_count) (
   (let data (malloc (* element_count 8)))
-  (store_64 p element_count)
-  (store_64 (+ p 8) data)
+  (store u64 p element_count)
+  (store u64 (+ p 8) data)
   p
 )))
 
 (def warray_len (fun (array) (
-  (load_64 array)
+  (load u64 array)
 )))
 
 (def warray_index (fun (array index) (
-  (let data (load_64 (+ array 8)))
+  (let data (load u64 (+ array 8)))
   (+ data (* 8 index))
 )))
 
 (def warray_set (fun (array index value) (
-  (store_64 (warray_index array index) value)
+  (store u64 (warray_index array index) value)
 )))
 
-(def warray_get (fun (array index value) (
-  (load_64 (warray_index array index))
+(def warray_get (fun (array index) (
+  (load u64 (warray_index array index))
 )))
 
 (def function (fun (n) (
   (node_display n)
-  (let ns (alloca 16))
+  (let ns (ref (byte_chunk 16)))
   (node_children ns n)
   (let name (warray_get ns 0))
   (let args (warray_get ns 1))

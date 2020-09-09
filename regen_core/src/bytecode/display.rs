@@ -86,7 +86,7 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Op> {
       Op::Set(dest, src) =>
         write!(f, "(set {} (u{} {}))", bc.d(dest), dest.bytes * 8, bc.d(src))?,
       Op::Store{ byte_width, pointer, value } =>
-        write!(f, "(store {} (u{} {}) )", bc.d(pointer), byte_width, bc.d(value))?,
+        write!(f, "(store {} (u{} {}) )", bc.d(pointer), *byte_width * 8, bc.d(value))?,
       Op::CJump{ cond, then_seq, else_seq } =>
         write!(f, "(cjump {} {} {})",
           bc.d(cond), bc.d(then_seq), bc.d(else_seq))?,
@@ -95,9 +95,9 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Op> {
       Op::Jump(seq) =>
         write!(f, "(jump {})", bc.d(seq))?,
       Op::Arg{ byte_offset, value } =>
-        write!(f, "(set (+ Arg {}) (u64 {}))", byte_offset, bc.d(value))?,
+        write!(f, "(set (Arg {}) (u{} {}))", byte_offset, value.bytes * 8, bc.d(value))?,
       Op::Return(Some(v)) =>
-        write!(f, "(return (u64 {}))", bc.d(v))?,
+        write!(f, "(return (u{} {}))", v.bytes * 8, bc.d(v))?,
       Op::Return(None) =>
         write!(f, "return")?,
     }
@@ -119,8 +119,8 @@ impl fmt::Display for Operator {
       GT => write!(f, ">"),
       LTE => write!(f, "<="),
       GTE => write!(f, ">="),
-      Load(a) => write!(f, "load_{}", a),
       Ref => write!(f, "ref"),
+      Not => write!(f, "!"),
     }
   }
 }
@@ -130,27 +130,19 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Expr> {
     let bc = self.bc;
     match self.x {
       Expr::LiteralU64(v) =>
-        write!(f, "{}", v)?,
+        write!(f, "{}", v),
       Expr::Def(sym) =>
-        write!(f, "{}", sym)?,
+        write!(f, "{}", sym),
       Expr::BinaryOp(op, a, b) =>
-        write!(f, "({} {} {})", op, bc.d(a), bc.d(b))?,
+        write!(f, "({} {} {})", op, bc.d(a), bc.d(b)),
       Expr::UnaryOp(op, a) =>
-        write!(f, "({} {})", op, bc.d(a))?,
+        write!(f, "({} {})", op, bc.d(a)),
       Expr::Invoke(reg) =>
-        write!(f, "(call {})", bc.d(reg))?,
+        write!(f, "(call {})", bc.d(reg)),
       Expr::InvokeC(reg, args) =>
-        write!(f, "(ccall {} (arg_count {}))", bc.d(reg), args)?,
+        write!(f, "(ccall {} (arg_count {}))", bc.d(reg), args),
+      Expr::Load{ bytes, ptr } =>
+        write!(f, "load u{} {}", bytes * 8, bc.d(ptr)),
     }
-    Ok(())
-  }
-}
-
-impl fmt::Display for ByteWidth {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    use ByteWidth::*;
-    write!(f, "{}", match self {
-      U64 => "64", U32 => "32", U16 => "16", U8 => "8", 
-    })
   }
 }

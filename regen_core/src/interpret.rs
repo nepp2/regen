@@ -8,7 +8,7 @@ use crate::{parse, bytecode, env, ffi, compile};
 use env::Env;
 use parse::Node;
 use bytecode::{
-  BytecodeFunction, Op, Expr, FrameVar, Operator, ByteWidth,
+  BytecodeFunction, Op, Expr, FrameVar, Operator,
 };
 
 pub type CompileExpression = fn(env : &Env, fun : Node) -> BytecodeFunction;
@@ -71,7 +71,6 @@ fn reg(sbp : usize, i : FrameVar) -> usize {
 }
 
 fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : &mut Env) {
-  use ByteWidth::*;
   let mut frame = shadow_stack.pop().unwrap();
   'outer: loop {
     let fun = unsafe { &*frame.f };
@@ -82,13 +81,14 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : &mut Env) {
         Op::Expr(var, e) => {
           use Operator::*;
           match e {
-            Expr::Def(sym) =>
+            Expr::Def(sym) => {
               if let Some(f) = env.get(sym) {
                 set_var(sbp, var, f.value);
               }
               else {
                 panic!("Symbol '{}' not present in env", sym);
               }
+            }
             Expr::LiteralU64(val) => {
               set_var(sbp, var, val as u64);
             }
@@ -117,10 +117,7 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : &mut Env) {
               let a = get_var(sbp, a);
               let val = match op {
                 Sub => panic!("signed types not yet supported"),
-                Load(U64) => unsafe { *(a as *const u64) },
-                Load(U32) => unsafe { *(a as *const u32) as u64 },
-                Load(U16) => unsafe { *(a as *const u16) as u64 },
-                Load(U8) => unsafe { *(a as *const u8) as u64 },
+                Not => !(a != 0) as u64,
                 _ => panic!("op not unary"),
               };
               set_var(sbp, var, val);
@@ -150,6 +147,11 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : &mut Env) {
               let val = unsafe { ffi::call_c_function(fptr, args) };
               set_var(sbp, var, val);
             }
+            Expr::Load{ bytes, ptr } => {
+              let p = get_var(sbp, ptr);
+              let vaddr = var_addr(sbp, var);
+              unsafe { load(p as *mut (), vaddr, bytes as usize) }
+            }
           };
         }
         Op::Set(dest, src) => {
@@ -158,9 +160,9 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : &mut Env) {
           unsafe { store(src_addr, dest_addr as *mut (), src.bytes as usize) }
         }
         Op::Store{ byte_width, pointer, value } => {
-          let p = get_var(sbp, pointer);
-          let vaddr = var_addr(sbp, value);
-          unsafe { store(vaddr, p as *mut (), byte_width as usize) }
+          let dest = get_var(sbp, pointer);
+          let src_register = var_addr(sbp, value);
+          unsafe { store(src_register, dest as *mut (), byte_width as usize) }
         }
         Op::CJump{ cond, then_seq, else_seq } => {
           let v = get_var(sbp, cond);
@@ -236,13 +238,6 @@ fn var_addr(sbp : StackPtr, v : FrameVar) -> *mut u64 {
   sbp.byte_offset(v.byte_offset as u64)
 }
 
-fn copy_var(sbp : StackPtr, v : FrameVar, val : u64) {
-  let p = var_addr(sbp, v);
-  unsafe {
-    *p = val;
-  }
-}
-
 fn set_var(sbp : StackPtr, v : FrameVar, val : u64) {
   unsafe {
     *var_addr(sbp, v) = val;
@@ -263,6 +258,20 @@ unsafe fn store(src_register : *mut u64, dest : *mut (), byte_width : usize) {
       std::ptr::copy_nonoverlapping(
         src_register as *mut u8, // src
         dest as *mut u8, // dest
+        byte_width as usize),
+  }
+}
+
+unsafe fn load(src : *mut (), dest_register : *mut u64, byte_width : usize) {
+  match byte_width {
+    8 => *dest_register = *(src as *mut u64),
+    4 => *dest_register = *(src as *mut u32) as u64,
+    2 => *dest_register = *(src as *mut u16) as u64,
+    1 => *dest_register = *(src as *mut u8) as u64,
+    _ =>
+      std::ptr::copy_nonoverlapping(
+        src as *mut u8, // src
+        dest_register as *mut u8, // dest
         byte_width as usize),
   }
 }

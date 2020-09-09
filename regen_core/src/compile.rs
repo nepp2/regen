@@ -4,7 +4,7 @@ use crate::{bytecode, parse, symbols, env, perm_alloc, types};
 
 use bytecode::{
   SequenceId, SequenceInfo, Expr, BytecodeFunction,
-  ByteWidth, NamedVar, Op, Operator, FrameVar,
+  NamedVar, Op, Operator, FrameVar,
 };
 
 use types::{Type, TypeHandle, CoreTypes};
@@ -350,6 +350,14 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       let e = Expr::LiteralU64(s.as_u64());
       return Some(push_expr(b, e, b.env.c.u64_tag));
     }
+    // load
+    Command("load", [type_tag, pointer]) => {
+      let entry = b.env.get(type_tag.as_symbol()).unwrap();
+      let t = TypeHandle::from_u64(entry.value);
+      let ptr = compile_expr_to_value(b, *pointer).fv;
+      let e = Expr::Load{ bytes: t.get().size_of, ptr };
+      return Some(push_expr(b, e, *t.get()));
+    }
     _ => {
       let v = compile_list_expr(b, node);
       Some(v)
@@ -485,12 +493,8 @@ fn str_to_operator(s : &str) -> Option<Operator> {
     ">" => GT,
     "<=" => LTE,
     ">=" => GTE,
-    "load" => Load(ByteWidth::U64),
-    "load_64" => Load(ByteWidth::U64),
-    "load_32" => Load(ByteWidth::U32),
-    "load_16" => Load(ByteWidth::U16),
-    "load_8" => Load(ByteWidth::U8),
     "ref" => Ref,
+    "!" => Not,
     _ => return None,
   };
   Some(op)
@@ -501,13 +505,7 @@ fn op_result_type(c : &CoreTypes, op : Operator) -> Type {
   match op {
     Add | Sub | Mul | Div | Rem |
     Eq | LT | GT | LTE | GTE |
-    Load(ByteWidth::U64) => {
-      c.u64_tag
-    }
-    Load(ByteWidth::U32) => c.u32_tag,
-    Load(ByteWidth::U16) => c.u16_tag,
-    Load(ByteWidth::U8) => c.u8_tag,
-    Ref => c.u64_tag,
+    Ref | Not => c.u64_tag,
   }
 }
 

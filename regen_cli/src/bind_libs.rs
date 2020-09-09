@@ -2,6 +2,7 @@
 use regen_core::{
   env::Env,
   symbols::Symbol,
+  types::c_function_type,
 };
 use std::path::Path;
 use std::ffi::CString;
@@ -32,6 +33,9 @@ pub extern "C" fn load_library_symbol(lib : &Library, symbol : Symbol) -> *const
 }
 
 pub fn bind_libs(env : &mut Env) {
-  env.insert_str("load_library", load_library as u64, env.c.u64_tag);
-  env.insert_str("load_library_symbol", load_library_symbol as u64, env.c.u64_tag);
+  let u64 = env.c.u64_tag;
+  env.insert_str("load_library", load_library as u64,
+    c_function_type(&env.c, &[u64], u64));
+  env.insert_str("load_library_symbol", load_library_symbol as u64,
+    c_function_type(&env.c, &[u64, u64], u64));
 }
