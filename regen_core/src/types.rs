@@ -22,6 +22,10 @@ impl TypeHandle {
   pub fn as_u64(self) -> u64 {
     self.0 as u64
   }
+
+  pub fn from_u64(v : u64) -> Self {
+    TypeHandle(v as *const Type)
+  }
 }
 
 #[derive(Copy, Clone)]

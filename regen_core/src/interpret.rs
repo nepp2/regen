@@ -67,7 +67,7 @@ struct Frame {
 }
 
 fn reg(sbp : usize, i : FrameVar) -> usize {
-  i.byte_offset + sbp
+  i.byte_offset as usize + sbp
 }
 
 fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : &mut Env) {
@@ -152,18 +152,15 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : &mut Env) {
             }
           };
         }
-        Op::Set(var, val) => {
-          set_var(sbp, var, get_var(sbp, val));
+        Op::Set(dest, src) => {
+          let src_addr = var_addr(sbp, src);
+          let dest_addr = var_addr(sbp, dest);
+          unsafe { store(src_addr, dest_addr as *mut (), src.bytes as usize) }
         }
         Op::Store{ byte_width, pointer, value } => {
           let p = get_var(sbp, pointer);
-          let v = get_var(sbp, value);
-          match byte_width {
-            U64 => unsafe{ *(p as *mut u64) = v},
-            U32 => unsafe{ *(p as *mut u32) = v as u32},
-            U16 => unsafe{ *(p as *mut u16) = v as u16},
-            U8 => unsafe{ *(p as *mut u8) = v as u8},
-          }
+          let vaddr = var_addr(sbp, value);
+          unsafe { store(vaddr, p as *mut (), byte_width as usize) }
         }
         Op::CJump{ cond, then_seq, else_seq } => {
           let v = get_var(sbp, cond);
@@ -180,7 +177,7 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : &mut Env) {
           continue;
         }
         Op::Arg{ byte_offset, value } => {
-          let arg_ptr = sbp.advance_frame(fun.frame_bytes).byte_offset(byte_offset as usize);
+          let arg_ptr = sbp.advance_frame(fun.frame_bytes).byte_offset(byte_offset);
           unsafe {
             *arg_ptr = get_var(sbp, value);
           }
@@ -190,9 +187,9 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : &mut Env) {
         }
         Op::Return(val) => {
           if let Some(val) = val {
-            let v = get_var(sbp, val);
+            let src_addr = var_addr(sbp, val);
             unsafe {
-              *frame.return_addr = v;
+              store(src_addr, frame.return_addr as *mut (), val.bytes as usize);
             }
           }
           if let Some(prev_frame) = shadow_stack.pop() {
@@ -218,7 +215,7 @@ struct StackPtr {
 }
 
 impl StackPtr {
-  fn advance_frame(self, frame_bytes : usize) -> Self {
+  fn advance_frame(self, frame_bytes : u64) -> Self {
     let new_byte_pos = self.byte_pos + (frame_bytes as u32);
     if new_byte_pos >= self.max_bytes {
       panic!("exceeded stack")
@@ -226,8 +223,8 @@ impl StackPtr {
     StackPtr { mem: self.mem, byte_pos: new_byte_pos, max_bytes: self.max_bytes }
   }
 
-  fn byte_offset(self, byte_offset : usize) -> *mut u64 {
-    unsafe { self.mem.add(self.byte_pos as usize + byte_offset) as *mut u64 }
+  fn byte_offset(self, byte_offset : u64) -> *mut u64 {
+    unsafe { self.mem.add((self.byte_pos as u64 + byte_offset) as usize) as *mut u64 }
   }
 
   fn u64_offset(self, index : usize) -> *mut u64 {
@@ -236,7 +233,7 @@ impl StackPtr {
 }
 
 fn var_addr(sbp : StackPtr, v : FrameVar) -> *mut u64 {
-  sbp.byte_offset(v.byte_offset)
+  sbp.byte_offset(v.byte_offset as u64)
 }
 
 fn copy_var(sbp : StackPtr, v : FrameVar, val : u64) {
@@ -254,4 +251,18 @@ fn set_var(sbp : StackPtr, v : FrameVar, val : u64) {
 
 fn get_var(sbp : StackPtr, v : FrameVar) -> u64 {
   unsafe { *var_addr(sbp, v) }
+}
+
+unsafe fn store(src_register : *mut u64, dest : *mut (), byte_width : usize) {
+  match byte_width {
+    8 => *(dest as *mut u64) = *src_register,
+    4 => *(dest as *mut u32) = *src_register as u32,
+    2 => *(dest as *mut u16) = *src_register as u16,
+    1 => *(dest as *mut u8) = *src_register as u8,
+    _ =>
+      std::ptr::copy_nonoverlapping(
+        src_register as *mut u8, // src
+        dest as *mut u8, // dest
+        byte_width as usize),
+  }
 }

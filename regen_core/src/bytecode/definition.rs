@@ -13,8 +13,8 @@ pub struct SequenceId(pub usize);
 #[derive(Copy, Clone, Debug)]
 pub struct FrameVar {
   pub id : usize,
-  pub byte_offset : usize,
-  pub bytes : usize,
+  pub byte_offset : u32,
+  pub bytes : u32,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -47,7 +47,7 @@ pub enum Op {
   Debug(Symbol, FrameVar),
   Jump(SequenceId),
   Arg{ byte_offset: u64, value: FrameVar },
-  Store{ byte_width : ByteWidth, pointer : FrameVar, value : FrameVar },
+  Store{ byte_width : u64, pointer : FrameVar, value : FrameVar },
   Return(Option<FrameVar>),
 }
 
@@ -72,5 +72,5 @@ pub struct BytecodeFunction {
   pub args : usize,
   pub locals : Vec<NamedVar>,
   pub registers : Vec<FrameVar>,
-  pub frame_bytes : usize,
+  pub frame_bytes : u64,
 }

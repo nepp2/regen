@@ -40,7 +40,7 @@ struct Builder<'l> {
   registers : Vec<FrameVar>,
 
   /// frame size in multiple of 64bit words
-  frame_bytes : usize,
+  frame_bytes : u64,
 
   /// the instruction sequence currently being built
   cur_seq : Option<SequenceId>,
@@ -97,17 +97,17 @@ fn add_local(b : &mut Builder, name : Symbol, var : FrameVar, t : Type) -> Var {
   Var { fv: var, var_type: Local, data_type: t }
 }
 
-fn new_frame_var(b : &mut Builder, minimum_bytes : usize) -> FrameVar {
-  let bytes = types::round_up_multiple(minimum_bytes as u64, 8) as usize;
+fn new_frame_var(b : &mut Builder, minimum_bytes : u64) -> FrameVar {
+  let bytes = types::round_up_multiple(minimum_bytes as u64, 8);
   let id = b.registers.len();
-  let var = FrameVar{ id, byte_offset: b.frame_bytes, bytes };
+  let var = FrameVar{ id, byte_offset: b.frame_bytes as u32, bytes: bytes as u32 };
   b.registers.push(var);
-  b.frame_bytes += var.bytes;
+  b.frame_bytes += bytes;
   var
 }
 
 fn new_var(b : &mut Builder, t : Type) -> Var {
-  let var = new_frame_var(b, t.size_of as usize);
+  let var = new_frame_var(b, t.size_of);
   Var { fv: var, var_type: Register, data_type: t }
 }
 
@@ -116,10 +116,6 @@ fn push_expr(b : &mut Builder, e : Expr, t : Type) -> Var {
   b.ops.push(Op::Expr(r.fv, e));
   return r;
 }
-
-// fn build_symbol(b : &mut Builder, n : Node) -> Symbol {
-//   symbols::to_symbol(b.env.st, code_segment(b.code, n))
-// }
 
 fn create_sequence(b : &mut Builder, name : &str) -> SequenceId {
   // Make sure the name is unique
@@ -208,12 +204,6 @@ fn compile_expr_to_value(b : &mut Builder, node : Node) -> Var {
   compile_expr(b, node).expect("expected value, found none")
 }
 
-fn compile_store(b : &mut Builder, byte_width : ByteWidth, pointer : Node, value : Node) {
-  let pointer = compile_expr_to_value(b, pointer).fv;
-  let value = compile_expr_to_value(b, value).fv;
-  b.ops.push(Op::Store{ byte_width, pointer, value });
-}
-
 fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
   match node_shape(&node) {
     // Return
@@ -262,24 +252,32 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     }
     // set var
     Command("set", [varname, value]) => {
-      let val_reg = compile_expr_to_value(b, *value);
-      let var_reg =
+      let value = compile_expr_to_value(b, *value);
+      let variable =
         find_local_in_scope(b, varname.as_symbol())
         .expect("no variable found");
-      b.ops.push(Op::Set(var_reg.fv, val_reg.fv));
+      if value.data_type.size_of != variable.data_type.size_of {
+        panic!("types don't match")
+      }
+      b.ops.push(Op::Set(variable.fv, value.fv));
       None
     }
     // store var
-    Command("store", [pointer, value]) =>
-      { compile_store(b, ByteWidth::U64, *pointer, *value); None }
-    Command("store_64", [pointer, value]) =>
-      { compile_store(b, ByteWidth::U64, *pointer, *value); None }
-    Command("store_32", [pointer, value]) =>
-      { compile_store(b, ByteWidth::U32, *pointer, *value); None }
-    Command("store_16", [pointer, value]) =>
-      { compile_store(b, ByteWidth::U16, *pointer, *value); None }
-    Command("store_8", [pointer, value]) =>
-      { compile_store(b, ByteWidth::U8, *pointer, *value); None }
+    Command("store", [pointer, value]) => {
+      let pointer = compile_expr_to_value(b, *pointer).fv;
+      let value = compile_expr_to_value(b, *value).fv;
+      b.ops.push(Op::Store{ byte_width: value.bytes as u64, pointer, value });
+      None
+    }
+    // store var explicit type
+    Command("store", [type_tag, pointer, value]) => {
+      let e = b.env.get(type_tag.as_symbol()).unwrap();
+      let t = TypeHandle::from_u64(e.value);
+      let pointer = compile_expr_to_value(b, *pointer).fv;
+      let value = compile_expr_to_value(b, *value).fv;
+      b.ops.push(Op::Store{ byte_width: t.get().size_of, pointer, value });
+      None
+    }
     // stack allocate
     Command("byte_chunk", [value]) => {
       let array = types::array_type(&b.env.c, value.as_literal());
@@ -388,7 +386,7 @@ fn compile_function(env: &Env, args : &[Node], body : &[Node]) -> (BytecodeFunct
   for &arg in args {
     let name = arg.as_symbol();
     let t = env.c.u64_tag; // TODO: fix type
-    let var = new_frame_var(&mut b, t.size_of as usize);
+    let var = new_frame_var(&mut b, t.size_of);
     add_local(&mut b, name, var, t);
   }
   // start a sequence

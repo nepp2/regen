@@ -2,10 +2,10 @@
 (def new_rect (fun (x y w h) (
   (let rect (byte_chunk 16))
   (let p (ref rect))
-  (store_32 p x)
-  (store_32 (+ p 4) y)
-  (store_32 (+ p 8) w)
-  (store_32 (+ p 12) h)
+  (store u32 p x)
+  (store u32 (+ p 4) y)
+  (store u32 (+ p 8) w)
+  (store u32 (+ p 12) h)
   rect
 )))
 

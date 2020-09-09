@@ -1,9 +1,9 @@
 ;; { x : i32, y : i32, w : i32, h : i32 }
 (def rect_init (fun (p x y w h) (
-  (store_32 p x)
-  (store_32 (+ p 4) y)
-  (store_32 (+ p 8) w)
-  (store_32 (+ p 12) h)
+  (store u32 p x)
+  (store u32 (+ p 4) y)
+  (store u32 (+ p 8) w)
+  (store u32 (+ p 12) h)
 )))
 
 (def main (fun () (
