@@ -113,6 +113,10 @@ pub extern "C" fn load_prelude(env : &mut Env) {
   interpret::interpret(PRELUDE, env);
 }
 
+pub extern "C" fn eval(env : &mut Env, n : Node) {
+  interpret::interpret_node(n, env);
+}
+
 pub fn new_env(st : SymbolTable) -> Box<Env> {
   let env_ptr = Box::into_raw(Box::new(Env {
     values: Default::default(),
@@ -172,6 +176,9 @@ pub fn new_env(st : SymbolTable) -> Box<Env> {
 
   env.insert_str("load_prelude", load_prelude as u64,
     c_function_type(&env.c, &[u64], void));
+
+  env.insert_str("eval", eval as u64,
+    c_function_type(&env.c, &[u64, u64], void));
 
   env
 }

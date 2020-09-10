@@ -13,39 +13,37 @@ use bytecode::{
 
 pub type CompileExpression = fn(env : &Env, fun : Node) -> BytecodeFunction;
 
-pub fn interpret(code : &str, env : &mut Env) {
-  let n = parse::parse(env.st, &code);
+fn interpret_function(f : *const BytecodeFunction, env : &mut Env) {
   let mut stack = [0 as u8 ; 16384];
-  let mut shadow_stack = vec![];
   let stack_ptr = StackPtr {
     mem: &mut stack[0] as *mut u8,
     byte_pos: 0,
     max_bytes: stack.len() as u32,
   };
+  let mut shadow_stack = vec![
+    Frame {
+      pc: 0,
+      sbp: stack_ptr,
+      f,
+      return_addr: stack_ptr.byte_offset(0),
+    }
+  ];
+  interpreter_loop(&mut shadow_stack, env);
+}
+
+pub fn interpret_node(n : Node, env : &mut Env) {
+  let (f, _) = compile::compile_expr_to_function(env, n);
+  interpret_function(&f, env)
+}
+
+pub fn interpret(code : &str, env : &mut Env) {
+  let n = parse::parse(env.st, &code);
   for &c in n.children() {
-    let (f, _) = compile::compile_expr_to_function(env, c);
-    shadow_stack.clear();
-    shadow_stack.push(
-      Frame {
-        pc: 0,
-        sbp: stack_ptr,
-        f: (&f) as *const BytecodeFunction,
-        return_addr: stack_ptr.byte_offset(0),
-      }
-    );
-    interpreter_loop(&mut shadow_stack, env);
+    interpret_node(c, env);
   }
   if let Some(v) = env.get_str("main") {
     let f = v.value as *const BytecodeFunction;
-    shadow_stack.clear();
-    shadow_stack.push(
-      Frame {
-        pc: 0,
-        sbp: stack_ptr,
-        f,
-        return_addr: stack_ptr.byte_offset(0),
-      });
-    interpreter_loop(&mut shadow_stack, env);
+    interpret_function(f, env);
   }
   else {
     println!("No main function found.");
