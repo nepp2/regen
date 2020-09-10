@@ -119,6 +119,14 @@ pub struct SrcLocation {
   pub code : Perm<String>,
 }
 
+impl SrcLocation {
+  pub fn zero() -> Self {
+    SrcLocation {
+      start: 0, end: 0, code: Perm { p : std::ptr::null() },
+    }
+  }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct NodeInfo {
   pub loc : SrcLocation,

@@ -3,8 +3,9 @@
 use crate::symbols::{Symbol, SymbolTable, to_symbol};
 use crate::types::{Type, TypeHandle, CoreTypes, core_types, c_function_type};
 use crate::parse;
-use parse::{Node, NodeContent};
-use crate::perm_alloc::{PermSlice, perm_slice};
+use crate::interpret;
+use parse::{Node, NodeInfo, NodeContent, SrcLocation};
+use crate::perm_alloc::{PermSlice, perm_slice, perm};
 use std::collections::HashMap;
 
 /// Environment for interpreter
@@ -86,8 +87,30 @@ pub extern "C" fn node_children(out : &mut PermSlice<Node>, node : Node) {
   *out = s;
 }
 
+pub extern "C" fn node_from_list(list : &PermSlice<Node>) -> Node {
+  let info = NodeInfo {
+    loc: SrcLocation::zero(),
+    content: NodeContent::List(perm_slice(list.as_slice())),
+  };
+  perm(info)
+}
+
+pub extern "C" fn node_from_symbol(s : Symbol) -> Node {
+  let info = NodeInfo {
+    loc: SrcLocation::zero(),
+    content: NodeContent::Sym(s),
+  };
+  perm(info)
+}
+
 pub extern "C" fn node_display(node : Node) {
   println!("{}", node);
+}
+
+const PRELUDE : &'static str = std::include_str!("../../examples/prelude.gen");
+
+pub extern "C" fn load_prelude(env : &mut Env) {
+  interpret::interpret(PRELUDE, env);
 }
 
 pub fn new_env(st : SymbolTable) -> Box<Env> {
@@ -105,7 +128,6 @@ pub fn new_env(st : SymbolTable) -> Box<Env> {
 
   let u64 = env.c.u64_tag;
   let void = env.c.void_tag;
-  let slice = env.c.slice_tag;
 
   env.insert_str("c_add", c_add as u64,
     c_function_type(&env.c, &[u64, u64], u64));
@@ -137,9 +159,18 @@ pub fn new_env(st : SymbolTable) -> Box<Env> {
     c_function_type(&env.c, &[u64], void));
 
   env.insert_str("node_children", node_children as u64,
-    c_function_type(&env.c, &[u64], slice));
+    c_function_type(&env.c, &[u64, u64], void));
 
   env.insert_str("node_display", node_display as u64,
+    c_function_type(&env.c, &[u64], void));
+
+  env.insert_str("node_from_list", node_from_list as u64,
+    c_function_type(&env.c, &[u64], u64));
+
+  env.insert_str("node_from_symbol", node_from_symbol as u64,
+    c_function_type(&env.c, &[u64], u64));
+
+  env.insert_str("load_prelude", load_prelude as u64,
     c_function_type(&env.c, &[u64], void));
 
   env

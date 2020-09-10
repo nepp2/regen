@@ -1,9 +1,0 @@
-;; Draw a rectangle on the screen
-
-(def main (fun () (
-  ;; load SDL library
-  ;; get SDL symbols
-  ;; initialise SDL window
-  ;; draw rectangle
-  ;; poll events indefinitely
-)))

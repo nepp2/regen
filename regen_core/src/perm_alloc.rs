@@ -14,7 +14,7 @@ use std::ops::RangeFrom;
 #[derive(Clone)]
 #[repr(C)]
 pub struct Perm<T> {
-  p : *const T
+  pub p : *const T
 }
 
 impl <T> Perm<T> {
@@ -28,8 +28,8 @@ impl <T : Clone> Copy for Perm<T> { }
 #[derive(Clone)]
 #[repr(C)]
 pub struct PermSlice<T> {
-  len : usize,
-  p : *const T,
+  pub len : usize,
+  pub p : *const T,
 }
 
 impl <T : Clone> Copy for PermSlice<T> { }

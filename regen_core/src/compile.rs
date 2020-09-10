@@ -59,9 +59,6 @@ struct Builder<'l> {
 
   /// the environment containing all visible symbols
   env : &'l Env,
-
-  /// used to store argument values without reallocating a lot
-  arg_values : Vec<FrameVar>,
 }
 
 #[derive(Eq, PartialEq, Copy, Clone)]
@@ -170,6 +167,51 @@ fn complete_function(mut b : Builder) -> BytecodeFunction {
     locals: b.locals,
     registers: b.registers,
   }
+}
+
+fn compile_function(env: &Env, args : &[Node], body : &[Node]) -> (BytecodeFunction, Type) {
+  let mut b = Builder {
+    args: 0,
+    locals: vec![],
+    scoped_locals: vec![],
+    registers: vec![],
+    frame_bytes: 0,
+    seq_completion: vec![],
+    cur_seq: None,
+    seq_info: vec![],
+    ops: vec![],
+    label_stack: vec![],
+    env,
+  };
+  b.args = args.len();
+  for &arg in args {
+    let name = arg.as_symbol();
+    let t = env.c.u64_tag; // TODO: fix type
+    let var = new_frame_var(&mut b, t.size_of);
+    add_local(&mut b, name, var, t);
+  }
+  // start a sequence
+  let entry_seq = create_sequence(&mut b, "entry");
+  set_current_sequence(&mut b, entry_seq);
+  let v = compile_block_expr(&mut b, body);
+  let mut return_type = b.env.c.void_tag;
+  if let Some(v) = v {
+    return_type = v.data_type;
+    b.ops.push(Op::Return(Some(v.fv)));
+  }
+  else {
+    b.ops.push(Op::Return(None));
+  }
+  let t = types::function_type(&b.env.c, &[], return_type); // TODO: fix arg types!
+  let f = complete_function(b);
+  //for n in body { println!("{}", n) }
+  //println!("{}", f);
+  (f, t)
+}
+
+/// Compile basic imperative language into bytecode
+pub fn compile_expr_to_function(env: &Env, root : Node) -> (BytecodeFunction, Type) {
+  compile_function(env, &[], &[root])
 }
 
 fn compile_if_else(b : &mut Builder, cond : Node, then_expr : Node, else_expr : Node) -> Option<Var> {
@@ -375,53 +417,6 @@ fn compile_block_expr(b : &mut Builder, nodes : &[Node]) -> Option<Var> {
   v
 }
 
-fn compile_function(env: &Env, args : &[Node], body : &[Node]) -> (BytecodeFunction, Type) {
-  let mut b = Builder {
-    args: 0,
-    locals: vec![],
-    scoped_locals: vec![],
-    registers: vec![],
-    frame_bytes: 0,
-    seq_completion: vec![],
-    cur_seq: None,
-    seq_info: vec![],
-    ops: vec![],
-    label_stack: vec![],
-    env,
-    arg_values: vec![],
-  };
-  b.args = args.len();
-  for &arg in args {
-    let name = arg.as_symbol();
-    let t = env.c.u64_tag; // TODO: fix type
-    let var = new_frame_var(&mut b, t.size_of);
-    add_local(&mut b, name, var, t);
-  }
-  // start a sequence
-  let entry_seq = create_sequence(&mut b, "entry");
-  set_current_sequence(&mut b, entry_seq);
-  let v = compile_block_expr(&mut b, body);
-  let mut return_type = b.env.c.void_tag;
-  if let Some(v) = v {
-    return_type = v.data_type;
-    b.ops.push(Op::Return(Some(v.fv)));
-  }
-  else {
-    b.ops.push(Op::Return(None));
-  }
-  let t = types::function_type(&b.env.c, &[], return_type); // TODO: fix arg types!
-  let f = complete_function(b);
-  for n in body { println!("{}", n) }
-  println!("{}", f);
-  //println!("{}", )
-  (f, t)
-}
-
-/// Compile basic imperative language into bytecode
-pub fn compile_expr_to_function(env: &Env, root : Node) -> (BytecodeFunction, Type) {
-  compile_function(env, &[], &[root])
-}
-
 fn atom_to_value(b : &mut Builder, string : &str, sym : Symbol) -> Var {
   // boolean literals
   match string {
@@ -450,10 +445,10 @@ fn atom_to_value(b : &mut Builder, string : &str, sym : Symbol) -> Var {
 fn compile_function_call(b : &mut Builder, list : &[Node]) -> Var {
   let function = list[0];
   let args = &list[1..];
-  b.arg_values.clear();
+  let mut arg_values = vec![]; // TODO: remove allocation
   for &arg in args {
     let v = compile_expr_to_value(b, arg);
-    b.arg_values.push(v.fv);
+    arg_values.push(v.fv);
   }
   let f = compile_expr_to_value(b, function);
   let info = if let Some(i) = b.env.c.as_function(&f.data_type) {
@@ -464,7 +459,7 @@ fn compile_function_call(b : &mut Builder, list : &[Node]) -> Var {
       f.data_type.kind, function, function.loc);
   };
   let mut byte_offset = 0;
-  for value in b.arg_values.drain(..) {
+  for value in arg_values.drain(..) {
     // TODO: check arg values
     b.ops.push(Op::Arg{ byte_offset, value });
     byte_offset += types::round_up_multiple(value.bytes as u64, 8);

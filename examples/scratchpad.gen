@@ -1,49 +1,42 @@
 
-;; word array - all elements are 64bit
-;; *{ element_count : u64, data : *void }
-(def warray_init (fun (p element_count) (
-  (let data (malloc (* element_count 8)))
-  (store u64 p element_count)
-  (store u64 (+ p 8) data)
-  p
-)))
-
-(def warray_len (fun (array) (
-  (load u64 array)
-)))
-
-(def warray_index (fun (array index) (
-  (let data (load u64 (+ array 8)))
-  (+ data (* 8 index))
-)))
-
-(def warray_set (fun (array index value) (
-  (store u64 (warray_index array index) value)
-)))
-
-(def warray_get (fun (array index) (
-  (load u64 (warray_index array index))
-)))
+(load_prelude env)
 
 (def function (fun (n) (
-  (node_display n)
-  (let ns (ref (byte_chunk 16)))
-  (node_children ns n)
-  (let name (warray_get ns 0))
-  (let args (warray_get ns 1))
-  (let body (warray_get ns 2))
-  (node_display name)
-  (node_display args)
-  (node_display body)
+  (let slice (ref (byte_chunk 16)))
+  (node_children slice n)
+  (let name (warray_get slice 0))
+  (let args (warray_get slice 1))
+  (let body (warray_get slice 2))
+
+  (let fun_list (warray_new))
+  (warray_push fun_list (node_from_symbol (sym fun)))
+  (warray_push fun_list args)
+  (warray_push fun_list body)
+  (let fun_node (node_from_list fun_list))
+  
+  (let def_list (warray_new))
+  (warray_push def_list (node_from_symbol (sym def)))
+  (warray_push def_list name)
+  (warray_push def_list fun_node)
+  (node_from_list def_list)
+
   ;; (template
   ;;   (def #name (fun #args #body))
   ;; )
 )))
 
 (def main (fun () (
-  (function (# (
+  (let node (function (# (
     add (a b) (
       (+ a b)
     )
-  )))
+  ))))
+  (node_display node)
+
+  (let a (warray_new 0))
+  (warray_push a 10)
+  (warray_push a 5)
+  (warray_push a 0)
+
+  (debug (warray_get a 0))
 )))

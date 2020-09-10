@@ -95,7 +95,7 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Op> {
       Op::Jump(seq) =>
         write!(f, "(jump {})", bc.d(seq))?,
       Op::Arg{ byte_offset, value } =>
-        write!(f, "(set (Arg {}) (u{} {}))", byte_offset, value.bytes * 8, bc.d(value))?,
+        write!(f, "(arg {} (u{} {}))", byte_offset, value.bytes * 8, bc.d(value))?,
       Op::Return(Some(v)) =>
         write!(f, "(return (u{} {}))", v.bytes * 8, bc.d(v))?,
       Op::Return(None) =>
@@ -142,7 +142,7 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Expr> {
       Expr::InvokeC(reg, args) =>
         write!(f, "(ccall {} (arg_count {}))", bc.d(reg), args),
       Expr::Load{ bytes, ptr } =>
-        write!(f, "load u{} {}", bytes * 8, bc.d(ptr)),
+        write!(f, "(load u{} {})", bytes * 8, bc.d(ptr)),
     }
   }
 }
