@@ -32,10 +32,12 @@ pub extern "C" fn load_library_symbol(lib : &Library, symbol : Symbol) -> *const
   }
 }
 
-pub fn bind_libs(env : &mut Env) {
-  let u64 = env.c.u64_tag;
+pub fn bind_libs(mut env : Env) {
+  let e = env;
+  let c = &e.c;
+  let u64 = c.u64_tag;
   env.insert_str("load_library", load_library as u64,
-    c_function_type(&env.c, &[u64], u64));
+    c_function_type(c, &[u64], u64));
   env.insert_str("load_library_symbol", load_library_symbol as u64,
-    c_function_type(&env.c, &[u64, u64], u64));
+    c_function_type(c, &[u64, u64], u64));
 }

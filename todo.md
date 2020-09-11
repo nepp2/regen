@@ -1,16 +1,25 @@
 
 # Immediate TODO
 
+Get macros working
+- Draft the code to define macros
+- Add a macro flag type
+  - Nests a function type
+- Write the manual code needed to define the macro syntax
+  - this includes running eval
+  - do i need to retrieve a value from eval? maybe not
+
 ## Macros
 
 The next task is to make a macro expander.
 
 Any function call tagged as a macro is expanded immediately.
 
-Is this a separate pass, or does it just happen during the codegen pass?
+### Template syntax
 
-- Have an alternative symbol table
-- Store macros with a flag
-  - Every macro has the same type, so this might work.
-  - The type is `fn(&[Node]) -> Node`
+```lisp
+  (template
+    (def #name (fun #args #body))
+  )
+```
 

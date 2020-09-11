@@ -8,18 +8,23 @@ use crate::{parse, bytecode, env, ffi, compile};
 use env::Env;
 use parse::Node;
 use bytecode::{
-  BytecodeFunction, Op, Expr, FrameVar, Operator,
+  Op, Expr, FrameVar, Operator,
 };
+use compile::Function;
 
-pub type CompileExpression = fn(env : &Env, fun : Node) -> BytecodeFunction;
+pub type CompileExpression = fn(env : &Env, fun : Node) -> Function;
 
-fn interpret_function(f : *const BytecodeFunction, env : &mut Env) {
+pub fn interpret_function(f : *const Function, args : &[u64], env : Env) -> u64 {
   let mut stack = [0 as u8 ; 16384];
   let stack_ptr = StackPtr {
     mem: &mut stack[0] as *mut u8,
     byte_pos: 0,
     max_bytes: stack.len() as u32,
   };
+  let stack_args = unsafe {
+    std::slice::from_raw_parts_mut(stack_ptr.mem as *mut u64, args.len())
+  };
+  stack_args.copy_from_slice(args);
   let mut shadow_stack = vec![
     Frame {
       pc: 0,
@@ -29,21 +34,31 @@ fn interpret_function(f : *const BytecodeFunction, env : &mut Env) {
     }
   ];
   interpreter_loop(&mut shadow_stack, env);
+  unsafe {
+    let t = (*f).t;
+    let fun = env.c.as_function(&t).unwrap();
+    if fun.returns.size_of == 8 {
+      *(stack_ptr.mem as *mut u64)
+    }
+    else {
+      0
+    }
+  }
 }
 
-pub fn interpret_node(n : Node, env : &mut Env) {
-  let (f, _) = compile::compile_expr_to_function(env, n);
-  interpret_function(&f, env)
+pub fn interpret_node(n : Node, env : Env) -> u64 {
+  let f = compile::compile_expr_to_function(env, n);
+  interpret_function(&f, &[], env)
 }
 
-pub fn interpret(code : &str, env : &mut Env) {
+pub fn interpret_file(code : &str, env : Env) {
   let n = parse::parse(env.st, &code);
   for &c in n.children() {
     interpret_node(c, env);
   }
   if let Some(v) = env.get_str("main") {
-    let f = v.value as *const BytecodeFunction;
-    interpret_function(f, env);
+    let f = v.value as *const Function;
+    interpret_function(f, &[], env);
   }
   else {
     println!("No main function found.");
@@ -58,7 +73,7 @@ struct Frame {
   sbp : StackPtr,
 
   /// function pointer
-  f : *const BytecodeFunction,
+  f : *const Function,
 
   /// return address
   return_addr : *mut u64,
@@ -68,13 +83,13 @@ fn reg(sbp : usize, i : FrameVar) -> usize {
   i.byte_offset as usize + sbp
 }
 
-fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : &mut Env) {
+fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
   let mut frame = shadow_stack.pop().unwrap();
   'outer: loop {
     let fun = unsafe { &*frame.f };
     let sbp = frame.sbp;
     loop {
-      let op = fun.ops[frame.pc];
+      let op = fun.bc.ops[frame.pc];
       match op {
         Op::Expr(var, e) => {
           use Operator::*;
@@ -122,7 +137,7 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : &mut Env) {
             }
             Expr::Invoke(f) => {
               let fun_address = get_var(sbp, f);
-              let f = unsafe { &*(fun_address as *const BytecodeFunction) };
+              let f = unsafe { &*(fun_address as *const Function) };
               // advance the current frame past the call, and store it on the
               // shadow stack to be returned to later
               frame.pc += 1;
@@ -130,7 +145,7 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : &mut Env) {
               // set the new frame
               frame = Frame{
                 pc: 0,
-                sbp: sbp.advance_frame(fun.frame_bytes),
+                sbp: sbp.advance_frame(fun.bc.frame_bytes),
                 f,
                 return_addr: var_addr(sbp, var),
               };
@@ -139,7 +154,7 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : &mut Env) {
             Expr::InvokeC(f, arg_count) => {
               let fptr = get_var(sbp, f) as *const ();
               let args = unsafe {
-                let data = sbp.advance_frame(fun.frame_bytes).u64_offset(0);
+                let data = sbp.advance_frame(fun.bc.frame_bytes).u64_offset(0);
                 std::slice::from_raw_parts(data, arg_count)
               };
               let val = unsafe { ffi::call_c_function(fptr, args) };
@@ -165,19 +180,19 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : &mut Env) {
         Op::CJump{ cond, then_seq, else_seq } => {
           let v = get_var(sbp, cond);
           if v != 0 {
-            frame.pc = fun.sequence_info[then_seq.0].start_op;
+            frame.pc = fun.bc.sequence_info[then_seq.0].start_op;
           }
           else {
-            frame.pc = fun.sequence_info[else_seq.0].start_op;
+            frame.pc = fun.bc.sequence_info[else_seq.0].start_op;
           }
           continue;
         }
         Op::Jump(seq) => {
-          frame.pc = fun.sequence_info[seq.0].start_op;
+          frame.pc = fun.bc.sequence_info[seq.0].start_op;
           continue;
         }
         Op::Arg{ byte_offset, value } => {
-          let arg_ptr = sbp.advance_frame(fun.frame_bytes).byte_offset(byte_offset);
+          let arg_ptr = sbp.advance_frame(fun.bc.frame_bytes).byte_offset(byte_offset);
           unsafe {
             *arg_ptr = get_var(sbp, value);
           }

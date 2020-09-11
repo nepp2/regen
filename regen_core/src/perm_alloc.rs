@@ -6,7 +6,7 @@
 /// will instead reflect the semantics of the Regen language.
 
 use std::fmt;
-use std::ops::{Deref, Index};
+use std::ops::{Deref, DerefMut, Index};
 use core::hash::{Hash, Hasher};
 use std::borrow;
 use std::ops::RangeFrom;
@@ -14,7 +14,7 @@ use std::ops::RangeFrom;
 #[derive(Clone)]
 #[repr(C)]
 pub struct Perm<T> {
-  pub p : *const T
+  pub p : *mut T
 }
 
 impl <T> Perm<T> {
@@ -55,6 +55,12 @@ impl<T> Deref for Perm<T> {
 
   fn deref(&self) -> &Self::Target {
     unsafe { &*self.p }
+  }
+}
+
+impl<T> DerefMut for Perm<T> {
+  fn deref_mut(&mut self) -> &mut Self::Target {
+    unsafe { &mut *self.p }
   }
 }
 

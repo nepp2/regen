@@ -1,20 +1,20 @@
 /// Compiles core language into bytecode
 
-use crate::{bytecode, parse, symbols, env, perm_alloc, types};
+use crate::{bytecode, parse, symbols, env, perm_alloc, types, interpret};
 
 use bytecode::{
-  SequenceId, SequenceInfo, Expr, BytecodeFunction,
+  SequenceId, SequenceInfo, Expr, FunctionBytecode,
   NamedVar, Op, Operator, FrameVar,
 };
 
 use types::{Type, TypeHandle, CoreTypes};
 
-use perm_alloc::Perm;
+use perm_alloc::{Perm, perm};
 
 use symbols::to_symbol;
 use env::Env;
 use parse::{
-  Node,
+  Node, NodeInfo, NodeContent,
   node_shape, NodeShape,
 };
 use NodeShape::*;
@@ -25,8 +25,13 @@ struct LabelledBlockExpr {
   exit_seq: SequenceId,
 }
 
+pub struct Function {
+  pub bc : FunctionBytecode,
+  pub t : Type,
+}
+
 /// Function builder
-struct Builder<'l> {
+struct Builder {
   /// number of arguments the function takes
   args : usize,
 
@@ -58,7 +63,7 @@ struct Builder<'l> {
   label_stack : Vec<LabelledBlockExpr>,
 
   /// the environment containing all visible symbols
-  env : &'l Env,
+  env : Env,
 }
 
 #[derive(Eq, PartialEq, Copy, Clone)]
@@ -153,13 +158,13 @@ fn complete_sequence(b : &mut Builder) {
   }
 }
 
-fn complete_function(mut b : Builder) -> BytecodeFunction {
+fn complete_function(mut b : Builder) -> FunctionBytecode {
   complete_sequence(&mut b);
   // check all sequences are complete
   if !b.seq_completion.iter().all(|x| *x) {
     panic!("not all basic sequences were completed")
   }
-  BytecodeFunction {
+  FunctionBytecode {
     sequence_info: b.seq_info,
     ops: b.ops,
     frame_bytes: b.frame_bytes,
@@ -169,7 +174,7 @@ fn complete_function(mut b : Builder) -> BytecodeFunction {
   }
 }
 
-fn compile_function(env: &Env, args : &[Node], body : &[Node]) -> (BytecodeFunction, Type) {
+fn compile_function(env: Env, args : &[Node], body : &[Node]) -> Function {
   let mut b = Builder {
     args: 0,
     locals: vec![],
@@ -206,11 +211,11 @@ fn compile_function(env: &Env, args : &[Node], body : &[Node]) -> (BytecodeFunct
   let f = complete_function(b);
   //for n in body { println!("{}", n) }
   //println!("{}", f);
-  (f, t)
+  Function { bc: f, t }
 }
 
 /// Compile basic imperative language into bytecode
-pub fn compile_expr_to_function(env: &Env, root : Node) -> (BytecodeFunction, Type) {
+pub fn compile_expr_to_function(env: Env, root : Node) -> Function {
   compile_function(env, &[], &[root])
 }
 
@@ -243,7 +248,12 @@ fn compile_if_else(b : &mut Builder, cond : Node, then_expr : Node, else_expr : 
 }
 
 fn compile_expr_to_value(b : &mut Builder, node : Node) -> Var {
-  compile_expr(b, node).expect("expected value, found none")
+  if let Some(v) = compile_expr(b, node) {
+    v
+  }
+  else {
+    panic!("expected value, found none, at node {}", node);
+  }
 }
 
 fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
@@ -285,10 +295,10 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     }
     // fun
     Command("fun", [arg_nodes, body]) => {
-      let (f, t) = compile_function(
+      let f = compile_function(
         b.env, arg_nodes.children(), body.children());
+      let r = new_var(b, f.t);
       let f_addr = Box::into_raw(Box::new(f)) as u64;
-      let r = new_var(b, t);
       b.ops.push(Op::Expr(r.fv, Expr::LiteralU64(f_addr)));
       Some(r)
     }
@@ -373,6 +383,10 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       set_current_sequence(b, exit_seq);
       result
     }
+    Command("do", exprs) => {
+      let result = compile_block_expr(b, exprs);
+      result
+    }
   // Debug
     Command("debug", [v]) => {
       let r = compile_expr_to_value(b, *v);
@@ -390,6 +404,13 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     Command("sym", [v]) => {
       let s = v.as_symbol();
       let e = Expr::LiteralU64(s.as_u64());
+      return Some(push_expr(b, e, b.env.c.u64_tag));
+    }
+    // typeof
+    Command("typeof", [v]) => {
+      let v = compile_expr_to_value(b, *v);
+      let t = TypeHandle::alloc_type(v.data_type);
+      let e = Expr::LiteralU64(t.as_u64());
       return Some(push_expr(b, e, b.env.c.u64_tag));
     }
     // load
@@ -437,7 +458,8 @@ fn atom_to_value(b : &mut Builder, string : &str, sym : Symbol) -> Var {
   // Assume global
   if let Some(entry) = b.env.get(sym) {
     let e = Expr::Def(sym);
-    return push_expr(b, e, entry.tag);
+    let t = entry.tag;
+    return push_expr(b, e, t);
   }
   panic!("symbol '{}' not defined", sym)
 }
@@ -445,19 +467,20 @@ fn atom_to_value(b : &mut Builder, string : &str, sym : Symbol) -> Var {
 fn compile_function_call(b : &mut Builder, list : &[Node]) -> Var {
   let function = list[0];
   let args = &list[1..];
-  let mut arg_values = vec![]; // TODO: remove allocation
-  for &arg in args {
-    let v = compile_expr_to_value(b, arg);
-    arg_values.push(v.fv);
-  }
   let f = compile_expr_to_value(b, function);
-  let info = if let Some(i) = b.env.c.as_function(&f.data_type) {
+  let env = b.env;
+  let info = if let Some(i) = env.c.as_function(&f.data_type) {
     i
   }
   else {
     panic!("expected function, found {} expression '{}' at {}",
       f.data_type.kind, function, function.loc);
   };
+  let mut arg_values = vec![]; // TODO: remove allocation
+  for &arg in args {
+    let v = compile_expr_to_value(b, arg);
+    arg_values.push(v.fv);
+  }
   let mut byte_offset = 0;
   for value in arg_values.drain(..) {
     // TODO: check arg values
@@ -473,6 +496,31 @@ fn compile_function_call(b : &mut Builder, list : &[Node]) -> Var {
     }
   };
   return push_expr(b, e, info.returns);
+}
+
+fn compile_macro_call(b : &mut Builder, f : &Function, n : Node) -> Var {
+  let args = n.perm_children().slice_range(1..);
+  let node = perm(NodeInfo{
+    loc: n.loc,
+    content: NodeContent::List(args),
+  });
+  let v = interpret::interpret_function(f, &[Perm::to_ptr(node) as u64], b.env);
+  let new_node = Perm { p: v as *mut NodeInfo };
+  compile_expr_to_value(b, new_node)
+}
+
+fn compile_call(b : &mut Builder, n : Node) -> Var {
+  let list = n.children();
+  let function = list[0];
+  if let parse::NodeContent::Sym(f) = function.content {
+    if let Some(e) = b.env.get(f) {
+      if b.env.c.as_macro(&e.tag).is_some() {
+        let f = unsafe { &*(e.value as *const Function) };
+        return compile_macro_call(b, f, n);
+      }
+    }
+  }
+  compile_function_call(b, list)
 }
 
 fn str_to_operator(s : &str) -> Option<Operator> {
@@ -524,7 +572,7 @@ fn compile_list_expr(b : &mut Builder, node : Node) -> Var {
     }
     _ => (),
   }
-  compile_function_call(b, node.children())
+  compile_call(b, node)
 }
 
 /// TODO: this is long-winded. replace it with an in-language macro!

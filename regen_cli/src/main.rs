@@ -3,7 +3,7 @@
 mod watcher;
 mod bind_libs;
 
-use regen_core::{interpret, new_env};
+use regen_core::{interpret_file, new_env};
 use std::fs;
 use std::path::Path;
 
@@ -11,9 +11,9 @@ fn run_file(path : impl AsRef<Path>) {
   let code =
     fs::read_to_string(path)
     .expect("Something went wrong reading the file");
-  let mut env = new_env();
-  bind_libs::bind_libs(&mut env);
-  interpret(&code, &mut env);
+  let env = new_env();
+  bind_libs::bind_libs(env);
+  interpret_file(&code, env);
 }
 
 fn main(){

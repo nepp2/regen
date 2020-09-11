@@ -4,7 +4,7 @@ use super::definition::*;
 
 use std::fmt;
 
-impl fmt::Display for BytecodeFunction {
+impl fmt::Display for FunctionBytecode {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     writeln!(f, ";; Frame size: {}", self.frame_bytes)?;
     write!(f, ";; Frame vars: {{ ")?;
@@ -40,18 +40,18 @@ impl fmt::Display for BytecodeFunction {
 }
 
 struct BytecodeDisplay<'l, X> {
-   bc : &'l BytecodeFunction,
+   bc : &'l FunctionBytecode,
    x : &'l X,
 }
 
 
-impl BytecodeFunction {
+impl FunctionBytecode {
   fn d<'l, X>(&'l self, x : &'l X) -> BytecodeDisplay<'l, X> {
      BytecodeDisplay { bc: self, x }
   }
 }
 
-fn display_var(f: &mut fmt::Formatter<'_>, var : FrameVar, b : &BytecodeFunction) -> fmt::Result {
+fn display_var(f: &mut fmt::Formatter<'_>, var : FrameVar, b : &FunctionBytecode) -> fmt::Result {
   if let Some(l) = b.locals.iter().find(|l| l.var.id == var.id) {
     write!(f, "${}", l.name)
   }

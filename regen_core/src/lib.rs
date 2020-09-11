@@ -13,8 +13,8 @@ pub mod types;
 #[cfg(test)]
 mod test;
 
-pub use interpret::interpret;
+pub use interpret::interpret_file;
 
-pub fn new_env() -> Box<env::Env> {
+pub fn new_env() -> env::Env {
     env::new_env(symbols::symbol_table())
 }

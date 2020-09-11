@@ -9,7 +9,7 @@ use regen_core;
 // to include #[wasm_bindgen]
 #[wasm_bindgen]
 pub fn interpret(code : String) -> String {
-  let mut env = regen_core::new_env();
-  regen_core::interpret(&code, &mut env);
+  let env = regen_core::new_env();
+  regen_core::interpret_file(&code, env);
   format!("Regen launched")
 }

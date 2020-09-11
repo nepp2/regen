@@ -63,12 +63,14 @@ pub struct FunctionInfo {
   pub c_function : bool,
 }
 
+#[derive(Clone)]
 pub struct CoreTypes {
   pub primitive_kind : Symbol,
   pub tuple_kind : Symbol,
   pub function_kind : Symbol,
   pub pointer_kind : Symbol,
   pub array_kind : Symbol,
+  pub macro_kind : Symbol,
 
   pub type_tag : Type,
   pub u64_tag : Type,
@@ -87,6 +89,13 @@ impl CoreTypes {
       return None;
     }
     Some(unsafe { &*(t.kind_info as *const FunctionInfo) })
+  }
+
+  pub fn as_macro(&self, t : &Type) -> Option<TypeHandle> {
+    if t.kind != self.macro_kind {
+      return None;
+    }
+    Some(TypeHandle(t.kind_info as *const Type))
   }
 }
 
@@ -161,6 +170,7 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
   let function_kind = to_symbol(st, "function");
   let pointer_kind = to_symbol(st, "pointer");
   let array_kind = to_symbol(st, "array");
+  let macro_kind = to_symbol(st, "macro");
 
   let u64_tag = new_simple_type(primitive_kind, 8);
   let u32_tag = new_simple_type(primitive_kind, 4);
@@ -180,8 +190,11 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
   ]);
 
   CoreTypes {
-    primitive_kind, tuple_kind, function_kind, pointer_kind, array_kind,
+    primitive_kind, tuple_kind, function_kind,
+    pointer_kind, array_kind, macro_kind,
+
     type_tag, u64_tag, u32_tag, u16_tag, u8_tag, void_tag, slice_tag,
+
     core_types:
       vec![
         (to_symbol(st, "type"), type_tag),

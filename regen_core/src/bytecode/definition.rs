@@ -61,7 +61,7 @@ pub struct NamedVar {
   pub var : FrameVar,
 }
 
-pub struct BytecodeFunction {
+pub struct FunctionBytecode {
   pub sequence_info : Vec<SequenceInfo>,
   pub ops : Vec<Op>,
   pub args : usize,

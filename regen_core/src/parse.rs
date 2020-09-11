@@ -122,7 +122,7 @@ pub struct SrcLocation {
 impl SrcLocation {
   pub fn zero() -> Self {
     SrcLocation {
-      start: 0, end: 0, code: Perm { p : std::ptr::null() },
+      start: 0, end: 0, code: Perm { p : std::ptr::null_mut() },
     }
   }
 }
@@ -135,9 +135,13 @@ pub struct NodeInfo {
 
 impl NodeInfo {
   pub fn children(&self) -> &[Node] {
+    self.perm_children().as_slice()
+  }
+
+  pub fn perm_children(&self) -> PermSlice<Node> {
     match self.content {
-      NodeContent::List(l) => l.as_slice(),
-      _ => &[],
+      NodeContent::List(l) => l,
+      _ => perm_slice(&[]),
     }
   }
 

@@ -1,6 +1,32 @@
 
+;; *{ size : u64, kind : symbol, kind_info : *void }
+(def new_type (fun (size kind kind_info) (
+  ;; allocate type
+  (let p (malloc 24))
+  (store u64 p size)
+  (store u64 (+ p 8) kind)
+  (store u64 (+ p 16) kind_info)
+  p
+)))
+
+(def type_size_of (fun (type) (
+  (load u64 type)
+)))
+
+(def type_kind (fun (type) (
+  (load u64 (+ type 8))
+)))
+
+(def type_kind_info (fun (type) (
+  (load u64 (+ type 16))
+)))
+
 (def max (fun (a b) (
   (if (> a b) (a) (b))
+)))
+
+(def min (fun (a b) (
+  (if (< a b) (a) (b))
 )))
 
 ;; dynamic array or word-sized elements (64 bit)
