@@ -66,6 +66,24 @@
   (env_insert env (sym macro) macro_function t)
 )
 
+(macro warray node (
+  (let cs (ref (byte_chunk 16)))
+  (node_children cs node)
+  (let len (warray_len cs))
+  (let do_list (warray_new))
+  (warray_push do_list (sym do))
+  (warray_push do_list (# (let a (warray_new))))
+  (let i 0)
+  (block (
+    (if (>= i len) (break))
+    (let c (warray_get cs i))
+    (let n (# (warray_push a ($ c))))
+    (warray_push do_list n)
+    (set i (i + 1))
+    repeat
+  ))
+))
+
 (macro function node (
   (let slice (ref (byte_chunk 16)))
   (node_children slice node)

@@ -288,6 +288,11 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       let e = Expr::LiteralU64(Perm::to_ptr(*n) as u64);
       Some(push_expr(b, e, b.env.c.u64_tag))
     }
+    // template
+    Command("template", [n]) => {
+      let e = Expr::LiteralU64(Perm::to_ptr(*n) as u64);
+      Some(push_expr(b, e, b.env.c.u64_tag))
+    }
     // def
     Command("def", [def_name, value]) => {
       def_macro(b, *def_name, *value);
@@ -572,6 +577,11 @@ fn compile_list_expr(b : &mut Builder, node : Node) -> Option<Var> {
     _ => (),
   }
   compile_call(b, node)
+}
+
+fn template(b : &mut Builder, n : Node) -> Node {
+  // TODO: figure out how to implement template
+  // (copy the implementation from the previous compiler?)
 }
 
 /// TODO: this is long-winded. replace it with an in-language macro!
