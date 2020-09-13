@@ -422,8 +422,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       return Some(push_expr(b, e, *t.get()));
     }
     _ => {
-      let v = compile_list_expr(b, node);
-      Some(v)
+      compile_list_expr(b, node)
     }
   }
 }
@@ -498,7 +497,7 @@ fn compile_function_call(b : &mut Builder, list : &[Node]) -> Var {
   return push_expr(b, e, info.returns);
 }
 
-fn compile_macro_call(b : &mut Builder, f : &Function, n : Node) -> Var {
+fn compile_macro_call(b : &mut Builder, f : &Function, n : Node) -> Option<Var> {
   let args = n.perm_children().slice_range(1..);
   let node = perm(NodeInfo{
     loc: n.loc,
@@ -506,10 +505,10 @@ fn compile_macro_call(b : &mut Builder, f : &Function, n : Node) -> Var {
   });
   let v = interpret::interpret_function(f, &[Perm::to_ptr(node) as u64], b.env);
   let new_node = Perm { p: v as *mut NodeInfo };
-  compile_expr_to_value(b, new_node)
+  compile_expr(b, new_node)
 }
 
-fn compile_call(b : &mut Builder, n : Node) -> Var {
+fn compile_call(b : &mut Builder, n : Node) -> Option<Var> {
   let list = n.children();
   let function = list[0];
   if let parse::NodeContent::Sym(f) = function.content {
@@ -520,7 +519,7 @@ fn compile_call(b : &mut Builder, n : Node) -> Var {
       }
     }
   }
-  compile_function_call(b, list)
+  Some(compile_function_call(b, list))
 }
 
 fn str_to_operator(s : &str) -> Option<Operator> {
@@ -552,7 +551,7 @@ fn op_result_type(c : &CoreTypes, op : Operator) -> Type {
   }
 }
 
-fn compile_list_expr(b : &mut Builder, node : Node) -> Var {
+fn compile_list_expr(b : &mut Builder, node : Node) -> Option<Var> {
   match node_shape(&node) {
     Command(head, tail) => {
       if let Some(op) = str_to_operator(head) {
@@ -561,12 +560,12 @@ fn compile_list_expr(b : &mut Builder, node : Node) -> Var {
           let v1 = compile_expr_to_value(b, *v1);
           let v2 = compile_expr_to_value(b, *v2);
           let e = Expr::BinaryOp(op, v1.fv, v2.fv);
-          return push_expr(b, e, t);
+          return Some(push_expr(b, e, t));
         }
         if let [v1] = tail {
           let v1 = compile_expr_to_value(b, *v1);
           let e = Expr::UnaryOp(op, v1.fv);
-          return push_expr(b, e, t);
+          return Some(push_expr(b, e, t));
         }
       }
     }

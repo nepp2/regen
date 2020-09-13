@@ -66,8 +66,6 @@
   (env_insert env (sym macro) macro_function t)
 )
 
-(debug 5)
-
 (macro function node (
   (let slice (ref (byte_chunk 16)))
   (node_children slice node)
@@ -86,16 +84,14 @@
   (warray_push def_list name)
   (warray_push def_list fun_node)
   
-  (let n (node_from_list def_list))
-  (node_display n)
-  n
+  (node_from_list def_list)
 ))
 
 (function add (a b) (
   (+ a b)
 ))
 
-;; (debug (add 5 6))
+(debug (add 5 6))
 
 ;; (template
 ;;   (def #name (fun #args #body))
