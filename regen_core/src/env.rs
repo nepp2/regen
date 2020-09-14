@@ -193,7 +193,7 @@ pub fn new_env(st : SymbolTable) -> Env {
   env.insert_str("print_symbol", print_symbol as u64,
     c_function_type(c, &[u64], void));
 
-  env.insert_str("node_children", node_children as u64,
+  env.insert_str("node_children_c", node_children as u64,
     c_function_type(c, &[u64, u64], void));
 
   env.insert_str("node_display", node_display as u64,

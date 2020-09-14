@@ -9,8 +9,7 @@
 ;; define the macro macro!
 (do
   (let macro_function (fun (n) (
-    (let nodes (ref (byte_chunk 16)))
-    (node_children nodes n)
+    (let nodes (ref (node_children n)))
     (let name (warray_get nodes 0))
     (let arg (warray_get nodes 1))
     (let body (warray_get nodes 2))
@@ -25,11 +24,10 @@
 )
 
 (macro warray node (
-  (let cs (ref (byte_chunk 16)))
-  (node_children cs node)
+  (let cs (ref (node_children node)))
   (let len (warray_len cs))
   (let do_list (warray_new))
-  (warray_push do_list (sym do))
+  (warray_push do_list (# do))
   (warray_push do_list (# (let a (warray_new))))
   (let i 0)
   (block (
@@ -40,19 +38,59 @@
     (set i (+ i 1))
     repeat
   ))
+  (warray_push do_list (# a))
+  (node_from_list do_list)
 ))
 
 (macro function node (
-  (let slice (ref (byte_chunk 16)))
-  (node_children slice node)
+  (let slice (ref (node_children node)))
   (let name (warray_get slice 0))
   (let args (warray_get slice 1))
   (let body (warray_get slice 2))
   (# (def ($ name) (fun ($ args) ($ body))))
 ))
 
+;; define while loops
+(macro while node (
+  (let slice (ref (node_children node)))
+  (let condition (warray_get slice 0))
+  (let body (warray_get slice 1))
+  (# (block (
+    (if ($ condition)
+      (($ body) repeat)
+      (break)
+    )
+  )))
+))
+
+;; define for loops in terms of while loops (testing nested macros)
+(macro for node (
+  (let slice (ref (node_children node)))
+  (let var_def (warray_get slice 0))
+  (let condition (warray_get slice 1))
+  (let var_update (warray_get slice 2))
+  (let body (warray_get slice 3))
+  (# (do
+    ($ var_def)
+    (while ($ condition) (do
+      ($ body)
+      ($ var_update)
+    ))
+  ))
+))
+
 (function add (a b) (
   (+ a b)
 ))
 
-(debug (add 5 6))
+(do
+  (let a (warray 93 82 93))
+  (let acc 0)
+  (for (let i 0) (< i (warray_len a)) (set i (+ i 1)) (do
+    (set acc (+ acc (warray_get a i)))
+  ))
+  (if (= acc 268)
+    ()
+    ((fail (sym ACC_VALUE_INCORRECT)))
+  )
+)
