@@ -44,10 +44,14 @@ pub fn perm_slice<T : Clone>(vs : &[T]) -> PermSlice<T> {
   }
   else {
     let v : Vec<_> = vs.iter().cloned().collect();
-    let p = PermSlice { p : v.as_ptr(), len: vs.len() };
-    std::mem::forget(v);
-    p
+    perm_slice_from_vec(v)
   }
+}
+
+pub fn perm_slice_from_vec<T : Clone>(vs : Vec<T>) -> PermSlice<T> {
+  let p = PermSlice { p : vs.as_ptr(), len: vs.len() };
+  std::mem::forget(vs);
+  p
 }
 
 impl<T> Deref for Perm<T> {

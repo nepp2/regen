@@ -259,24 +259,24 @@ fn compile_expr_to_value(b : &mut Builder, node : Node) -> Var {
 fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
   match node_shape(&node) {
     // Return
-    Atom("return", _) => {
+    Atom("return") => {
       b.ops.push(Op::Return(None));
       None
     }
     // Break
-    Atom("break", _) => {
+    Atom("break") => {
       let break_to = b.label_stack.last().unwrap().exit_seq;
       b.ops.push(Op::Jump(break_to));
       None
     }
     // Repeat
-    Atom("repeat", _) => {
+    Atom("repeat") => {
       let loop_back_to = b.label_stack.last().unwrap().entry_seq;
       b.ops.push(Op::Jump(loop_back_to));
       None
     }
-    Atom(string, sym) => {
-      Some(atom_to_value(b, string, sym))
+    Atom(_) => {
+      Some(atom_to_value(b, node))
     }
     // Literal
     Literal(v) => {
@@ -284,14 +284,8 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       Some(push_expr(b, e, b.env.c.u64_tag))
     }
     // quotation
-    Command("#", [n]) => {
-      let e = Expr::LiteralU64(Perm::to_ptr(*n) as u64);
-      Some(push_expr(b, e, b.env.c.u64_tag))
-    }
-    // template
-    Command("template", [n]) => {
-      let e = Expr::LiteralU64(Perm::to_ptr(*n) as u64);
-      Some(push_expr(b, e, b.env.c.u64_tag))
+    Command("#", [quoted]) => {
+      Some(quote(b, *quoted))
     }
     // def
     Command("def", [def_name, value]) => {
@@ -442,9 +436,10 @@ fn compile_block_expr(b : &mut Builder, nodes : &[Node]) -> Option<Var> {
   v
 }
 
-fn atom_to_value(b : &mut Builder, string : &str, sym : Symbol) -> Var {
+fn atom_to_value(b : &mut Builder, node : Node) -> Var {
+  let sym = node.as_symbol();
   // boolean literals
-  match string {
+  match sym.as_str() {
     "true" => {
       let e = Expr::LiteralU64(1);
       return push_expr(b, e, b.env.c.u64_tag);
@@ -465,7 +460,7 @@ fn atom_to_value(b : &mut Builder, string : &str, sym : Symbol) -> Var {
     let t = entry.tag;
     return push_expr(b, e, t);
   }
-  panic!("symbol '{}' not defined", sym)
+  panic!("symbol '{}' not defined ({})", sym, node.loc)
 }
 
 fn compile_function_call(b : &mut Builder, list : &[Node]) -> Var {
@@ -477,7 +472,7 @@ fn compile_function_call(b : &mut Builder, list : &[Node]) -> Var {
     i
   }
   else {
-    panic!("expected function, found {} expression '{}' at {}",
+    panic!("expected function, found {} expression '{}' at ({})",
       f.data_type.kind, function, function.loc);
   };
   let mut arg_values = vec![]; // TODO: remove allocation
@@ -579,9 +574,83 @@ fn compile_list_expr(b : &mut Builder, node : Node) -> Option<Var> {
   compile_call(b, node)
 }
 
-fn template(b : &mut Builder, n : Node) -> Node {
-  // TODO: figure out how to implement template
-  // (copy the implementation from the previous compiler?)
+fn find_template_arguments(n : Node, args : &mut Vec<Node>) {
+  match node_shape(&n) {
+    Command("$", [e]) => {
+      args.push(*e);
+    }
+    _ => (),
+  }
+  for &c in n.children() {
+    find_template_arguments(c, args);
+  }
+}
+
+/// Handles templating if necessary
+fn quote(b : &mut Builder, quoted : Node) -> Var {
+  let u64_tag = b.env.c.u64_tag;
+  let node_value = {
+    let e = Expr::LiteralU64(Perm::to_ptr(quoted) as u64);
+    push_expr(b, e, u64_tag)
+  };
+  // TODO: this function is kind of verbose and difficult to read
+  let mut template_args = vec![];
+  find_template_arguments(quoted, &mut template_args);
+  // let main_quote = self.node(expr, Quote(Box::new(e.clone())));
+  if template_args.len() > 0 {
+    use Operator::*;
+    let args = template_args.len() as u64;
+    let data_ptr = {
+      let t = types::array_type(&b.env.c, args * 8);
+      let data = new_var(b, t);
+      push_expr(b, Expr::UnaryOp(Ref, data.fv), u64_tag)
+    };
+    // Codegen args
+    let mut arg_values = vec![];
+    for a in template_args {
+      arg_values.push(compile_expr_to_value(b, a));
+    }
+    // Store args
+    for (i, a) in arg_values.iter().enumerate() {
+      let pointer = {
+        let offset = push_expr(b, Expr::LiteralU64(i as u64 * 8), u64_tag);
+        push_expr(b, Expr::BinaryOp(Add, data_ptr.fv, offset.fv), u64_tag).fv
+      };
+      b.ops.push(Op::Store{ byte_width: 8, pointer, value: a.fv });
+    }
+    // slice struct
+    let slice_var = new_var(b, b.env.c.slice_tag);
+    let slice_ptr = push_expr(b, Expr::UnaryOp(Ref, slice_var.fv), u64_tag);
+    // store slice length
+    let slice_length = push_expr(b, Expr::LiteralU64(args), u64_tag);
+    b.ops.push(Op::Store{
+      byte_width: 8,
+      pointer: slice_ptr.fv,
+      value: slice_length.fv,
+    });
+    // store slice data
+    let data_pointer = {
+      let eight = push_expr(b, Expr::LiteralU64(8), u64_tag);
+      push_expr(b, Expr::BinaryOp(Add, slice_ptr.fv, eight.fv), u64_tag)
+    };
+    b.ops.push(Op::Store{
+      byte_width: 8,
+      pointer: data_pointer.fv,
+      value: data_ptr.fv,
+    });
+    // template quote reference
+    let f = {
+      let template_quote = to_symbol(b.env.st, "template_quote");
+      push_expr(b, Expr::Def(template_quote), u64_tag)
+    };
+    // call template_quote
+    b.ops.push(Op::Arg{byte_offset: 0, value: node_value.fv}); // quoted node
+    b.ops.push(Op::Arg{byte_offset: 8, value: slice_ptr.fv}); // slice reference
+    push_expr(b, Expr::InvokeC(f.fv, 2), u64_tag)
+  }
+  else {
+    node_value
+  }
 }
 
 /// TODO: this is long-winded. replace it with an in-language macro!

@@ -224,7 +224,7 @@ fn parse_list(ns : &mut Vec<Node>, ts : &mut TokenStream) {
 
 pub enum NodeShape<'l> {
   Command(&'l str, &'l [Node]),
-  Atom(&'l str, Symbol),
+  Atom(&'l str),
   Literal(u64),
   Other,
 }
@@ -240,7 +240,7 @@ pub fn node_shape<'l>(n : &'l Node) -> NodeShape<'l> {
         NodeShape::Other
       }
     }
-    Sym(s) => NodeShape::Atom(s.as_str(), s),
+    Sym(s) => NodeShape::Atom(s.as_str()),
     Literal(v) => NodeShape::Literal(v),
   }
 }
@@ -263,7 +263,18 @@ use std::fmt;
 
 impl fmt::Display for SrcLocation {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "(char {} to {})", self.start, self.end)
+    let mut line_start = 0;
+    let mut line_number = 1;
+    for (i, c) in self.code.as_str()[0..self.start].char_indices() {
+      if c == '\n' {
+        line_start = i;
+        line_number += 1;
+      }
+    }
+    write!(f, "line {}, {} to {}",
+      line_number,
+      self.start - line_start,
+      self.end - line_start)
   }
 }
 

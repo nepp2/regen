@@ -4,8 +4,8 @@ use crate::symbols::{Symbol, SymbolTable, to_symbol};
 use crate::types::{Type, TypeHandle, CoreTypes, core_types, c_function_type};
 use crate::parse;
 use crate::interpret;
-use parse::{Node, NodeInfo, NodeContent, SrcLocation};
-use crate::perm_alloc::{Perm, PermSlice, perm_slice, perm};
+use parse::{Node, NodeInfo, NodeContent, SrcLocation, node_shape, NodeShape::*};
+use crate::perm_alloc::{Perm, PermSlice, perm_slice, perm_slice_from_vec, perm};
 use std::collections::HashMap;
 
 /// Environment for interpreter
@@ -124,6 +124,29 @@ pub extern "C" fn eval(env : Env, n : Node) {
   interpret::interpret_node(n, env);
 }
 
+pub extern "C" fn template_quote(n : Node, args : &PermSlice<Node>) -> Node {
+  fn template(n : Node, args : &[Node], next_arg : &mut usize) -> Node {
+    match node_shape(&n) {
+      Atom(_) => n,
+      Command("$", [_]) => {
+        let new_e = args[*next_arg];
+        *next_arg += 1;
+        new_e
+      }
+      _ => {
+        let mut children = vec![];
+        for &c in n.children() {
+          children.push(template(c, args, next_arg));
+        }
+        let loc = n.loc;
+        let content = NodeContent::List(perm_slice_from_vec(children));
+        perm(NodeInfo { loc, content })
+      },
+    }
+  }
+  template(n, args.as_slice(), &mut 0)
+}
+
 pub fn new_env(st : SymbolTable) -> Env {
   let mut env = perm(Environment {
     values: Default::default(),
@@ -190,6 +213,9 @@ pub fn new_env(st : SymbolTable) -> Env {
 
   env.insert_str("eval", eval as u64,
     c_function_type(c, &[u64, u64], void));
+
+  env.insert_str("template_quote", template_quote as u64,
+    c_function_type(c, &[u64, u64], u64));
 
   env
 }
