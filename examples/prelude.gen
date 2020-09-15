@@ -31,7 +31,7 @@
 
 ;; dynamic array or word-sized elements (64 bit)
 ;; *{ element_count : u64, data : *void, capacity : u64 }
-(def list64_new (fun () (
+(def list64_create_empty (fun () (
   (let p (malloc 24))
   (store u64 p 0)
   (store u64 (+ p 8) 0)

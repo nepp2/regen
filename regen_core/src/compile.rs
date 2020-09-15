@@ -252,7 +252,7 @@ fn compile_expr_to_value(b : &mut Builder, node : Node) -> Var {
     v
   }
   else {
-    panic!("expected value, found none, at node {}", node);
+    panic!("expected value, found none, at node {} ({})", node, node.loc);
   }
 }
 
@@ -552,6 +552,9 @@ fn op_result_type(c : &CoreTypes, op : Operator) -> Type {
 }
 
 fn compile_list_expr(b : &mut Builder, node : Node) -> Option<Var> {
+  if node.children().len() == 0 {
+    return None;
+  }
   match node_shape(&node) {
     Command(head, tail) => {
       if let Some(op) = str_to_operator(head) {

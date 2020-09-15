@@ -1,10 +1,5 @@
 (load_prelude env)
 
-;; define macro_flag
-(def macro_type (fun (t) (
-  (new_type 8 (sym macro) t)
-)))
-
 ;; define the macro macro!
 (do
   (let macro_function (fun (n) (
@@ -14,20 +9,22 @@
     (let body (list64_get nodes 2))
     (# (do
       (let v (fun (($ arg)) ($ body)))
-      (let t (macro_type (typeof v)))
-      (env_insert env (sym ($ name)) v t)
+      (let macro_type
+        (new_type 8 (sym macro) (typeof v)))
+      (env_insert env (sym ($ name)) v macro_type)
     ))
   )))
-  (let t (macro_type (typeof macro_function)))
-  (env_insert env (sym macro) macro_function t)
+  (let macro_type
+    (new_type 8 (sym macro) (typeof macro_function)))
+  (env_insert env (sym macro) macro_function macro_type)
 )
 
-(macro list64 node (
+(macro list64_create node (
   (let cs (ref (node_children node)))
   (let len (list64_len cs))
-  (let do_list (list64_new))
+  (let do_list (list64_create_empty))
   (list64_push do_list (# do))
-  (list64_push do_list (# (let a (list64_new))))
+  (list64_push do_list (# (let a (list64_create_empty))))
   (let i 0)
   (block (
     (if (! (< i len)) (break))
@@ -83,7 +80,7 @@
 ))
 
 (do
-  (let a (list64 93 82 93))
+  (let a (list64_create 93 82 93))
   (let acc 0)
   (for (let i 0) (< i (list64_len a)) (set i (+ i 1)) (do
     (set acc (+ acc (list64_get a i)))

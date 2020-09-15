@@ -56,7 +56,7 @@ pub struct TestRect {
   h : u32,
 }
 
-pub extern "C" fn test_struct(r : TestRect) -> bool {
+pub extern "C" fn test_tuple(r : TestRect) -> bool {
   r.x == 1 && r.y == 2 && r.w == 3 && r.h == 4
 }
 
@@ -127,7 +127,7 @@ pub extern "C" fn eval(env : Env, n : Node) {
 pub extern "C" fn template_quote(n : Node, args : &PermSlice<Node>) -> Node {
   fn template(n : Node, args : &[Node], next_arg : &mut usize) -> Node {
     match node_shape(&n) {
-      Atom(_) => n,
+      Atom(_) | Literal(_) => n,
       Command("$", [_]) => {
         let new_e = args[*next_arg];
         *next_arg += 1;
@@ -167,7 +167,7 @@ pub fn new_env(st : SymbolTable) -> Env {
   env.insert_str("c_add", c_add as u64,
     c_function_type(c, &[u64, u64], u64));
 
-  env.insert_str("test_struct", test_struct as u64,
+  env.insert_str("test_tuple", test_tuple as u64,
     c_function_type(c, &[u64], u64));
 
   env.insert_str("fail", fail as u64,

@@ -41,17 +41,12 @@ fn run_file(path : impl AsRef<Path>) {
 
   #[test]
   fn test_milestone_3() {
-    run_file("../examples/milestones/3_struct_ish.gen");
+    run_file("../examples/milestones/3_tuples.gen");
   }
 
   #[test]
   fn test_milestone_4() {
-    run_file("../examples/milestones/4_struct_return.gen");
-  }
-
-  #[test]
-  fn test_milestone_5() {
-    run_file("../examples/milestones/5_macros.gen");
+    run_file("../examples/milestones/4_macros.gen");
   }
 
 //}

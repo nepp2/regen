@@ -1,16 +1,18 @@
 ;; { x : i32, y : i32, w : i32, h : i32 }
-(def rect_init (fun (p x y w h) (
+(def new_rect (fun (x y w h) (
+  (let rect (byte_chunk 16))
+  (let p (ref rect))
   (store u32 p x)
   (store u32 (+ p 4) y)
   (store u32 (+ p 8) w)
   (store u32 (+ p 12) h)
+  rect
 )))
 
 (def main (fun () (
-  (let rect (ref (byte_chunk 16)))
-  (rect_init rect 1 2 3 4)
+  (let rect (new_rect 1 2 3 4))
 
-  (if (test_struct rect)
+  (if (test_tuple (ref rect))
     ((print_symbol (sym SUCCESS)))
     ((fail (sym RECT_INCORRECT)))
   )

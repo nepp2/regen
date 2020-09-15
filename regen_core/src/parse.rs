@@ -232,13 +232,13 @@ pub enum NodeShape<'l> {
 pub fn node_shape<'l>(n : &'l Node) -> NodeShape<'l> {
   match n.content {
     List(children) => {
-      let head = children[0];
-      if let Sym(s) = head.content {    
-        NodeShape::Command(s.as_str(), &children.as_slice()[1..])
+      if children.len() > 0 {
+        let head = children[0];
+        if let Sym(s) = head.content {    
+          return NodeShape::Command(s.as_str(), &children.as_slice()[1..]);
+        }
       }
-      else {
-        NodeShape::Other
-      }
+      return NodeShape::Other;
     }
     Sym(s) => NodeShape::Atom(s.as_str()),
     Literal(v) => NodeShape::Literal(v),
