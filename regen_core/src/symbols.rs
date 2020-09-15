@@ -30,14 +30,12 @@ pub struct SymbolTable(*mut Symbols);
 
 impl fmt::Debug for Symbol {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    // TODO
     write!(f, "Symbol({})", unsafe { &**self.0 } )
   }
 }
 
 impl fmt::Display for Symbol {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    // TODO
     write!(f, "{}", unsafe { &**self.0} )
   }
 }

@@ -189,11 +189,23 @@ fn compile_function(env: Env, args : &[Node], body : &[Node]) -> Function {
     env,
   };
   b.args = args.len();
+  let mut arg_types = vec![];
   for &arg in args {
-    let name = arg.as_symbol();
-    let t = env.c.u64_tag; // TODO: fix type
+    let (name, t) = {
+      if let [type_tag, name] = arg.children() {
+        let t =
+          TypeHandle::from_u64(
+            b.env.get(type_tag.as_symbol()).unwrap().value);
+        (name.as_symbol(), *t.get())
+      }
+      else {
+        // TODO: fix type
+        (arg.as_symbol(), env.c.u64_tag)
+      }
+    };
     let var = new_frame_var(&mut b, t.size_of);
     add_local(&mut b, name, var, t);
+    arg_types.push(t);
   }
   // start a sequence
   let entry_seq = create_sequence(&mut b, "entry");
@@ -207,7 +219,7 @@ fn compile_function(env: Env, args : &[Node], body : &[Node]) -> Function {
   else {
     b.ops.push(Op::Return(None));
   }
-  let t = types::function_type(&b.env.c, &[], return_type); // TODO: fix arg types!
+  let t = types::function_type(&b.env.c, &arg_types, return_type); // TODO: fix arg types!
   let f = complete_function(b);
   //for n in body { println!("{}", n) }
   //println!("{}", f);
@@ -596,10 +608,8 @@ fn quote(b : &mut Builder, quoted : Node) -> Var {
     let e = Expr::LiteralU64(Perm::to_ptr(quoted) as u64);
     push_expr(b, e, u64_tag)
   };
-  // TODO: this function is kind of verbose and difficult to read
   let mut template_args = vec![];
   find_template_arguments(quoted, &mut template_args);
-  // let main_quote = self.node(expr, Quote(Box::new(e.clone())));
   if template_args.len() > 0 {
     use Operator::*;
     let args = template_args.len() as u64;
