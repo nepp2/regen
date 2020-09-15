@@ -24,28 +24,28 @@
 
 ;; word array - all elements are 64bit
 ;; *{ element_count : u64, data : *void }
-(def warray_init (fun (p element_count) (
+(def list64_init (fun (p element_count) (
   (let data (malloc (* element_count 8)))
   (store_64 p element_count)
   (store_64 (+ p 8) data)
   p
 )))
 
-(def warray_len (fun (array) (
+(def list64_len (fun (array) (
   (load_64 array)
 )))
 
-(def warray_index (fun (array index) (
+(def list64_index (fun (array index) (
   (let data (load_64 (+ array 8)))
   (+ data (* 8 index))
 )))
 
-(def warray_set (fun (array index value) (
-  (store_64 (warray_index array index) value)
+(def list64_set (fun (array index value) (
+  (store_64 (list64_index array index) value)
 )))
 
-(def warray_get (fun (array index value) (
-  (load_64 (warray_index array index))
+(def list64_get (fun (array index value) (
+  (load_64 (list64_index array index))
 )))
 
 ;; packed array - can have arbitrarily sized elements
@@ -68,19 +68,19 @@
   (+ data (* element_size index))
 )))
 
-(def new_struct_type (fun (id field_warray) (
+(def new_struct_type (fun (id field_list64) (
   (let size 0)
   (let i 0)
-  (let limit (warray_len field_warray))
+  (let limit (list64_len field_list64))
   (block (
     (if (>= i limit)
      (break))
-    (let t (warray_get field_warray i))
+    (let t (list64_get field_list64 i))
     (set size (+ size (size_of t)))
     (set i (+ i 1))
     repeat
   ))
-  (new_type size id (sym struct) field_warray)
+  (new_type size id (sym struct) field_list64)
 )))
 
 ;; x y w h
@@ -100,11 +100,11 @@
 
   (let rect_type (block (
     (let fields (alloca 16))
-    (warray_init fields 4 8)
-    (warray_set fields 0 u32)
-    (warray_set fields 1 u32)
-    (warray_set fields 2 u32)
-    (warray_set fields 3 u32)
+    (list64_init fields 4 8)
+    (list64_set fields 0 u32)
+    (list64_set fields 1 u32)
+    (list64_set fields 2 u32)
+    (list64_set fields 3 u32)
     (new_struct_type (sym rect) fields)
   )))
 

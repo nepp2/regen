@@ -31,7 +31,7 @@
 
 ;; dynamic array or word-sized elements (64 bit)
 ;; *{ element_count : u64, data : *void, capacity : u64 }
-(def warray_new (fun () (
+(def list64_new (fun () (
   (let p (malloc 24))
   (store u64 p 0)
   (store u64 (+ p 8) 0)
@@ -39,7 +39,7 @@
   p
 )))
 
-(def warray_push (fun (array v) (
+(def list64_push (fun (array v) (
   (let element_count (load u64 array))
   (let capacity (load u64 (+ array 16)))
   (if (= capacity element_count) (
@@ -56,21 +56,21 @@
   (store u64 array (+ element_count 1))
 )))
 
-(def warray_len (fun (array) (
+(def list64_len (fun (array) (
   (load u64 array)
 )))
 
-(def warray_index (fun (array index) (
+(def list64_index (fun (array index) (
   (let data (load u64 (+ array 8)))
   (+ data (* 8 index))
 )))
 
-(def warray_set (fun (array index value) (
-  (store u64 (warray_index array index) value)
+(def list64_set (fun (array index value) (
+  (store u64 (list64_index array index) value)
 )))
 
-(def warray_get (fun (array index) (
-  (load u64 (warray_index array index))
+(def list64_get (fun (array index) (
+  (load u64 (list64_index array index))
 )))
 
 (def node_children (fun (node) (

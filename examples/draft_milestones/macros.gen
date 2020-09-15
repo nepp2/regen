@@ -38,11 +38,11 @@
 
 ;; (let rect_type (block (
 ;;   (let fields (alloca 16))
-;;   (warray_init fields 4 8)
-;;   (warray_set fields 0 u32)
-;;   (warray_set fields 1 u32)
-;;   (warray_set fields 2 u32)
-;;   (warray_set fields 3 u32)
+;;   (list64_init fields 4 8)
+;;   (list64_set fields 0 u32)
+;;   (list64_set fields 1 u32)
+;;   (list64_set fields 2 u32)
+;;   (list64_set fields 3 u32)
 ;;   (new_struct_type (sym r) fields)
 ;; )))
 

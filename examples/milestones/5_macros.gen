@@ -1,4 +1,3 @@
-
 (load_prelude env)
 
 ;; define macro_flag

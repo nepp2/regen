@@ -49,4 +49,9 @@ fn run_file(path : impl AsRef<Path>) {
     run_file("../examples/milestones/4_struct_return.gen");
   }
 
+  #[test]
+  fn test_milestone_5() {
+    run_file("../examples/milestones/5_macros.gen");
+  }
+
 //}
