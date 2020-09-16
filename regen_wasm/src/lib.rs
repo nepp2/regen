@@ -2,7 +2,7 @@
 // Import the wasm-bindgen crate.
 use wasm_bindgen::prelude::*;
 
-use regen_core;
+use regen_core::interpret::interpret_file;
 
 // Our Add function
 // wasm-pack requires "exported" functions
@@ -10,6 +10,6 @@ use regen_core;
 #[wasm_bindgen]
 pub fn interpret(code : String) -> String {
   let env = regen_core::new_env();
-  regen_core::interpret_file(&code, env);
+  interpret_file(&code, env);
   format!("Regen launched")
 }

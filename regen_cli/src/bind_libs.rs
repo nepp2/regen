@@ -1,12 +1,28 @@
 
 use regen_core::{
   env::Env,
-  symbols::Symbol,
+  symbols::{Symbol, to_symbol},
   types::c_function_type,
+  interpret,
 };
+use std::fs;
 use std::path::Path;
 use std::ffi::CString;
 use libloading::{Library, Symbol as LibSymbol};
+
+pub extern "C" fn include(mut env : Env, file_name : Symbol) {
+  let path = format!("../examples/lib/{}.gen", file_name.as_str());
+  let path_symbol = to_symbol(env.st, &path);
+  if env.get(path_symbol).is_none() {
+    let code =
+      fs::read_to_string(&path)
+      .expect("Something went wrong reading the file");
+    interpret::interpret_file(&code, env);
+    let u64 = env.c.u64_tag;
+    env.insert(path_symbol, path_symbol.as_u64(), u64);
+  }
+
+}
 
 pub extern "C" fn load_library(path : Symbol) -> *const Library {
   load_library_str(path.as_str())
@@ -36,6 +52,9 @@ pub fn bind_libs(mut env : Env) {
   let e = env;
   let c = &e.c;
   let u64 = c.u64_tag;
+  let void = c.void_tag;
+  env.insert_str("include", include as u64,
+    c_function_type(c, &[u64], void));
   env.insert_str("load_library", load_library as u64,
     c_function_type(c, &[u64], u64));
   env.insert_str("load_library_symbol", load_library_symbol as u64,

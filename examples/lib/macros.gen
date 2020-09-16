@@ -1,0 +1,78 @@
+
+(include env (sym prelude))
+(include env (sym list64))
+
+;; define the macro macro!
+(do
+  (let macro_function (fun (n) (
+    (let nodes (ref (node_children n)))
+    (let name (list64_get nodes 0))
+    (let arg (list64_get nodes 1))
+    (let body (list64_get nodes 2))
+    (# (do
+      (let v (fun (($ arg)) ($ body)))
+      (let macro_type
+        (new_type 8 (sym macro) (typeof v)))
+      (env_insert env (sym ($ name)) v macro_type)
+    ))
+  )))
+  (let macro_type
+    (new_type 8 (sym macro) (typeof macro_function)))
+  (env_insert env (sym macro) macro_function macro_type)
+)
+
+(macro list64_create node (
+  (let cs (ref (node_children node)))
+  (let len (list64_len cs))
+  (let do_list (list64_create_empty))
+  (list64_push do_list (# do))
+  (list64_push do_list (# (let a (list64_create_empty))))
+  (let i 0)
+  (block (
+    (if (! (< i len)) (break))
+    (let c (list64_get cs i))
+    (let n (# (list64_push a ($ c))))
+    (list64_push do_list n)
+    (set i (+ i 1))
+    repeat
+  ))
+  (list64_push do_list (# a))
+  (node_from_list do_list)
+))
+
+(macro function node (
+  (let slice (ref (node_children node)))
+  (let name (list64_get slice 0))
+  (let args (list64_get slice 1))
+  (let body (list64_get slice 2))
+  (# (def ($ name) (fun ($ args) ($ body))))
+))
+
+;; define while loops
+(macro while node (
+  (let slice (ref (node_children node)))
+  (let condition (list64_get slice 0))
+  (let body (list64_get slice 1))
+  (# (block (
+    (if ($ condition)
+      (($ body) repeat)
+      (break)
+    )
+  )))
+))
+
+;; define for loops in terms of while loops (testing nested macros)
+(macro for node (
+  (let slice (ref (node_children node)))
+  (let var_def (list64_get slice 0))
+  (let condition (list64_get slice 1))
+  (let var_update (list64_get slice 2))
+  (let body (list64_get slice 3))
+  (# (do
+    ($ var_def)
+    (while ($ condition) (do
+      ($ body)
+      ($ var_update)
+    ))
+  ))
+))

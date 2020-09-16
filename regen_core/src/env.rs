@@ -114,12 +114,6 @@ pub extern "C" fn node_display(node : Node) {
   println!("{}", node);
 }
 
-const PRELUDE : &'static str = std::include_str!("../../examples/prelude.gen");
-
-pub extern "C" fn load_prelude(env : Env) {
-  interpret::interpret_file(PRELUDE, env);
-}
-
 pub extern "C" fn eval(env : Env, n : Node) {
   interpret::interpret_node(n, env);
 }
@@ -207,9 +201,6 @@ pub fn new_env(st : SymbolTable) -> Env {
 
   env.insert_str("node_as_symbol", node_as_symbol as u64,
     c_function_type(c, &[u64], u64));
-
-  env.insert_str("load_prelude", load_prelude as u64,
-    c_function_type(c, &[u64], void));
 
   env.insert_str("eval", eval as u64,
     c_function_type(c, &[u64, u64], void));

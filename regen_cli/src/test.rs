@@ -1,21 +1,7 @@
 
-use crate::interpret::interpret_file;
-use crate::env::new_env;
-use crate::symbols;
-
-use std::fs;
-use std::path::Path;
+use crate::run_file;
 
 //use rusty_fork::rusty_fork_test;
-
-fn run_file(path : impl AsRef<Path>) {
-  let code =
-    fs::read_to_string(path)
-    .expect("Something went wrong reading the file");
-  let st = symbols::symbol_table();
-  let env = new_env(st);
-  interpret_file(&code, env);
-}
 
 //rusty_fork_test! {
 

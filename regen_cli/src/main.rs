@@ -3,11 +3,14 @@
 mod watcher;
 mod bind_libs;
 
-use regen_core::{interpret_file, new_env};
+#[cfg(test)]
+mod test;
+
+use regen_core::{interpret::interpret_file, new_env};
 use std::fs;
 use std::path::Path;
 
-fn run_file(path : impl AsRef<Path>) {
+pub fn run_file(path : impl AsRef<Path>) {
   let code =
     fs::read_to_string(path)
     .expect("Something went wrong reading the file");
