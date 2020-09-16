@@ -29,11 +29,11 @@
   fact
 )))
 
-(def main (fun () (
+(do
   (if (= (factorial 5) 120)
     ()
     ((fail (sym FACTORIAL_BROKEN))))
   (if (= (factorial_loop 5) 120)
     ()
     ((fail (sym FACTORIAL_LOOP_BROKEN))))
-)))
+)

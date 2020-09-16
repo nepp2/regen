@@ -30,10 +30,10 @@ const runWasm = async () => {
       fact
     )))
     
-    (def main (fun () (
+    (do
       (debug (factorial 3))
       (debug (factorial_loop 3))
-    )))
+    )
   `);
 
   console.log(interpretResult);

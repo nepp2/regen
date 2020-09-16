@@ -1,8 +1,28 @@
 
-(def foo (fun (a b) (
-  (+ a b)
-)))
+(include env (sym macros))
 
-(do
-  (debug (foo 3 5))
-)
+(macro tuple node (
+  (let ns (ref (node_children node)))
+  (let name (list64_get ns 0))
+  (let field_types (list64_create))
+  (for i 1 (list64_len ns) (do
+    (let type_node (list64_get ns i))
+    (let s (node_as_symbol type_node))
+    (let t (env_get env s))
+    (list64_push field_types t)
+  ))
+  ;; (let name 0)
+  (node_display node)
+  (# 0)
+))
+
+(tuple rect u64 u64 u64 u64)
+
+
+;; (do
+;;   (let rect (tuple_init rect 10 10 100 100))
+;;   (if (test_tuple (ref rect))
+;;     ((print_symbol (sym SUCCESS)))
+;;     ((fail (sym RECT_INCORRECT)))
+;;   )
+;; )

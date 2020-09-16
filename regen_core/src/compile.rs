@@ -122,7 +122,7 @@ fn push_expr(b : &mut Builder, e : Expr, t : Type) -> Var {
 fn create_sequence(b : &mut Builder, name : &str) -> SequenceId {
   // Make sure the name is unique
   let mut i = 1;
-  let mut name_candidate = symbols::to_symbol(b.env.st, &name);
+  let mut name_candidate = symbols::to_symbol(b.env.st, name);
   loop {
     let name_unique = b.seq_info.iter().find(|s| s.name == name_candidate).is_none();
     if name_unique { break }

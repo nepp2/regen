@@ -3,9 +3,9 @@
   (+ a b)
 )))
 
-(def main (fun () (
+(do
   (let blah 5)
   (if (= (foo 55 blah) 60)
     ()
     ((fail (sym WRONG_VALUE))))
-)))
+)

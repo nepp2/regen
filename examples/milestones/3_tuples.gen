@@ -9,11 +9,11 @@
   rect
 )))
 
-(def main (fun () (
+(do
   (let rect (new_rect 1 2 3 4))
 
   (if (test_tuple (ref rect))
-    ((print_symbol (sym SUCCESS)))
+    ()
     ((fail (sym RECT_INCORRECT)))
   )
-)))
+)

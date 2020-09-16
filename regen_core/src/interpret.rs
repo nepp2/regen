@@ -56,13 +56,6 @@ pub fn interpret_file(code : &str, env : Env) {
   for &c in n.children() {
     interpret_node(c, env);
   }
-  if let Some(v) = env.get_str("main") {
-    let f = v.value as *const Function;
-    interpret_function(f, &[], env);
-  }
-  else {
-    println!("No main function found.");
-  }
 }
   
 struct Frame {

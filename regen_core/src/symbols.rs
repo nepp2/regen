@@ -52,14 +52,14 @@ pub fn symbol_table() -> SymbolTable {
   SymbolTable(Box::into_raw(Box::new(Default::default())))
 }
 
-pub fn to_symbol(symbols : SymbolTable, s : &str) -> Symbol {
+pub fn to_symbol<S : Into<String> + AsRef<str>>(symbols : SymbolTable, s : S) -> Symbol {
   let symbols = unsafe { &mut *symbols.0 };
-  let proxy = symbols.symbol_set.get(s);
+  let proxy = symbols.symbol_set.get(s.as_ref());
   if proxy.is_some() { return Symbol(proxy.unwrap().0) };
-  let s = make_static(s.to_string());
   // TODO: replace use of Box with a bump allocator/slotmap/something
   // OR: store the string data in an unsized struct with the size included,
   // to reduce indirection.
+  let s = make_static(s.into());
   let sym = Symbol(Box::into_raw(Box::new(s as *const str)));
   symbols.symbol_set.insert(s, sym);
   sym

@@ -7,7 +7,7 @@
 (do
   (let a (list64_create 93 82 93))
   (let acc 0)
-  (for (let i 0) (< i (list64_len a)) (set i (+ i 1)) (do
+  (for i 0 (list64_len a) (do
     (set acc (+ acc (list64_get a i)))
   ))
   (if (= acc 268)

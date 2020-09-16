@@ -155,7 +155,7 @@ impl NodeInfo {
   pub fn as_symbol(&self) -> Symbol {
     match self.content {
       NodeContent::Sym(s) => s,
-      _ => panic!("expected symbol, found {:?}", self),
+      _ => panic!("expected symbol, found {}", self),
     }
   }
 
@@ -278,13 +278,13 @@ impl fmt::Display for SrcLocation {
   }
 }
 
-impl fmt::Display for Node {
+impl fmt::Display for NodeInfo {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    display_node(f, 0, *self, &mut false)
+    display_node(f, 0, self, &mut false)
   }
 }
 
-fn display_node(f: &mut fmt::Formatter<'_>, depth: usize, n : Node, newline : &mut bool) -> fmt::Result {
+fn display_node(f: &mut fmt::Formatter<'_>, depth: usize, n : &NodeInfo, newline : &mut bool) -> fmt::Result {
   match n.content {
     List(children) => display_list(f, depth, children.as_slice(), newline),
     Sym(s) => write!(f, "{}", s),
@@ -304,7 +304,7 @@ fn display_list(f: &mut fmt::Formatter<'_>, depth: usize, ns : &[Node], newline 
     if i > 0 {
       write!(f, " ")?;
     }
-    display_node(f, depth, n, newline)?;
+    display_node(f, depth, &*n, newline)?;
     if *newline {
       return display_list_newline(f, depth + 1, ns, i + 1, false);
     }
@@ -316,7 +316,7 @@ fn display_list_newline(f: &mut fmt::Formatter<'_>, depth: usize, ns : &[Node], 
   while i < ns.len() {
     writeln!(f)?;
     print_indent(f, depth * 2)?;
-    display_node(f, depth, ns[i], &mut false)?;
+    display_node(f, depth, &*ns[i], &mut false)?;
     i += 1;
   }
   if indent_newline {

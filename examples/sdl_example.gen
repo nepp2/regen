@@ -63,7 +63,7 @@
   p
 )))
 
-(def main (fun () (
+(do
   (sdl_init SDL_INIT_VIDEO)
   (let win
     (sdl_create_window
@@ -97,4 +97,4 @@
     (sdl_present renderer)
     repeat
   ))
-)))
+)

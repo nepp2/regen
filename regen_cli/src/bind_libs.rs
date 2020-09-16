@@ -10,10 +10,15 @@ use std::path::Path;
 use std::ffi::CString;
 use libloading::{Library, Symbol as LibSymbol};
 
+#[cfg(not(test))]
+const LIB_PATH : &'static str = "examples/lib";
+#[cfg(test)]
+const LIB_PATH : &'static str = "../examples/lib";
+
 pub extern "C" fn include(mut env : Env, file_name : Symbol) {
-  let path = format!("../examples/lib/{}.gen", file_name.as_str());
-  let path_symbol = to_symbol(env.st, &path);
+  let path_symbol = to_symbol(env.st, format!("module::{}", file_name));
   if env.get(path_symbol).is_none() {
+    let path = format!("{}/{}.gen", LIB_PATH, file_name.as_str());
     let code =
       fs::read_to_string(&path)
       .expect("Something went wrong reading the file");

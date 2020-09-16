@@ -74,11 +74,11 @@ pub extern "C" fn env_insert(mut env : Env, sym : Symbol, value : u64, t : Type)
   env.insert(sym, value, t);
 }
 
-pub extern "C" fn env_get(env : &Env, sym : Symbol) -> u64 {
+pub extern "C" fn env_get(env : Env, sym : Symbol) -> u64 {
   env.get(sym).unwrap().value
 }
 
-pub extern "C" fn print_symbol(sym : Symbol) {
+pub extern "C" fn symbol_display(sym : Symbol) {
   println!("symbol: {}", sym)
 }
 
@@ -184,7 +184,7 @@ pub fn new_env(st : SymbolTable) -> Env {
   env.insert_str("env_get", env_get as u64, 
     c_function_type(c, &[u64, u64], u64));
 
-  env.insert_str("print_symbol", print_symbol as u64,
+  env.insert_str("symbol_display", symbol_display as u64,
     c_function_type(c, &[u64], void));
 
   env.insert_str("node_children_c", node_children as u64,
