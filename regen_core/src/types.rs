@@ -1,36 +1,15 @@
-/// Defines the an extensible Type data structure to be used by the
+/// Defines the an extensible TypeInfo data structure to be used by the
 /// compiler & interpreter.
 
-use crate::perm_alloc::{PermSlice, perm_slice};
+use crate::perm_alloc::{Perm, PermSlice, perm, perm_slice, perm_slice_from_vec};
 use crate::symbols;
 use symbols::{Symbol, to_symbol, SymbolTable};
 
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct TypeHandle(*const Type);
-
-impl TypeHandle {
-  // TODO: replace this with something more efficient
-  pub fn alloc_type(t : Type) -> TypeHandle {
-    TypeHandle(Box::into_raw(Box::new(t)))
-  }
-
-  pub fn get(&self) -> &Type {
-    unsafe { &*self.0 }
-  }
-
-  pub fn as_u64(self) -> u64 {
-    self.0 as u64
-  }
-
-  pub fn from_u64(v : u64) -> Self {
-    TypeHandle(v as *const Type)
-  }
-}
+pub type TypeHandle = Perm<TypeInfo>;
 
 #[derive(Copy, Clone)]
 #[repr(C)]
-pub struct Type {
+pub struct TypeInfo {
   pub size_of : u64,
   pub kind : Symbol,
   pub kind_info : *const (),
@@ -38,28 +17,22 @@ pub struct Type {
 
 #[derive(Copy, Clone)]
 #[repr(C)]
-pub struct Field {
-  pub t : Type,
-  pub offset : u64,
-}
-
-#[derive(Copy, Clone)]
-#[repr(C)]
 pub struct TupleInfo {
-  pub fields : PermSlice<Field>,
+  pub field_types : PermSlice<TypeHandle>,
+  pub field_offsets : PermSlice<u64>,
 }
 
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct PointerInfo {
-  pub points_to : Type,
+  pub points_to : TypeInfo,
 }
 
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct FunctionInfo {
-  pub args : PermSlice<Type>,
-  pub returns : Type,
+  pub args : PermSlice<TypeHandle>,
+  pub returns : TypeHandle,
   pub c_function : bool,
 }
 
@@ -72,30 +45,32 @@ pub struct CoreTypes {
   pub array_kind : Symbol,
   pub macro_kind : Symbol,
 
-  pub type_tag : Type,
-  pub u64_tag : Type,
-  pub u32_tag : Type,
-  pub u16_tag : Type,
-  pub u8_tag : Type,
-  pub void_tag : Type,
-  pub slice_tag : Type,
+  pub type_tag : TypeHandle,
+  pub u64_tag : TypeHandle,
+  pub u32_tag : TypeHandle,
+  pub u16_tag : TypeHandle,
+  pub u8_tag : TypeHandle,
+  pub void_tag : TypeHandle,
+  pub slice_tag : TypeHandle,
 
-  pub core_types : Vec<(Symbol, Type)>,
+  pub array_types : Vec<TypeHandle>,
+
+  pub core_types : Vec<(Symbol, TypeHandle)>,
 }
 
 impl CoreTypes {
-  pub fn as_function(&self, t : &Type) -> Option<&FunctionInfo> {
+  pub fn as_function(&self, t : &TypeInfo) -> Option<&FunctionInfo> {
     if t.kind != self.function_kind {
       return None;
     }
     Some(unsafe { &*(t.kind_info as *const FunctionInfo) })
   }
 
-  pub fn as_macro(&self, t : &Type) -> Option<TypeHandle> {
+  pub fn as_macro(&self, t : &TypeInfo) -> Option<TypeHandle> {
     if t.kind != self.macro_kind {
       return None;
     }
-    Some(TypeHandle(t.kind_info as *const Type))
+    Some(Perm::from_ptr(t.kind_info as *mut TypeInfo))
   }
 }
 
@@ -109,45 +84,54 @@ fn round_up_power_of_2(v : u64) -> u64 {
   power
 }
 
-fn struct_offsets(field_types : &[Type]) -> (Vec<Field>, u64) {
+fn new_type(kind : Symbol, size_of : u64, info : *const ()) -> TypeHandle {
+  perm(TypeInfo { size_of, kind, kind_info: info })
+}
+
+fn new_simple_type(kind : Symbol, size : u64) -> TypeHandle {
+  new_type(kind, size, std::ptr::null())
+}
+
+pub fn calculate_packed_field_offsets(field_types : &[TypeHandle]) -> (Vec<u64>, u64) {
   let mut fields = vec![];
   let mut offset = 0;
   for &t in field_types {
     let field_size = round_up_power_of_2(t.size_of);
     offset = round_up_multiple(offset, std::cmp::min(field_size, 8));
-    fields.push(Field { t, offset });
+    fields.push(offset);
     offset += field_size;
   }
   let size = round_up_multiple(offset, round_up_power_of_2(std::cmp::min(offset, 8)));
   (fields, size)
 }
 
-fn new_type(kind : Symbol, size_of : u64, info : *const ()) -> Type {
-  Type { size_of, kind, kind_info: info }
-}
-
-fn new_simple_type(kind : Symbol, size : u64) -> Type {
-  new_type(kind, size, std::ptr::null())
-}
-
-pub fn tuple_type_internal(kind : Symbol, fields : &[Type]) -> Type {
-  let (fields, size) = struct_offsets(fields);
+pub fn tuple_type_internal(kind : Symbol, fields : &[TypeHandle]) -> TypeHandle {
+  let (offsets, size) = calculate_packed_field_offsets(fields);
   let info =
     Box::into_raw(Box::new(
-      TupleInfo { fields: perm_slice(&fields)}))
+      TupleInfo {
+        field_types: perm_slice(&fields),
+        field_offsets: perm_slice_from_vec(offsets),
+      }
+    ))
     as *const ();
   new_type(kind, size, info)
 }
 
-pub fn tuple_type(c : &CoreTypes, fields : &[Type]) -> Type {
+pub fn tuple_type(c : &CoreTypes, fields : &[TypeHandle]) -> TypeHandle {
   tuple_type_internal(c.tuple_kind, fields)
 }
 
-pub fn array_type(c : &CoreTypes, bytes : u64) -> Type {
+pub fn array_type(c : &CoreTypes, bytes : u64) -> TypeHandle {
+  for t in &c.array_types {
+    if t.size_of == bytes {
+      return *t;
+    }
+  }
   new_simple_type(c.array_kind, bytes)
 }
 
-fn function_type_inner(c : &CoreTypes, args : &[Type], returns : Type, c_function : bool) -> Type {
+fn function_type_inner(c : &CoreTypes, args : &[TypeHandle], returns : TypeHandle, c_function : bool) -> TypeHandle {
   let info =
     Box::into_raw(Box::new(
       FunctionInfo { args: perm_slice(args), returns, c_function }))
@@ -155,11 +139,11 @@ fn function_type_inner(c : &CoreTypes, args : &[Type], returns : Type, c_functio
   new_type(c.function_kind, 8, info)
 }
 
-pub fn function_type(c : &CoreTypes, args : &[Type], returns : Type) -> Type {
+pub fn function_type(c : &CoreTypes, args : &[TypeHandle], returns : TypeHandle) -> TypeHandle {
   function_type_inner(c, args, returns, false)
 }
 
-pub fn c_function_type(c : &CoreTypes, args : &[Type], returns : Type) -> Type {
+pub fn c_function_type(c : &CoreTypes, args : &[TypeHandle], returns : TypeHandle) -> TypeHandle {
   function_type_inner(c, args, returns, true)
 }
 
@@ -189,11 +173,18 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
     u64_tag,
   ]);
 
+  let mut array_types = vec![];
+  for i in 2..20 {
+    array_types.push(new_simple_type(array_kind, i * 8));
+  }
+
   CoreTypes {
     primitive_kind, tuple_kind, function_kind,
     pointer_kind, array_kind, macro_kind,
 
     type_tag, u64_tag, u32_tag, u16_tag, u8_tag, void_tag, slice_tag,
+
+    array_types,
 
     core_types:
       vec![

@@ -1,7 +1,8 @@
 /// Defines the environment (the global hashmap that defs are added to)
 
 use crate::symbols::{Symbol, SymbolTable, to_symbol};
-use crate::types::{Type, TypeHandle, CoreTypes, core_types, c_function_type};
+use crate::types;
+use types::{ TypeHandle, CoreTypes, core_types, c_function_type };
 use crate::parse;
 use crate::interpret;
 use parse::{Node, NodeInfo, NodeContent, SrcLocation, node_shape, NodeShape::*};
@@ -21,7 +22,7 @@ pub type Env = Perm<Environment>;
 #[derive(Copy, Clone)]
 pub struct EnvEntry {
   pub value : u64,
-  pub tag : Type,
+  pub tag : TypeHandle,
 }
 
 impl Environment {
@@ -34,11 +35,11 @@ impl Environment {
     self.get(name)
   }
 
-  pub fn insert(&mut self, name : Symbol, value : u64, tag : Type) {
+  pub fn insert(&mut self, name : Symbol, value : u64, tag : TypeHandle) {
     self.values.insert(name, EnvEntry {value, tag });
   }
 
-  pub fn insert_str(&mut self, name : &str, value : u64, tag : Type) {
+  pub fn insert_str(&mut self, name : &str, value : u64, tag : TypeHandle) {
     let name = to_symbol(self.st, name);
     self.insert(name, value, tag);
   }
@@ -70,7 +71,7 @@ extern {
   pub fn memcpy(dest : *mut u8, src: *const u8, count : usize) -> *mut u8;
 }
 
-pub extern "C" fn env_insert(mut env : Env, sym : Symbol, value : u64, t : Type) {
+pub extern "C" fn env_insert(mut env : Env, sym : Symbol, value : u64, t : TypeHandle) {
   env.insert(sym, value, t);
 }
 
@@ -118,6 +119,16 @@ pub extern "C" fn eval(env : Env, n : Node) {
   interpret::interpret_node(n, env);
 }
 
+pub extern "C" fn calculate_packed_field_offsets(
+  field_types : &PermSlice<TypeHandle>,
+  field_offsets : &mut PermSlice<u64>,
+) -> u64
+{
+  let (offsets, size_of) = types::calculate_packed_field_offsets(field_types.as_slice());
+  *field_offsets = perm_slice_from_vec(offsets);
+  size_of
+}
+
 pub extern "C" fn template_quote(n : Node, args : &PermSlice<Node>) -> Node {
   fn template(n : Node, args : &[Node], next_arg : &mut usize) -> Node {
     match node_shape(&n) {
@@ -150,8 +161,7 @@ pub fn new_env(st : SymbolTable) -> Env {
   let e = env;
   let c = &e.c;
   for (n, t) in &c.core_types {
-    let type_handle = TypeHandle::alloc_type(*t);
-    let e = EnvEntry { value: type_handle.as_u64(), tag: env.c.type_tag };
+    let e = EnvEntry { value: Perm::to_u64(*t), tag: env.c.type_tag };
     env.values.insert(*n, e);
   }
 
@@ -206,6 +216,9 @@ pub fn new_env(st : SymbolTable) -> Env {
     c_function_type(c, &[u64, u64], void));
 
   env.insert_str("template_quote", template_quote as u64,
+    c_function_type(c, &[u64, u64], u64));
+
+  env.insert_str("calculate_packed_field_offsets", calculate_packed_field_offsets as u64,
     c_function_type(c, &[u64, u64], u64));
 
   env

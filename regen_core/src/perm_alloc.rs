@@ -18,8 +18,20 @@ pub struct Perm<T> {
 }
 
 impl <T> Perm<T> {
-  pub fn to_ptr(v : Self) -> *const T {
+  pub fn to_ptr(v : Self) -> *mut T {
     v.p
+  }
+
+  pub fn to_u64(v : Self) -> u64 {
+    v.p as u64
+  }
+
+  pub fn from_ptr(p : *mut T) -> Self {
+    Perm { p }
+  }
+
+  pub fn from_u64(v : u64) -> Self {
+    Perm { p: v as *mut T }
   }
 }
 

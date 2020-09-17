@@ -21,30 +21,6 @@
   (env_insert env (sym macro) macro_function macro_type)
 )
 
-;; (do
-;;   (let macro_function (fun (n) (
-;;     (let nodes (ref (node_children n)))
-;;     (let name (list64_get nodes 0))
-;;     (let args (list64_get nodes 1))
-;;     (let body (list64_get nodes 2))
-;;     (# (do
-;;       (let v (fun (__n) (
-;;         ($ (do
-;;           ;; assign some variables
-;;         ))
-;;         (block ($ body))
-;;       )))
-;;       (let macro_type
-;;         (new_type 8 (sym macro) (typeof v)))
-;;       (env_insert env (sym ($ name)) v macro_type)
-;;     ))
-;;   )))
-;;   (let macro_type
-;;     (new_type 8 (sym macro) (typeof macro_function)))
-;;   (env_insert env (sym macro2) macro_function macro_type)
-;; )
-
-
 (macro list64_create node (
   (let cs (ref (node_children node)))
   (let len (list64_len cs))

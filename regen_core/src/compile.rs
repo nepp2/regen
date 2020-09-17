@@ -7,7 +7,7 @@ use bytecode::{
   NamedVar, Op, Operator, FrameVar,
 };
 
-use types::{Type, TypeHandle, CoreTypes};
+use types::{TypeHandle, CoreTypes};
 
 use perm_alloc::{Perm, perm};
 
@@ -27,7 +27,7 @@ struct LabelledBlockExpr {
 
 pub struct Function {
   pub bc : FunctionBytecode,
-  pub t : Type,
+  pub t : TypeHandle,
 }
 
 /// Function builder
@@ -39,7 +39,7 @@ struct Builder {
   locals : Vec<NamedVar>,
   
   /// local variables in scope
-  scoped_locals : Vec<(NamedVar, Type)>,
+  scoped_locals : Vec<(NamedVar, TypeHandle)>,
   
   /// registers
   registers : Vec<FrameVar>,
@@ -77,10 +77,10 @@ use VarType::*;
 struct Var {
   fv : FrameVar,
   var_type : VarType,
-  data_type : Type,
+  data_type : TypeHandle,
 }
 
-fn to_local(var : FrameVar, data_type : Type) -> Var {
+fn to_local(var : FrameVar, data_type : TypeHandle) -> Var {
   Var { fv: var, var_type: Local, data_type }
 }
 
@@ -92,7 +92,7 @@ fn find_local_in_scope(b : &mut Builder, name : Symbol)
     .map(|(l, t)| Var { fv: l.var, var_type: Local, data_type: *t})
 }
 
-fn add_local(b : &mut Builder, name : Symbol, var : FrameVar, t : Type) -> Var {
+fn add_local(b : &mut Builder, name : Symbol, var : FrameVar, t : TypeHandle) -> Var {
   let local = NamedVar{ name, var };
   b.locals.push(local);
   b.scoped_locals.push((local, t));
@@ -108,12 +108,12 @@ fn new_frame_var(b : &mut Builder, minimum_bytes : u64) -> FrameVar {
   var
 }
 
-fn new_var(b : &mut Builder, t : Type) -> Var {
+fn new_var(b : &mut Builder, t : TypeHandle) -> Var {
   let var = new_frame_var(b, t.size_of);
   Var { fv: var, var_type: Register, data_type: t }
 }
 
-fn push_expr(b : &mut Builder, e : Expr, t : Type) -> Var {
+fn push_expr(b : &mut Builder, e : Expr, t : TypeHandle) -> Var {
   let r = new_var(b, t);
   b.ops.push(Op::Expr(r.fv, e));
   return r;
@@ -196,7 +196,7 @@ fn compile_function(env: Env, args : &[Node], body : &[Node]) -> Function {
         let t =
           TypeHandle::from_u64(
             b.env.get(type_tag.as_symbol()).unwrap().value);
-        (name.as_symbol(), *t.get())
+        (name.as_symbol(), t)
       }
       else {
         // TODO: fix type
@@ -338,7 +338,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       let t = TypeHandle::from_u64(e.value);
       let pointer = compile_expr_to_value(b, *pointer).fv;
       let value = compile_expr_to_value(b, *value).fv;
-      b.ops.push(Op::Store{ byte_width: t.get().size_of, pointer, value });
+      b.ops.push(Op::Store{ byte_width: t.size_of, pointer, value });
       None
     }
     // stack allocate
@@ -420,8 +420,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     // typeof
     Command("typeof", [v]) => {
       let v = compile_expr_to_value(b, *v);
-      let t = TypeHandle::alloc_type(v.data_type);
-      let e = Expr::LiteralU64(t.as_u64());
+      let e = Expr::LiteralU64(Perm::to_u64(v.data_type));
       return Some(push_expr(b, e, b.env.c.u64_tag));
     }
     // load
@@ -429,8 +428,8 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       let entry = b.env.get(type_tag.as_symbol()).unwrap();
       let t = TypeHandle::from_u64(entry.value);
       let ptr = compile_expr_to_value(b, *pointer).fv;
-      let e = Expr::Load{ bytes: t.get().size_of, ptr };
-      return Some(push_expr(b, e, *t.get()));
+      let e = Expr::Load{ bytes: t.size_of, ptr };
+      return Some(push_expr(b, e, t));
     }
     _ => {
       compile_list_expr(b, node)
@@ -554,7 +553,7 @@ fn str_to_operator(s : &str) -> Option<Operator> {
   Some(op)
 }
 
-fn op_result_type(c : &CoreTypes, op : Operator) -> Type {
+fn op_result_type(c : &CoreTypes, op : Operator) -> TypeHandle {
   use Operator::*;
   match op {
     Add | Sub | Mul | Div | Rem |
@@ -685,7 +684,7 @@ fn def_macro(b : &mut Builder, def_name : Node, value : Node) {
     v
   };
   let type_tag = {
-    let t = TypeHandle::alloc_type(val_reg.data_type).as_u64(); // TODO: this is very inefficient
+    let t = Perm::to_u64(val_reg.data_type); // TODO: this is very inefficient
     let v = new_frame_var(b, 8);
     b.ops.push(Op::Expr(v, LiteralU64(t)));
     v
