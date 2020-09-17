@@ -4,6 +4,7 @@
 use crate::perm_alloc::{Perm, PermSlice, perm, perm_slice, perm_slice_from_vec};
 use crate::symbols;
 use symbols::{Symbol, to_symbol, SymbolTable};
+use std::fmt;
 
 pub type TypeHandle = Perm<TypeInfo>;
 
@@ -147,14 +148,21 @@ pub fn c_function_type(c : &CoreTypes, args : &[TypeHandle], returns : TypeHandl
   function_type_inner(c, args, returns, true)
 }
 
+const PRIMITIVE_KIND : &'static str = "primitive";
+const TUPLE_KIND : &'static str = "tuple";
+const FUNCTION_KIND : &'static str = "function";
+const POINTER_KIND : &'static str = "pointer";
+const ARRAY_KIND : &'static str = "array";
+const MACRO_KIND : &'static str = "macro";
+
 pub fn core_types(st : SymbolTable) -> CoreTypes {
 
-  let primitive_kind = to_symbol(st, "primitive");
-  let tuple_kind = to_symbol(st, "tuple");
-  let function_kind = to_symbol(st, "function");
-  let pointer_kind = to_symbol(st, "pointer");
-  let array_kind = to_symbol(st, "array");
-  let macro_kind = to_symbol(st, "macro");
+  let primitive_kind = to_symbol(st, PRIMITIVE_KIND);
+  let tuple_kind = to_symbol(st, TUPLE_KIND);
+  let function_kind = to_symbol(st, FUNCTION_KIND);
+  let pointer_kind = to_symbol(st, POINTER_KIND);
+  let array_kind = to_symbol(st, ARRAY_KIND);
+  let macro_kind = to_symbol(st, MACRO_KIND);
 
   let u64_tag = new_simple_type(primitive_kind, 8);
   let u32_tag = new_simple_type(primitive_kind, 4);
@@ -196,6 +204,46 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
         (to_symbol(st, "void"), void_tag),
         (to_symbol(st, "slice"), slice_tag),
       ],
+  }
+}
+
+impl fmt::Display for TypeInfo {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self.kind.as_str() {
+      PRIMITIVE_KIND => {
+        write!(f, "prim({})", self.size_of)?;
+      }
+      TUPLE_KIND => {
+        write!(f, "(")?;
+        let i = unsafe { &*(self.kind_info as *const TupleInfo) };
+        for &t in i.field_types.as_slice() {
+          write!(f, "{}, ", t)?;
+        }
+        write!(f, ")")?;
+      }
+      FUNCTION_KIND => {
+        let i = unsafe { &*(self.kind_info as *const FunctionInfo) };
+        write!(f, "fn(")?;
+        for &t in i.args.as_slice() {
+          write!(f, "{}, ", t)?;
+        }
+        write!(f, ") : {}", i.returns)?;
+      }
+      POINTER_KIND => {
+        let t = unsafe { &*(self.kind_info as *const TypeInfo) };
+        write!(f, "ptr({})", t)?;
+      }
+      ARRAY_KIND => {
+        write!(f, "byte_chunk({})", self.size_of)?;
+      }
+      MACRO_KIND => {
+        write!(f, "macro")?;
+      }
+      _ => {
+        write!(f, "{}", self.kind)?;
+      }
+    }
+    Ok(())
   }
 }
 

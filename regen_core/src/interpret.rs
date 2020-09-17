@@ -54,9 +54,7 @@ pub fn interpret_node(n : Node, env : Env) -> u64 {
 pub fn interpret_file(code : &str, env : Env) {
   let n = parse::parse(env.st, &code);
   for &c in n.children() {
-    println!("interpreting: {}", c);
     interpret_node(c, env);
-    println!("completed.");
   }
 }
   

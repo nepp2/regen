@@ -82,39 +82,39 @@ impl<T> DerefMut for Perm<T> {
 
 impl <T : PartialEq> PartialEq for Perm<T> {
   fn eq(&self, other: &Self) -> bool {
-      (&**self) == (&**other)
+    (&**self) == (&**other)
   }
 }
 impl <T : Eq + PartialEq> Eq for Perm<T> {}
 
 impl<T: Hash> Hash for Perm<T> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        (**self).hash(state);
-    }
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    (**self).hash(state);
+  }
 }
 
 impl<T: fmt::Display> fmt::Display for Perm<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&**self, f)
-    }
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fmt::Display::fmt(&**self, f)
+  }
 }
 
 impl<T: fmt::Debug> fmt::Debug for Perm<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(&**self, f)
-    }
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fmt::Debug::fmt(&**self, f)
+  }
 }
 
 impl<T> borrow::Borrow<T> for Perm<T> {
-    fn borrow(&self) -> &T {
-        &**self
-    }
+  fn borrow(&self) -> &T {
+    &**self
+  }
 }
 
 impl<T> AsRef<T> for Perm<T> {
-    fn as_ref(&self) -> &T {
-        &**self
-    }
+  fn as_ref(&self) -> &T {
+    &**self
+  }
 }
 
 
@@ -135,21 +135,21 @@ impl <T: 'static> PermSlice<T> {
 
 impl <T : PartialEq + 'static> PartialEq for PermSlice<T> {
   fn eq(&self, other: &Self) -> bool {
-      self.as_slice() == other.as_slice()
+    self.as_slice() == other.as_slice()
   }
 }
 impl <T : Eq + PartialEq + 'static> Eq for PermSlice<T> {}
 
 impl<T: Hash + 'static> Hash for PermSlice<T> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.as_slice().hash(state);
-    }
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    self.as_slice().hash(state);
+  }
 }
 
 impl<T: fmt::Debug + 'static> fmt::Debug for PermSlice<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(self.as_slice(), f)
-    }
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fmt::Debug::fmt(self.as_slice(), f)
+  }
 }
 
 impl <T: 'static> Index<usize> for PermSlice<T> {
@@ -182,6 +182,6 @@ impl<T : 'static> IntoIterator for PermSlice<T> {
   type IntoIter = std::slice::Iter<'static, T>;
 
   fn into_iter(self) -> Self::IntoIter {
-      self.as_slice().iter()
+    self.as_slice().iter()
   }
 }

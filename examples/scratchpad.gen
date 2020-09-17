@@ -1,23 +1,31 @@
 
 (include env (sym macros))
 
+(def byte_chunk_16 (typeof (byte_chunk 16)))
+
 (macro tuple node (
   (let ns (ref (node_children node)))
-  (let name (list64_get ns 0))
   (let field_types (list64_create))
-  (for i 1 (list64_len ns) (do
+  (for i 0 (list64_len ns) (do
     (let type_node (list64_get ns i))
     (let s (node_as_symbol type_node))
     (let t (env_get env s))
     (list64_push field_types t)
   ))
-  ;; (let name 0)
-  (node_display node)
-  (# 0)
+  (let field_offsets (byte_chunk 16))
+  (let size_of
+    (calculate_packed_field_offsets field_types (ref field_offsets)))
+  (let kind_info (malloc 32))
+  (store byte_chunk_16 kind_info (load byte_chunk_16 field_types))
+  (store byte_chunk_16 (+ kind_info 16) field_offsets)
+  (let tuple_type (new_type size_of (sym tuple) kind_info))
+  (# ($ (node_from_literal tuple_type)))
 ))
 
-(tuple rect u64 u64 u64 u64)
+(def rect (tuple u64 u64 u64 u64))
 
+(type_display rect)
+(debug (type_size_of rect))
 
 ;; (do
 ;;   (let rect (tuple_init rect 10 10 100 100))

@@ -107,6 +107,14 @@ pub extern "C" fn node_from_symbol(s : Symbol) -> Node {
   perm(info)
 }
 
+pub extern "C" fn node_from_literal(v : u64) -> Node {
+  let info = NodeInfo {
+    loc: SrcLocation::zero(),
+    content: NodeContent::Literal(v),
+  };
+  perm(info)
+}
+
 pub extern "C" fn node_as_symbol(n : Node) -> Symbol {
   n.as_symbol()
 }
@@ -150,6 +158,11 @@ pub extern "C" fn template_quote(n : Node, args : &PermSlice<Node>) -> Node {
     }
   }
   template(n, args.as_slice(), &mut 0)
+}
+
+pub extern "C" fn type_display(t : TypeHandle) {
+  println!("{}", t.kind);
+  println!("{}", t);
 }
 
 pub fn new_env(st : SymbolTable) -> Env {
@@ -209,6 +222,9 @@ pub fn new_env(st : SymbolTable) -> Env {
   env.insert_str("node_from_symbol", node_from_symbol as u64,
     c_function_type(c, &[u64], u64));
 
+  env.insert_str("node_from_literal", node_from_literal as u64,
+    c_function_type(c, &[u64], u64));
+
   env.insert_str("node_as_symbol", node_as_symbol as u64,
     c_function_type(c, &[u64], u64));
 
@@ -220,6 +236,9 @@ pub fn new_env(st : SymbolTable) -> Env {
 
   env.insert_str("calculate_packed_field_offsets", calculate_packed_field_offsets as u64,
     c_function_type(c, &[u64, u64], u64));
+
+  env.insert_str("type_display", type_display as u64,
+    c_function_type(c, &[u64], void));
 
   env
 }
