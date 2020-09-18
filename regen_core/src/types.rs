@@ -170,11 +170,13 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
   let u8_tag = new_simple_type(primitive_kind, 1);
   let void_tag = new_simple_type(primitive_kind, 0);
 
-  let type_tag = tuple_type_internal(tuple_kind, &[
-    u64_tag,
-    u64_tag,
-    u64_tag,
-  ]);
+  let type_tag = new_simple_type(primitive_kind, 8);
+  
+  // tuple_type_internal(tuple_kind, &[
+  //   u64_tag,
+  //   u64_tag,
+  //   u64_tag,
+  // ]);
 
   let slice_tag = tuple_type_internal(tuple_kind, &[
     u64_tag,

@@ -22,15 +22,64 @@
   (# ($ (node_from_literal tuple_type)))
 ))
 
+(macro tuple_init node (
+  (let ns (ref (node_children node)))
+  (let t (eval env (list64_get ns 0)))
+  (type_display t)
+  (let field_types (tuple_type_field_types t))
+  (let field_offsets (tuple_type_field_offsets t))
+  (let do_list (list64_create
+    (# do)
+    (# (let tup (byte_chunk ($
+      (node_from_literal (type_size_of t))
+    ))))
+    (# (let tup_ref (ref tup)))
+  ))
+  (for i 1 (list64_len ns) (do
+    (let val_node (list64_get ns i))
+    (let f_index (- i 1))
+    (let f_type (list64_get field_types f_index))
+    (let f_offset (list64_get field_offsets f_index))
+    ;; TODO: the problem is that I can't retrieve the name of the type from
+    ;; the type value. Should field types be stored as symbols instead?
+    ;; Then the same thing would go for function types, etc. This would forbid
+    ;; anonymous type values (e.g. tuple types/function types), but maybe this is
+    ;; good thing.
+    ;;
+    ;; These types could instead all have implicit names. E.g. tuple(u64, u64).
+    ;; If this is true, then the types could just be storing their own names
+    ;; like before!
+    ;; 
+    ;; Also, consider the macro design a bit more. A macro invocation is a node!
+    ;; Consider rejigging the internal representation to reflect this.
+    (list64_push do_list (#
+      (store u64 (+ tup_ref ($ (node_from_literal f_offset))) ($ val_node))
+    ))
+  ))
+  (list64_push do_list (# tup))
+  (let out (node_from_list do_list))
+  (node_display out)
+  out
+
+  ;; (let field_offsets (byte_chunk 16))
+  ;; (let size_of
+  ;;   (calculate_packed_field_offsets field_types (ref field_offsets)))
+  ;; (let kind_info (malloc 32))
+  ;; (store byte_chunk_16 kind_info (load byte_chunk_16 field_types))
+  ;; (store byte_chunk_16 (+ kind_info 16) field_offsets)
+  ;; (let tuple_type (new_type size_of (sym tuple) kind_info))
+  ;; (# ($ (node_from_literal tuple_type)))
+))
+
 (def rect (tuple u64 u64 u64 u64))
 
 (type_display rect)
 (debug (type_size_of rect))
 
-;; (do
-;;   (let rect (tuple_init rect 10 10 100 100))
-;;   (if (test_tuple (ref rect))
-;;     ((print_symbol (sym SUCCESS)))
-;;     ((fail (sym RECT_INCORRECT)))
-;;   )
-;; )
+(do
+  (let r (tuple_init rect 10 10 100 100))
+  ;; (if (test_tuple (ref r))
+  ;;   ((print_symbol (sym SUCCESS)))
+  ;;   ((fail (sym RECT_INCORRECT)))
+  ;; )
+)

@@ -21,6 +21,15 @@
   (load u64 (+ type 16))
 )))
 
+(def tuple_type_field_types (fun (type) (
+  (type_kind_info type)
+)))
+
+(def tuple_type_field_offsets (fun (type) (
+  (let info (type_kind_info type))
+  (+ info 16)
+)))
+
 (def max (fun (a b) (
   (if (> a b) (a) (b))
 )))

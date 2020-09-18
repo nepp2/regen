@@ -123,8 +123,8 @@ pub extern "C" fn node_display(node : Node) {
   println!("{}", node);
 }
 
-pub extern "C" fn eval(env : Env, n : Node) {
-  interpret::interpret_node(n, env);
+pub extern "C" fn eval(env : Env, n : Node) -> u64 {
+  interpret::interpret_node(n, env)
 }
 
 pub extern "C" fn calculate_packed_field_offsets(
@@ -161,7 +161,6 @@ pub extern "C" fn template_quote(n : Node, args : &PermSlice<Node>) -> Node {
 }
 
 pub extern "C" fn type_display(t : TypeHandle) {
-  println!("{}", t.kind);
   println!("{}", t);
 }
 
@@ -229,7 +228,7 @@ pub fn new_env(st : SymbolTable) -> Env {
     c_function_type(c, &[u64], u64));
 
   env.insert_str("eval", eval as u64,
-    c_function_type(c, &[u64, u64], void));
+    c_function_type(c, &[u64, u64], u64));
 
   env.insert_str("template_quote", template_quote as u64,
     c_function_type(c, &[u64, u64], u64));
