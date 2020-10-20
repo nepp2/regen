@@ -83,3 +83,7 @@
   ;;   ((fail (sym RECT_INCORRECT)))
   ;; )
 )
+
+(let r (tuple_init rect 10 10 100 100))
+(debug (tuple_index rect r 2))
+(debug (. r 2)) ;; 100
