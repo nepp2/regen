@@ -31,7 +31,7 @@ fn main(){
       run_file(path);
     }
     [] => {
-      watcher::watch("examples/scratchpad.gen");
+      run_file("examples/scratchpad.gen");
     },
     args => {
       println!("unrecognised arguments {:?}", args);

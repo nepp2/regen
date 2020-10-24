@@ -1,0 +1,20 @@
+
+
+
+(def list (macro n
+  ;; create type name
+  (let name (sym (node_as_string n)))
+  ;; if type is not defined, define type
+  (if (! (env_contains env name)) (do
+    (let name (symbol_as_node name))
+    (eval env (#
+      (def ($ name) (struct
+        (data (ptr ($ t)))
+        (len u64)
+      ))
+    ))
+  ))
+  ;; return type name
+  (symbol_as_node name)
+))
+

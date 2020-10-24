@@ -7,7 +7,7 @@ use bytecode::{
   NamedVar, Op, Operator, FrameVar,
 };
 
-use types::{TypeHandle, CoreTypes};
+use types::{TypeHandle, CoreTypes, Kind};
 
 use perm_alloc::{Perm, perm};
 
@@ -219,7 +219,7 @@ fn compile_function(env: Env, args : &[Node], body : &[Node]) -> Function {
   else {
     b.ops.push(Op::Return(None));
   }
-  let t = types::function_type(&b.env.c, &arg_types, return_type); // TODO: fix arg types!
+  let t = types::function_type(&arg_types, return_type); // TODO: fix arg types!
   let f = complete_function(b);
   //for n in body { println!("{}", n) }
   //println!("{}", f);
@@ -399,27 +399,35 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       result
     }
   // Debug
-    Command("debug", [v]) => {
-      let r = compile_expr_to_value(b, *v);
-      let sym = to_symbol(b.env.st, parse::code_segment(&*v.loc.code, *v));
-      b.ops.push(Op::Debug(sym, r.fv));
+    Command("debug", [n]) => {
+      let val = compile_expr_to_value(b, *n);
+      match val.data_type.kind {
+        Kind::Type => {
+          // Spit out a function call!
+          panic!();
+        }
+        _ => (),
+      }
+      println!("compiling debug of type: {}", val.data_type);
+      let sym = to_symbol(b.env.st, parse::code_segment(&*n.loc.code, *n));
+      b.ops.push(Op::Debug(sym, val.fv));
       None
     }
     // Return
-    Command("return", [v]) => {
-      let r = compile_expr_to_value(b, *v);
+    Command("return", [n]) => {
+      let r = compile_expr_to_value(b, *n);
       b.ops.push(Op::Return(Some(r.fv)));
       None
     }
     // symbol
-    Command("sym", [v]) => {
-      let s = v.as_symbol();
+    Command("sym", [n]) => {
+      let s = n.as_symbol();
       let e = Expr::LiteralU64(s.as_u64());
       return Some(push_expr(b, e, b.env.c.u64_tag));
     }
     // typeof
-    Command("typeof", [v]) => {
-      let v = compile_expr_to_value(b, *v);
+    Command("typeof", [n]) => {
+      let v = compile_expr_to_value(b, *n);
       let e = Expr::LiteralU64(Perm::to_u64(v.data_type));
       return Some(push_expr(b, e, b.env.c.u64_tag));
     }
@@ -478,13 +486,12 @@ fn compile_function_call(b : &mut Builder, list : &[Node]) -> Var {
   let function = list[0];
   let args = &list[1..];
   let f = compile_expr_to_value(b, function);
-  let env = b.env;
-  let info = if let Some(i) = env.c.as_function(&f.data_type) {
+  let info = if let Some(i) = types::type_as_function(&f.data_type) {
     i
   }
   else {
     panic!("expected function, found {} expression '{}' at ({})",
-      f.data_type.kind, function, function.loc);
+      f.data_type, function, function.loc);
   };
   let mut arg_values = vec![]; // TODO: remove allocation
   for &arg in args {
@@ -524,7 +531,7 @@ fn compile_call(b : &mut Builder, n : Node) -> Option<Var> {
   let function = list[0];
   if let parse::NodeContent::Sym(f) = function.content {
     if let Some(e) = b.env.get(f) {
-      if b.env.c.as_macro(&e.tag).is_some() {
+      if types::type_as_macro(&e.tag).is_some() {
         let f = unsafe { &*(e.value as *const Function) };
         return compile_macro_call(b, f, n);
       }

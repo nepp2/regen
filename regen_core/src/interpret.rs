@@ -3,7 +3,7 @@
 /// Receives a sexp node tree and compiles/interprets the top level
 /// nodes one at a time.
 
-use crate::{parse, bytecode, env, ffi, compile};
+use crate::{parse, bytecode, env, ffi, compile, types};
 
 use env::Env;
 use parse::Node;
@@ -36,7 +36,7 @@ pub fn interpret_function(f : *const Function, args : &[u64], env : Env) -> u64 
   interpreter_loop(&mut shadow_stack, env);
   unsafe {
     let t = (*f).t;
-    let fun = env.c.as_function(&t).unwrap();
+    let fun = types::type_as_function(&t).unwrap();
     if fun.returns.size_of == 8 {
       *(stack_ptr.mem as *mut u64)
     }

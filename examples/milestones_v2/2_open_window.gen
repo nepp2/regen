@@ -1,0 +1,28 @@
+
+(import env "examples/sdl2.gen")
+
+(do
+  (sdl_init SDL_INIT_VIDEO)
+  (let win
+    (sdl_create_window
+      "Regen Window"
+      SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED
+      800 600
+      SDL_WINDOW_SHOWN))
+  (let renderer
+    (sdl_create_renderer win u64_max SDL_RENDERER_ACCELERATED))
+  (let event_ptr (malloc 1000))
+  (while true (
+    (if (&&
+          (== 1 (sdl_poll_event event_ptr))
+          (== (load_32 event_ptr) SDL_QUIT)) 
+      break)
+    (sdl_set_draw_color renderer 0 0 0 0)
+    (sdl_clear renderer)
+    (sdl_set_draw_color renderer 255 0 0 255)
+
+    (let rect (init sdl_rect 50 50 300 200))
+    (sdl_fill_rect renderer (ref rect))
+    (sdl_present renderer)
+  ))
+)

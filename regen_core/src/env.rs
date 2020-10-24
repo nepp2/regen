@@ -164,80 +164,88 @@ pub extern "C" fn type_display(t : TypeHandle) {
   println!("{}", t);
 }
 
+pub extern "C" fn debug_line_start(n: Node) {
+  print!("{}: ", n);
+}
+
 pub fn new_env(st : SymbolTable) -> Env {
   let mut env = perm(Environment {
     values: Default::default(),
     st,
-    c: core_types(st),
+    c: core_types(),
   });
   let e = env;
   let c = &e.c;
   for (n, t) in &c.core_types {
     let e = EnvEntry { value: Perm::to_u64(*t), tag: env.c.type_tag };
-    env.values.insert(*n, e);
+    let n = to_symbol(st, *n);
+    env.values.insert(n, e);
   }
 
   let u64 = env.c.u64_tag;
   let void = env.c.void_tag;
 
   env.insert_str("c_add", c_add as u64,
-    c_function_type(c, &[u64, u64], u64));
+    c_function_type(&[u64, u64], u64));
 
   env.insert_str("test_tuple", test_tuple as u64,
-    c_function_type(c, &[u64], u64));
+    c_function_type(&[u64], u64));
 
   env.insert_str("fail", fail as u64,
-    c_function_type(c, &[u64], u64));
+    c_function_type(&[u64], u64));
 
   env.insert_str("malloc", malloc as u64,
-    c_function_type(c, &[u64], u64));
+    c_function_type(&[u64], u64));
 
   env.insert_str("free", free as u64,
-    c_function_type(c, &[u64], void));
+    c_function_type(&[u64], void));
 
   env.insert_str("memcpy", memcpy as u64,
-    c_function_type(c, &[u64, u64, u64], void));
+    c_function_type(&[u64, u64, u64], void));
 
   env.insert_str("env", Perm::to_ptr(e) as u64, u64);
 
   env.insert_str("env_insert", env_insert as u64,
-    c_function_type(c, &[u64, u64, u64, u64], void));
+    c_function_type(&[u64, u64, u64, u64], void));
 
   env.insert_str("env_get", env_get as u64, 
-    c_function_type(c, &[u64, u64], u64));
+    c_function_type(&[u64, u64], u64));
 
   env.insert_str("symbol_display", symbol_display as u64,
-    c_function_type(c, &[u64], void));
+    c_function_type(&[u64], void));
 
   env.insert_str("node_children_c", node_children as u64,
-    c_function_type(c, &[u64, u64], void));
+    c_function_type(&[u64, u64], void));
 
   env.insert_str("node_display", node_display as u64,
-    c_function_type(c, &[u64], void));
+    c_function_type(&[u64], void));
 
   env.insert_str("node_from_list", node_from_list as u64,
-    c_function_type(c, &[u64], u64));
+    c_function_type(&[u64], u64));
 
   env.insert_str("node_from_symbol", node_from_symbol as u64,
-    c_function_type(c, &[u64], u64));
+    c_function_type(&[u64], u64));
 
   env.insert_str("node_from_literal", node_from_literal as u64,
-    c_function_type(c, &[u64], u64));
+    c_function_type(&[u64], u64));
 
   env.insert_str("node_as_symbol", node_as_symbol as u64,
-    c_function_type(c, &[u64], u64));
+    c_function_type(&[u64], u64));
 
   env.insert_str("eval", eval as u64,
-    c_function_type(c, &[u64, u64], u64));
+    c_function_type(&[u64, u64], u64));
 
   env.insert_str("template_quote", template_quote as u64,
-    c_function_type(c, &[u64, u64], u64));
+    c_function_type(&[u64, u64], u64));
 
   env.insert_str("calculate_packed_field_offsets", calculate_packed_field_offsets as u64,
-    c_function_type(c, &[u64, u64], u64));
+    c_function_type(&[u64, u64], u64));
 
   env.insert_str("type_display", type_display as u64,
-    c_function_type(c, &[u64], void));
+    c_function_type(&[u64], void));
+
+  env.insert_str("debug_line_start", debug_line_start as u64,
+    c_function_type(&[u64], void));
 
   env
 }
