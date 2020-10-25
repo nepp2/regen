@@ -190,8 +190,8 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
             *arg_ptr = get_var(sbp, value);
           }
         }
-        Op::Debug(sym, r) => {
-          println!("{}: {}", sym, get_var(sbp, r));
+        Op::Debug(sym, r, t) => {
+          println!("{}: {} of type {}", sym, get_var(sbp, r), t);
         }
         Op::Return(val) => {
           if let Some(val) = val {

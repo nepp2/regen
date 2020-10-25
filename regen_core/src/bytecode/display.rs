@@ -90,7 +90,7 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Op> {
       Op::CJump{ cond, then_seq, else_seq } =>
         write!(f, "(cjump {} {} {})",
           bc.d(cond), bc.d(then_seq), bc.d(else_seq))?,
-      Op::Debug(sym, reg) =>
+      Op::Debug(sym, reg, _) =>
         write!(f, "(debug {} {})", sym, bc.d(reg))?,
       Op::Jump(seq) =>
         write!(f, "(jump {})", bc.d(seq))?,

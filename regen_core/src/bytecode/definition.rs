@@ -1,7 +1,8 @@
 /// Bytecode data structure is defined here
 
-use crate::symbols;
+use crate::{symbols, types};
 use symbols::Symbol;
+use types::TypeHandle;
 
 /// ID of the sequence, which is actually its offset within
 /// the function it belongs to; this ID is only unique within
@@ -34,12 +35,12 @@ pub enum Expr {
   Load{ bytes: u64, ptr : FrameVar }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone)]
 pub enum Op {
   Expr(FrameVar, Expr),
   Set(FrameVar, FrameVar),
   CJump{ cond: FrameVar, then_seq: SequenceId, else_seq: SequenceId },
-  Debug(Symbol, FrameVar),
+  Debug(Symbol, FrameVar, TypeHandle),
   Jump(SequenceId),
   Arg{ byte_offset: u64, value: FrameVar },
   Store{ byte_width : u64, pointer : FrameVar, value : FrameVar },

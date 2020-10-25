@@ -7,7 +7,7 @@ use bytecode::{
   NamedVar, Op, Operator, FrameVar,
 };
 
-use types::{TypeHandle, CoreTypes, Kind};
+use types::{TypeHandle, CoreTypes};
 
 use perm_alloc::{Perm, perm};
 
@@ -401,16 +401,8 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
   // Debug
     Command("debug", [n]) => {
       let val = compile_expr_to_value(b, *n);
-      match val.data_type.kind {
-        Kind::Type => {
-          // Spit out a function call!
-          panic!();
-        }
-        _ => (),
-      }
-      println!("compiling debug of type: {}", val.data_type);
       let sym = to_symbol(b.env.st, parse::code_segment(&*n.loc.code, *n));
-      b.ops.push(Op::Debug(sym, val.fv));
+      b.ops.push(Op::Debug(sym, val.fv, val.data_type));
       None
     }
     // Return

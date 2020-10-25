@@ -164,10 +164,6 @@ pub extern "C" fn type_display(t : TypeHandle) {
   println!("{}", t);
 }
 
-pub extern "C" fn debug_line_start(n: Node) {
-  print!("{}: ", n);
-}
-
 pub fn new_env(st : SymbolTable) -> Env {
   let mut env = perm(Environment {
     values: Default::default(),
@@ -242,9 +238,6 @@ pub fn new_env(st : SymbolTable) -> Env {
     c_function_type(&[u64, u64], u64));
 
   env.insert_str("type_display", type_display as u64,
-    c_function_type(&[u64], void));
-
-  env.insert_str("debug_line_start", debug_line_start as u64,
     c_function_type(&[u64], void));
 
   env
