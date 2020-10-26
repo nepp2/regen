@@ -3,7 +3,7 @@
 /// Receives a sexp node tree and compiles/interprets the top level
 /// nodes one at a time.
 
-use crate::{parse, bytecode, env, ffi, compile, types};
+use crate::{parse, bytecode, env, ffi, compile, types, debug};
 
 use env::Env;
 use parse::Node;
@@ -191,7 +191,8 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
           }
         }
         Op::Debug(sym, r, t) => {
-          println!("{}: {} of type {}", sym, get_var(sbp, r), t);
+          let p = var_addr(sbp, r);
+          println!("{}: {}", sym, debug::display(p as *const (), t));
         }
         Op::Return(val) => {
           if let Some(val) = val {

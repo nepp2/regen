@@ -1,10 +1,11 @@
 
 ;; primitives
 
+(debug 5) ;; 5
 (debug (typeof 5)) ;; u64
-;; (debug (typeof u32)) ;; type
+(debug (typeof u32)) ;; type
 
-;; ;; pointers
+;; pointers
 
 ;; (debug (ptr u64)) ;; type
 

@@ -16,7 +16,7 @@ pub enum Primitive {
   Void = 4,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 #[repr(u64)]
 pub enum Kind {
   Primitive = 0,
@@ -70,6 +70,13 @@ pub struct CoreTypes {
   pub array_types : Vec<TypeHandle>,
 
   pub core_types : Vec<(&'static str, TypeHandle)>,
+}
+
+pub fn type_as_primitive(t : &TypeInfo) -> Option<Primitive> {
+  if let Kind::Primitive = t.kind {
+    return Some(unsafe { std::mem::transmute(t.info) });
+  }
+  None
 }
 
 pub fn type_as_function(t : &TypeInfo) -> Option<&FunctionInfo> {
@@ -151,14 +158,6 @@ pub fn c_function_type(args : &[TypeHandle], returns : TypeHandle) -> TypeHandle
   function_type_inner(args, returns, true)
 }
 
-const PRIMITIVE_KIND : &'static str = "primitive";
-const TUPLE_KIND : &'static str = "tuple";
-const FUNCTION_KIND : &'static str = "function";
-const POINTER_KIND : &'static str = "pointer";
-const ARRAY_KIND : &'static str = "array";
-const MACRO_KIND : &'static str = "macro";
-const TYPE_KIND : &'static str = "type";
-
 pub fn core_types() -> CoreTypes {
 
   let u64_tag = new_type(Kind::Primitive, 8, Primitive::U64 as u64);
@@ -201,8 +200,7 @@ impl fmt::Display for TypeInfo {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self.kind {
       Kind::Primitive => {
-        let p : Primitive = unsafe { std::mem::transmute(self.info) };
-        let s = match p {
+        let s = match type_as_primitive(self).unwrap() {
           Primitive::U64 => "U64",
           Primitive::U32 => "U32",
           Primitive::U16 => "U16",

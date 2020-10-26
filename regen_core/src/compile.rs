@@ -421,7 +421,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     Command("typeof", [n]) => {
       let v = compile_expr_to_value(b, *n);
       let e = Expr::LiteralU64(Perm::to_u64(v.data_type));
-      return Some(push_expr(b, e, b.env.c.u64_tag));
+      return Some(push_expr(b, e, b.env.c.type_tag));
     }
     // load
     Command("load", [type_tag, pointer]) => {

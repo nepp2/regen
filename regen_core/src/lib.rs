@@ -9,6 +9,7 @@ mod compile;
 pub mod interpret;
 mod ffi;
 pub mod types;
+pub mod debug;
 
 pub fn new_env() -> env::Env {
     env::new_env(symbols::symbol_table())
