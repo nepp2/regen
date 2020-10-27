@@ -142,7 +142,7 @@ pub fn array_type(c : &CoreTypes, bytes : u64) -> TypeHandle {
   new_type(Kind::Array, bytes, 0)
 }
 
-pub fn pointer_type(c : &CoreTypes, inner : TypeHandle) -> TypeHandle {
+pub fn pointer_type(inner : TypeHandle) -> TypeHandle {
   new_type(Kind::Pointer, 8, Perm::to_u64(inner))
 }
 

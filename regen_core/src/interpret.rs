@@ -8,7 +8,7 @@ use crate::{parse, bytecode, env, ffi, compile, types, debug};
 use env::Env;
 use parse::Node;
 use bytecode::{
-  Op, Expr, FrameVar, Operator,
+  Instr, Expr, FrameVar, Operator,
 };
 use compile::Function;
 
@@ -82,9 +82,9 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
     let fun = unsafe { &*frame.f };
     let sbp = frame.sbp;
     loop {
-      let op = fun.bc.ops[frame.pc];
-      match op {
-        Op::Expr(var, e) => {
+      let instr = fun.bc.instrs[frame.pc];
+      match instr {
+        Instr::Expr(var, e) => {
           use Operator::*;
           match e {
             Expr::Def(sym) => {
@@ -160,41 +160,41 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
             }
           };
         }
-        Op::Set(dest, src) => {
+        Instr::Set(dest, src) => {
           let src_addr = var_addr(sbp, src);
           let dest_addr = var_addr(sbp, dest);
           unsafe { store(src_addr, dest_addr as *mut (), src.bytes as usize) }
         }
-        Op::Store{ byte_width, pointer, value } => {
+        Instr::Store{ byte_width, pointer, value } => {
           let dest = get_var(sbp, pointer);
           let src_register = var_addr(sbp, value);
           unsafe { store(src_register, dest as *mut (), byte_width as usize) }
         }
-        Op::CJump{ cond, then_seq, else_seq } => {
+        Instr::CJump{ cond, then_seq, else_seq } => {
           let v = get_var(sbp, cond);
           if v != 0 {
-            frame.pc = fun.bc.sequence_info[then_seq.0].start_op;
+            frame.pc = fun.bc.sequence_info[then_seq.0].start_instruction;
           }
           else {
-            frame.pc = fun.bc.sequence_info[else_seq.0].start_op;
+            frame.pc = fun.bc.sequence_info[else_seq.0].start_instruction;
           }
           continue;
         }
-        Op::Jump(seq) => {
-          frame.pc = fun.bc.sequence_info[seq.0].start_op;
+        Instr::Jump(seq) => {
+          frame.pc = fun.bc.sequence_info[seq.0].start_instruction;
           continue;
         }
-        Op::Arg{ byte_offset, value } => {
+        Instr::Arg{ byte_offset, value } => {
           let arg_ptr = sbp.advance_frame(fun.bc.frame_bytes).byte_offset(byte_offset);
           unsafe {
             *arg_ptr = get_var(sbp, value);
           }
         }
-        Op::Debug(sym, r, t) => {
+        Instr::Debug(sym, r, t) => {
           let p = var_addr(sbp, r);
           println!("{}: {}", sym, debug::display(p as *const (), t));
         }
-        Op::Return(val) => {
+        Instr::Return(val) => {
           if let Some(val) = val {
             let src_addr = var_addr(sbp, val);
             unsafe {

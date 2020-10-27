@@ -4,7 +4,7 @@ use crate::{bytecode, parse, symbols, env, perm_alloc, types, interpret};
 
 use bytecode::{
   SequenceId, SequenceInfo, Expr, FunctionBytecode,
-  NamedVar, Op, Operator, FrameVar,
+  NamedVar, Instr, Operator, FrameVar,
 };
 
 use types::{TypeHandle, CoreTypes, Kind};
@@ -57,7 +57,7 @@ struct Builder {
   seq_info : Vec<SequenceInfo>,
 
   /// the operations of all the sequences
-  ops : Vec<Op>,
+  instrs : Vec<Instr>,
 
   /// labels indicating the start and end of a labelled block expression
   label_stack : Vec<LabelledBlockExpr>,
@@ -71,8 +71,6 @@ enum VarType {
   Local, Register
 }
 
-use VarType::*;
-
 #[derive(Copy, Clone)]
 struct Var {
   fv : FrameVar,
@@ -81,7 +79,7 @@ struct Var {
 }
 
 fn to_local(var : FrameVar, data_type : TypeHandle) -> Var {
-  Var { fv: var, var_type: Local, data_type }
+  Var { fv: var, var_type: VarType::Local, data_type }
 }
 
 fn find_local_in_scope(b : &mut Builder, name : Symbol)
@@ -89,14 +87,14 @@ fn find_local_in_scope(b : &mut Builder, name : Symbol)
 {
   b.scoped_locals.iter().rev()
     .find(|&l| l.0.name == name)
-    .map(|(l, t)| Var { fv: l.var, var_type: Local, data_type: *t})
+    .map(|(l, t)| Var { fv: l.var, var_type: VarType::Local, data_type: *t})
 }
 
 fn add_local(b : &mut Builder, name : Symbol, var : FrameVar, t : TypeHandle) -> Var {
   let local = NamedVar{ name, var };
   b.locals.push(local);
   b.scoped_locals.push((local, t));
-  Var { fv: var, var_type: Local, data_type: t }
+  Var { fv: var, var_type: VarType::Local, data_type: t }
 }
 
 fn new_frame_var(b : &mut Builder, minimum_bytes : u64) -> FrameVar {
@@ -110,12 +108,12 @@ fn new_frame_var(b : &mut Builder, minimum_bytes : u64) -> FrameVar {
 
 fn new_var(b : &mut Builder, t : TypeHandle) -> Var {
   let var = new_frame_var(b, t.size_of);
-  Var { fv: var, var_type: Register, data_type: t }
+  Var { fv: var, var_type: VarType::Register, data_type: t }
 }
 
 fn push_expr(b : &mut Builder, e : Expr, t : TypeHandle) -> Var {
   let r = new_var(b, t);
-  b.ops.push(Op::Expr(r.fv, e));
+  b.instrs.push(Instr::Expr(r.fv, e));
   return r;
 }
 
@@ -132,7 +130,7 @@ fn create_sequence(b : &mut Builder, name : &str) -> SequenceId {
   let seq_id = SequenceId(b.seq_info.len());
   b.seq_info.push(SequenceInfo {
     name: name_candidate,
-    start_op: 0, num_ops: 0,
+    start_instruction: 0, num_instructions: 0,
   });
   b.seq_completion.push(false);
   seq_id
@@ -146,13 +144,13 @@ fn set_current_sequence(b : &mut Builder, sequence : SequenceId) {
     panic!("this sequence has already been completed");
   }
   b.cur_seq = Some(sequence);
-  b.seq_info[sequence.0].start_op = b.ops.len();
+  b.seq_info[sequence.0].start_instruction = b.instrs.len();
 }
 
 fn complete_sequence(b : &mut Builder) {
   if let Some(i) = b.cur_seq {
     let seq = &mut b.seq_info[i.0];
-    seq.num_ops = b.ops.len() - seq.start_op;
+    seq.num_instructions = b.instrs.len() - seq.start_instruction;
     b.seq_completion[i.0] = true;
     b.cur_seq = None;
   }
@@ -166,7 +164,7 @@ fn complete_function(mut b : Builder) -> FunctionBytecode {
   }
   FunctionBytecode {
     sequence_info: b.seq_info,
-    ops: b.ops,
+    instrs: b.instrs,
     frame_bytes: b.frame_bytes,
     args: b.args,
     locals: b.locals,
@@ -184,7 +182,7 @@ fn compile_function(env: Env, args : &[Node], body : &[Node]) -> Function {
     seq_completion: vec![],
     cur_seq: None,
     seq_info: vec![],
-    ops: vec![],
+    instrs: vec![],
     label_stack: vec![],
     env,
   };
@@ -214,10 +212,10 @@ fn compile_function(env: Env, args : &[Node], body : &[Node]) -> Function {
   let mut return_type = b.env.c.void_tag;
   if let Some(v) = v {
     return_type = v.data_type;
-    b.ops.push(Op::Return(Some(v.fv)));
+    b.instrs.push(Instr::Return(Some(v.fv)));
   }
   else {
-    b.ops.push(Op::Return(None));
+    b.instrs.push(Instr::Return(None));
   }
   let t = types::function_type(&arg_types, return_type); // TODO: fix arg types!
   let f = complete_function(b);
@@ -237,24 +235,24 @@ fn compile_if_else(b : &mut Builder, cond : Node, then_expr : Node, else_expr : 
   let else_seq = create_sequence(b, "else");
   let exit_seq = create_sequence(b, "exit");
   let cond = compile_expr_to_value(b, cond).fv;
-  b.ops.push(Op::CJump{ cond, then_seq, else_seq });
+  b.instrs.push(Instr::CJump{ cond, then_seq, else_seq });
   set_current_sequence(b, then_seq);
   let then_result =
     compile_block_expr(b, then_expr.children());
   if let Some(v) = then_result {
     let r = new_var(b, v.data_type);
     result_reg = Some(r);
-    b.ops.push(Op::Set(r.fv, v.fv));
+    b.instrs.push(Instr::Set(r.fv, v.fv));
   }
-  b.ops.push(Op::Jump(exit_seq));
+  b.instrs.push(Instr::Jump(exit_seq));
   set_current_sequence(b, else_seq);
   let else_result =
     compile_block_expr(b, else_expr.children());
   if let Some(r) = result_reg {
     let v = else_result.expect("expected block expression");
-    b.ops.push(Op::Set(r.fv, v.fv));
+    b.instrs.push(Instr::Set(r.fv, v.fv));
   }
-  b.ops.push(Op::Jump(exit_seq));
+  b.instrs.push(Instr::Jump(exit_seq));
   set_current_sequence(b, exit_seq);
   result_reg
 }
@@ -272,19 +270,19 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
   match node_shape(&node) {
     // Return
     Atom("return") => {
-      b.ops.push(Op::Return(None));
+      b.instrs.push(Instr::Return(None));
       None
     }
     // Break
     Atom("break") => {
       let break_to = b.label_stack.last().unwrap().exit_seq;
-      b.ops.push(Op::Jump(break_to));
+      b.instrs.push(Instr::Jump(break_to));
       None
     }
     // Repeat
     Atom("repeat") => {
       let loop_back_to = b.label_stack.last().unwrap().entry_seq;
-      b.ops.push(Op::Jump(loop_back_to));
+      b.instrs.push(Instr::Jump(loop_back_to));
       None
     }
     Atom(_) => {
@@ -310,7 +308,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
         b.env, arg_nodes.children(), body.children());
       let r = new_var(b, f.t);
       let f_addr = Box::into_raw(Box::new(f)) as u64;
-      b.ops.push(Op::Expr(r.fv, Expr::LiteralU64(f_addr)));
+      b.instrs.push(Instr::Expr(r.fv, Expr::LiteralU64(f_addr)));
       Some(r)
     }
     // set var
@@ -322,14 +320,14 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       if value.data_type.size_of != variable.data_type.size_of {
         panic!("types don't match")
       }
-      b.ops.push(Op::Set(variable.fv, value.fv));
+      b.instrs.push(Instr::Set(variable.fv, value.fv));
       None
     }
     // store var
     Command("store", [pointer, value]) => {
       let pointer = compile_expr_to_value(b, *pointer).fv;
       let value = compile_expr_to_value(b, *value).fv;
-      b.ops.push(Op::Store{ byte_width: value.bytes as u64, pointer, value });
+      b.instrs.push(Instr::Store{ byte_width: value.bytes as u64, pointer, value });
       None
     }
     // store var explicit type
@@ -338,7 +336,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       let t = TypeHandle::from_u64(e.value);
       let pointer = compile_expr_to_value(b, *pointer).fv;
       let value = compile_expr_to_value(b, *value).fv;
-      b.ops.push(Op::Store{ byte_width: t.size_of, pointer, value });
+      b.instrs.push(Instr::Store{ byte_width: t.size_of, pointer, value });
       None
     }
     // stack allocate
@@ -352,12 +350,12 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       // evaluate the expression
       let val = compile_expr_to_value(b, *value);
       match val.var_type {
-        Local => {
+        VarType::Local => {
           let var = new_var(b, val.data_type).fv;
           add_local(b, name, var, val.data_type);
-          b.ops.push(Op::Set(var, val.fv));
+          b.instrs.push(Instr::Set(var, val.fv));
         }
-        Register => {
+        VarType::Register => {
           add_local(b, name, val.fv, val.data_type);
         }
       }
@@ -368,10 +366,10 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       let then_seq = create_sequence(b, "then");
       let exit_seq = create_sequence(b, "exit");
       let cond = compile_expr_to_value(b, *cond).fv;
-      b.ops.push(Op::CJump{ cond, then_seq, else_seq: exit_seq });
+      b.instrs.push(Instr::CJump{ cond, then_seq, else_seq: exit_seq });
       set_current_sequence(b, then_seq);
       compile_block_expr(b, then_expr.children());
-      b.ops.push(Op::Jump(exit_seq));
+      b.instrs.push(Instr::Jump(exit_seq));
       set_current_sequence(b, exit_seq);
       None
     }
@@ -383,14 +381,14 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     Command("block", [body]) => {
       let entry_seq = create_sequence(b, "block_entry");
       let exit_seq = create_sequence(b, "block_exit");
-      b.ops.push(Op::Jump(entry_seq));
+      b.instrs.push(Instr::Jump(entry_seq));
       set_current_sequence(b, entry_seq);
       b.label_stack.push(
         LabelledBlockExpr{ entry_seq, exit_seq }
       );
       let result = compile_block_expr(b, body.children());
       b.label_stack.pop();
-      b.ops.push(Op::Jump(exit_seq));
+      b.instrs.push(Instr::Jump(exit_seq));
       set_current_sequence(b, exit_seq);
       result
     }
@@ -402,13 +400,13 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     Command("debug", [n]) => {
       let val = compile_expr_to_value(b, *n);
       let sym = to_symbol(b.env.st, parse::code_segment(&*n.loc.code, *n));
-      b.ops.push(Op::Debug(sym, val.fv, val.data_type));
+      b.instrs.push(Instr::Debug(sym, val.fv, val.data_type));
       None
     }
     // Return
     Command("return", [n]) => {
       let r = compile_expr_to_value(b, *n);
-      b.ops.push(Op::Return(Some(r.fv)));
+      b.instrs.push(Instr::Return(Some(r.fv)));
       None
     }
     // symbol
@@ -437,8 +435,9 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       if v.data_type.size_of != t.size_of {
         panic!("unsafe cast")
       }
-      let e = Expr::
-      return Some(push_expr(b, e, t));
+      let nv = new_var(b, t);
+      b.instrs.push(Instr::Set(nv.fv, v.fv));
+      Some(nv)
     }
     _ => {
       if let Some(type_tag) = node_to_type(b, node) {
@@ -469,7 +468,7 @@ fn node_to_type(b: &Builder, n : Node) -> Option<TypeHandle> {
     // pointer type
     Command("ptr", [inner_type]) => {
       let inner = node_to_type(b, *inner_type).unwrap();
-      Some(types::pointer_type(&b.env.c, inner))
+      Some(types::pointer_type(inner))
     }
     _ => None,
   }
@@ -531,7 +530,7 @@ fn compile_function_call(b : &mut Builder, list : &[Node]) -> Var {
   let mut byte_offset = 0;
   for value in arg_values.drain(..) {
     // TODO: check arg values
-    b.ops.push(Op::Arg{ byte_offset, value });
+    b.instrs.push(Instr::Arg{ byte_offset, value });
     byte_offset += types::round_up_multiple(value.bytes as u64, 8);
   }
   let e = {
@@ -665,14 +664,14 @@ fn quote(b : &mut Builder, quoted : Node) -> Var {
         let offset = push_expr(b, Expr::LiteralU64(i as u64 * 8), u64_tag);
         push_expr(b, Expr::BinaryOp(Add, data_ptr.fv, offset.fv), u64_tag).fv
       };
-      b.ops.push(Op::Store{ byte_width: 8, pointer, value: a.fv });
+      b.instrs.push(Instr::Store{ byte_width: 8, pointer, value: a.fv });
     }
     // slice struct
     let slice_var = new_var(b, b.env.c.slice_tag);
     let slice_ptr = push_expr(b, Expr::UnaryOp(Ref, slice_var.fv), u64_tag);
     // store slice length
     let slice_length = push_expr(b, Expr::LiteralU64(args), u64_tag);
-    b.ops.push(Op::Store{
+    b.instrs.push(Instr::Store{
       byte_width: 8,
       pointer: slice_ptr.fv,
       value: slice_length.fv,
@@ -682,7 +681,7 @@ fn quote(b : &mut Builder, quoted : Node) -> Var {
       let eight = push_expr(b, Expr::LiteralU64(8), u64_tag);
       push_expr(b, Expr::BinaryOp(Add, slice_ptr.fv, eight.fv), u64_tag)
     };
-    b.ops.push(Op::Store{
+    b.instrs.push(Instr::Store{
       byte_width: 8,
       pointer: data_pointer.fv,
       value: data_ptr.fv,
@@ -693,8 +692,8 @@ fn quote(b : &mut Builder, quoted : Node) -> Var {
       push_expr(b, Expr::Def(template_quote), u64_tag)
     };
     // call template_quote
-    b.ops.push(Op::Arg{byte_offset: 0, value: node_value.fv}); // quoted node
-    b.ops.push(Op::Arg{byte_offset: 8, value: slice_ptr.fv}); // slice reference
+    b.instrs.push(Instr::Arg{byte_offset: 0, value: node_value.fv}); // quoted node
+    b.instrs.push(Instr::Arg{byte_offset: 8, value: slice_ptr.fv}); // slice reference
     push_expr(b, Expr::InvokeC(f.fv, 2), u64_tag)
   }
   else {
@@ -711,31 +710,31 @@ fn def_macro(b : &mut Builder, def_name : Node, value : Node) {
   let env = {
     let env = to_symbol(b.env.st, "env");
     let v = new_frame_var(b, 8);
-    b.ops.push(Op::Expr(v, Def(env)));
+    b.instrs.push(Instr::Expr(v, Def(env)));
     v
   };
   let def_sym = {
     let def = def_name.as_symbol().as_u64();
     let v = new_frame_var(b, 8);
-    b.ops.push(Op::Expr(v, LiteralU64(def)));
+    b.instrs.push(Instr::Expr(v, LiteralU64(def)));
     v
   };
   let type_tag = {
     let t = Perm::to_u64(val_reg.data_type); // TODO: this is very inefficient
     let v = new_frame_var(b, 8);
-    b.ops.push(Op::Expr(v, LiteralU64(t)));
+    b.instrs.push(Instr::Expr(v, LiteralU64(t)));
     v
   };
   let f = {
     let env_insert = to_symbol(b.env.st, "env_insert");
     let f = new_frame_var(b, 8);
-    b.ops.push(Op::Expr(f, Def(env_insert)));
+    b.instrs.push(Instr::Expr(f, Def(env_insert)));
     f
   };
-  b.ops.push(Op::Arg{byte_offset: 0, value: env}); // env
-  b.ops.push(Op::Arg{byte_offset: 8, value: def_sym}); // symbol name
-  b.ops.push(Op::Arg{byte_offset: 16, value: val_reg.fv}); // value
-  b.ops.push(Op::Arg{byte_offset: 24, value: type_tag}); // type
+  b.instrs.push(Instr::Arg{byte_offset: 0, value: env}); // env
+  b.instrs.push(Instr::Arg{byte_offset: 8, value: def_sym}); // symbol name
+  b.instrs.push(Instr::Arg{byte_offset: 16, value: val_reg.fv}); // value
+  b.instrs.push(Instr::Arg{byte_offset: 24, value: type_tag}); // type
   let v = new_frame_var(b, 8);
-  b.ops.push(Op::Expr(v, InvokeC(f, 4)));
+  b.instrs.push(Instr::Expr(v, InvokeC(f, 4)));
 }

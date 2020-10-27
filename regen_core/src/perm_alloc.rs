@@ -6,10 +6,9 @@
 /// will instead reflect the semantics of the Regen language.
 
 use std::fmt;
-use std::ops::{Deref, DerefMut, Index};
+use std::ops::{Deref, DerefMut, Index, RangeFrom};
 use core::hash::{Hash, Hasher};
 use std::borrow;
-use std::ops::RangeFrom;
 
 #[derive(Clone)]
 #[repr(C)]

@@ -36,7 +36,7 @@ pub enum Expr {
 }
 
 #[derive(Copy, Clone)]
-pub enum Op {
+pub enum Instr {
   Expr(FrameVar, Expr),
   Set(FrameVar, FrameVar),
   CJump{ cond: FrameVar, then_seq: SequenceId, else_seq: SequenceId },
@@ -52,8 +52,8 @@ pub enum Op {
 /// block expressions.
 pub struct SequenceInfo {
   pub name : Symbol,
-  pub start_op : usize,
-  pub num_ops : usize,
+  pub start_instruction : usize,
+  pub num_instructions : usize,
 }
 
 #[derive(Copy, Clone)]
@@ -64,7 +64,7 @@ pub struct NamedVar {
 
 pub struct FunctionBytecode {
   pub sequence_info : Vec<SequenceInfo>,
-  pub ops : Vec<Op>,
+  pub instrs : Vec<Instr>,
   pub args : usize,
   pub locals : Vec<NamedVar>,
   pub registers : Vec<FrameVar>,

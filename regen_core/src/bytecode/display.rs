@@ -27,9 +27,9 @@ impl fmt::Display for FunctionBytecode {
     }
     for b in self.sequence_info.iter() {
       writeln!(f, "  (seq {} (", b.name)?;
-      let end = b.start_op + b.num_ops;
-      for op in self.ops[b.start_op..end].iter() {
-        write!(f, "    {}", self.d(op))?;
+      let end = b.start_instruction + b.num_instructions;
+      for instr in self.instrs[b.start_instruction..end].iter() {
+        write!(f, "    {}", self.d(instr))?;
         writeln!(f)?;
       }
       writeln!(f, "  ))")?;
@@ -77,28 +77,28 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, SequenceId> {
   }
 }
 
-impl <'l> fmt::Display for BytecodeDisplay<'l, Op> {
+impl <'l> fmt::Display for BytecodeDisplay<'l, Instr> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let bc = self.bc;
     match self.x {
-      Op::Expr(reg, expr) =>
+      Instr::Expr(reg, expr) =>
         write!(f, "(let {} {})", bc.d(reg), bc.d(expr))?,
-      Op::Set(dest, src) =>
+      Instr::Set(dest, src) =>
         write!(f, "(set {} (u{} {}))", bc.d(dest), dest.bytes * 8, bc.d(src))?,
-      Op::Store{ byte_width, pointer, value } =>
+      Instr::Store{ byte_width, pointer, value } =>
         write!(f, "(store {} (u{} {}) )", bc.d(pointer), *byte_width * 8, bc.d(value))?,
-      Op::CJump{ cond, then_seq, else_seq } =>
+      Instr::CJump{ cond, then_seq, else_seq } =>
         write!(f, "(cjump {} {} {})",
           bc.d(cond), bc.d(then_seq), bc.d(else_seq))?,
-      Op::Debug(sym, reg, _) =>
+      Instr::Debug(sym, reg, _) =>
         write!(f, "(debug {} {})", sym, bc.d(reg))?,
-      Op::Jump(seq) =>
+      Instr::Jump(seq) =>
         write!(f, "(jump {})", bc.d(seq))?,
-      Op::Arg{ byte_offset, value } =>
+      Instr::Arg{ byte_offset, value } =>
         write!(f, "(arg {} (u{} {}))", byte_offset, value.bytes * 8, bc.d(value))?,
-      Op::Return(Some(v)) =>
+      Instr::Return(Some(v)) =>
         write!(f, "(return (u{} {}))", v.bytes * 8, bc.d(v))?,
-      Op::Return(None) =>
+      Instr::Return(None) =>
         write!(f, "return")?,
     }
     Ok(())
