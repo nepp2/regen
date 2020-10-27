@@ -1,4 +1,11 @@
 
-# Immediate TODO
+how to support type definitions?
 
-- Make function parameters work properly
+* Primitives
+* Functions
+* Pointers
+* Tuples
+* Structs
+
+Support in compiler?
+  * Replace later with typed macros

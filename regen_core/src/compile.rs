@@ -7,7 +7,7 @@ use bytecode::{
   NamedVar, Op, Operator, FrameVar,
 };
 
-use types::{TypeHandle, CoreTypes};
+use types::{TypeHandle, CoreTypes, Kind};
 
 use perm_alloc::{Perm, perm};
 
@@ -425,15 +425,53 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     }
     // load
     Command("load", [type_tag, pointer]) => {
-      let entry = b.env.get(type_tag.as_symbol()).unwrap();
-      let t = TypeHandle::from_u64(entry.value);
+      let t = symbol_to_type(b, type_tag.as_symbol()).unwrap();
       let ptr = compile_expr_to_value(b, *pointer).fv;
       let e = Expr::Load{ bytes: t.size_of, ptr };
       return Some(push_expr(b, e, t));
     }
-    _ => {
-      compile_list_expr(b, node)
+    // cast
+    Command("cast", [value, type_tag]) => {
+      let v = compile_expr_to_value(b, *value);
+      let t = node_to_type(b, *type_tag).unwrap();
+      if v.data_type.size_of != t.size_of {
+        panic!("unsafe cast")
+      }
+      let e = Expr::
+      return Some(push_expr(b, e, t));
     }
+    _ => {
+      if let Some(type_tag) = node_to_type(b, node) {
+        let e = Expr::LiteralU64(Perm::to_u64(type_tag));
+        return Some(push_expr(b, e, b.env.c.type_tag));
+      }
+      else {
+        compile_list_expr(b, node)
+      }
+    }
+  }
+}
+
+fn symbol_to_type(b : &Builder, s : Symbol) -> Option<TypeHandle> {
+  if let Some(entry) = b.env.get(s) {
+    if entry.tag.kind == Kind::Type {
+      return Some(TypeHandle::from_u64(entry.value));
+    }
+  }
+  None
+}
+
+fn node_to_type(b: &Builder, n : Node) -> Option<TypeHandle> {
+  match node_shape(&n) {
+    Atom(s) => {
+      symbol_to_type(b, to_symbol(b.env.st, s))
+    }
+    // pointer type
+    Command("ptr", [inner_type]) => {
+      let inner = node_to_type(b, *inner_type).unwrap();
+      Some(types::pointer_type(&b.env.c, inner))
+    }
+    _ => None,
   }
 }
 

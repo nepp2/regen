@@ -7,7 +7,7 @@
 
 ;; pointers
 
-;; (debug (ptr u64)) ;; type
+(debug (ptr u64)) ;; type
 
 ;; (do
 ;;   (let p (cast (malloc 8) (ptr u64)))
