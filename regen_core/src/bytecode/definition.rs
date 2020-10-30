@@ -11,40 +11,60 @@ use types::TypeHandle;
 pub struct SequenceId(pub usize);
 
 /// Identifies a storage location that is local to a stack frame
+#[derive(Copy, Clone)]
+pub struct LocalInfo {
+  pub id : Local,
+  pub name : Option<Symbol>,
+  pub byte_offset : u64,
+  pub t : TypeHandle,
+}
+
+/// Identifies a storage location that is local to a stack frame
+#[derive(Copy, Clone)]
+pub struct RegisterInfo {
+  pub id : Register,
+  pub byte_offset : u64,
+  pub t : TypeHandle,
+}
+
+/// Identifies a storage location that is local to a stack frame
 #[derive(Copy, Clone, Debug)]
-pub struct FrameVar {
+pub struct Local {
   pub id : usize,
-  pub byte_offset : u32,
-  pub bytes : u32,
+}
+
+/// Identifies a storage location that is local to a stack frame
+#[derive(Copy, Clone, Debug)]
+pub struct Register {
+  pub id : usize,
 }
 
 #[derive(Copy, Clone, Debug)]
 pub enum Operator {
-  Add, Sub, Mul, Div, Rem, Eq, LT, GT, LTE, GTE,
-  Ref, Not,
+  Add, Sub, Mul, Div, Rem, Eq, LT, GT, LTE, GTE, Not,
 }
 
 #[derive(Copy, Clone, Debug)]
 pub enum Expr {
   Def(Symbol),
+  Local(Local),
   LiteralU64(u64),
-  BinaryOp(Operator, FrameVar, FrameVar),
-  UnaryOp(Operator, FrameVar),
-  Invoke(FrameVar),
-  InvokeC(FrameVar, usize),
-  Load{ bytes: u64, ptr : FrameVar }
+  BinaryOp(Operator, Register, Register),
+  UnaryOp(Operator, Register),
+  Invoke(Register),
+  InvokeC(Register, usize),
+  Load(Register),
 }
 
 #[derive(Copy, Clone)]
 pub enum Instr {
-  Expr(FrameVar, Expr),
-  Set(FrameVar, FrameVar),
-  CJump{ cond: FrameVar, then_seq: SequenceId, else_seq: SequenceId },
-  Debug(Symbol, FrameVar, TypeHandle),
+  Expr(Register, Expr),
+  CJump{ cond: Register, then_seq: SequenceId, else_seq: SequenceId },
+  Debug(Symbol, Register, TypeHandle),
   Jump(SequenceId),
-  Arg{ byte_offset: u64, value: FrameVar },
-  Store{ byte_width : u64, pointer : FrameVar, value : FrameVar },
-  Return(Option<FrameVar>),
+  Arg{ byte_offset: u64, value: Register },
+  Store{ pointer : Register, value : Register },
+  Return(Option<Register>),
 }
 
 /// A sequence of instructions. Equivalent to a basic block,
@@ -56,17 +76,11 @@ pub struct SequenceInfo {
   pub num_instructions : usize,
 }
 
-#[derive(Copy, Clone)]
-pub struct NamedVar {
-  pub name : Symbol,
-  pub var : FrameVar,
-}
-
 pub struct FunctionBytecode {
   pub sequence_info : Vec<SequenceInfo>,
   pub instrs : Vec<Instr>,
   pub args : usize,
-  pub locals : Vec<NamedVar>,
-  pub registers : Vec<FrameVar>,
+  pub locals : Vec<LocalInfo>,
+  pub registers : Vec<RegisterInfo>,
   pub frame_bytes : u64,
 }

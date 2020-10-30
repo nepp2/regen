@@ -7,21 +7,22 @@ use std::fmt;
 impl fmt::Display for FunctionBytecode {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     writeln!(f, ";; Frame size: {}", self.frame_bytes)?;
-    write!(f, ";; Frame vars: {{ ")?;
+    write!(f, ";; Frame vars:")?;
     for v in self.registers.as_slice() {
-      write!(f, "{} : u{}, ", self.d(v), v.bytes * 8)?;
+      writeln!(f)?;
+      write!(f, "  {}: {}", self.d(&v.id), v.t)?;
     }
-    writeln!(f, "}}")?;
+    writeln!(f)?;
     write!(f, "(fun (")?;
     for v in &self.locals.as_slice()[..self.args] {
-      write!(f, " (u{} ${})", v.var.bytes * 8, v.name)?;
+      write!(f, " ({} {})", v.t, self.d(&v.id))?;
     }
     writeln!(f, ") (")?;
     let locals = &self.locals.as_slice()[self.args..];
     if locals.len() > 0 {
       write!(f, " (locals")?;
       for v in locals {
-        write!(f, " (u{} ${})", v.var.bytes * 8, v.name)?;
+        write!(f, " ({} {})", v.t, self.d(&v.id))?;
       }
       writeln!(f, ")")?;
     }
@@ -51,23 +52,24 @@ impl FunctionBytecode {
   }
 }
 
-fn display_var(f: &mut fmt::Formatter<'_>, var : FrameVar, b : &FunctionBytecode) -> fmt::Result {
-  if let Some(l) = b.locals.iter().find(|l| l.var.id == var.id) {
-    write!(f, "${}", l.name)
-  }
-  else {
-    write!(f, "${}", var.id)
+fn display_reg(f: &mut fmt::Formatter<'_>, reg : Register) -> fmt::Result {
+  write!(f, "${}", reg.id)
+}
+
+impl <'l> fmt::Display for BytecodeDisplay<'l, Local> {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    if let Some(n) = self.bc.locals[self.x.id].name {
+      write!(f, "${}", n)
+    }
+    else {
+      write!(f, "${}_local", self.x.id)
+    }
   }
 }
 
-impl <'l> fmt::Display for BytecodeDisplay<'l, FrameVar> {
+impl <'l> fmt::Display for BytecodeDisplay<'l, Register> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    if let Some(l) = self.bc.locals.iter().find(|l| l.var.id == self.x.id) {
-      write!(f, "${}", l.name)
-    }
-    else {
-      write!(f, "${}", self.x.id)
-    }
+    write!(f, "${}", self.x.id)
   }
 }
 
@@ -82,11 +84,13 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Instr> {
     let bc = self.bc;
     match self.x {
       Instr::Expr(reg, expr) =>
-        write!(f, "(let {} {})", bc.d(reg), bc.d(expr))?,
-      Instr::Set(dest, src) =>
-        write!(f, "(set {} (u{} {}))", bc.d(dest), dest.bytes * 8, bc.d(src))?,
-      Instr::Store{ byte_width, pointer, value } =>
-        write!(f, "(store {} (u{} {}) )", bc.d(pointer), *byte_width * 8, bc.d(value))?,
+        write!(f, "(let {} {})",
+          bc.d(reg),
+          bc.d(expr))?,
+      Instr::Store{ pointer, value } =>
+        write!(f, "(store {} {})",
+          bc.d(pointer),
+          bc.d(value))?,
       Instr::CJump{ cond, then_seq, else_seq } =>
         write!(f, "(cjump {} {} {})",
           bc.d(cond), bc.d(then_seq), bc.d(else_seq))?,
@@ -94,10 +98,13 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Instr> {
         write!(f, "(debug {} {})", sym, bc.d(reg))?,
       Instr::Jump(seq) =>
         write!(f, "(jump {})", bc.d(seq))?,
-      Instr::Arg{ byte_offset, value } =>
-        write!(f, "(arg {} (u{} {}))", byte_offset, value.bytes * 8, bc.d(value))?,
+      Instr::Arg{ byte_offset, value } => {
+        write!(f, "(arg {} {})",
+          byte_offset,
+          bc.d(value))?
+      }
       Instr::Return(Some(v)) =>
-        write!(f, "(return (u{} {}))", v.bytes * 8, bc.d(v))?,
+        write!(f, "(return ({} {}))", bc.registers[v.id].t, bc.d(v))?,
       Instr::Return(None) =>
         write!(f, "return")?,
     }
@@ -119,7 +126,6 @@ impl fmt::Display for Operator {
       GT => write!(f, ">"),
       LTE => write!(f, "<="),
       GTE => write!(f, ">="),
-      Ref => write!(f, "ref"),
       Not => write!(f, "!"),
     }
   }
@@ -133,6 +139,8 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Expr> {
         write!(f, "{}", v),
       Expr::Def(sym) =>
         write!(f, "{}", sym),
+      Expr::Local(local) =>
+        write!(f, "{}", bc.d(local)),
       Expr::BinaryOp(op, a, b) =>
         write!(f, "({} {} {})", op, bc.d(a), bc.d(b)),
       Expr::UnaryOp(op, a) =>
@@ -141,8 +149,10 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Expr> {
         write!(f, "(call {})", bc.d(reg)),
       Expr::InvokeC(reg, args) =>
         write!(f, "(ccall {} (arg_count {}))", bc.d(reg), args),
-      Expr::Load{ bytes, ptr } =>
-        write!(f, "(load u{} {})", bytes * 8, bc.d(ptr)),
+      Expr::Load(ptr) =>
+        write!(f, "(load u{} {})",
+          bc.registers[ptr.id].t,
+          bc.d(ptr)),
     }
   }
 }

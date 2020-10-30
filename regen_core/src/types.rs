@@ -86,6 +86,13 @@ pub fn type_as_function(t : &TypeInfo) -> Option<&FunctionInfo> {
   None
 }
 
+pub fn deref_pointer_type(t : &TypeInfo) -> Option<TypeHandle> {
+  if let Kind::Pointer = t.kind {
+    return Some(TypeHandle::from_u64(t.info))
+  }
+  None
+}
+
 pub fn type_as_macro(t : &TypeInfo) -> Option<TypeHandle> {
   if let Kind::Macro = t.kind {
     return Some(Perm::from_ptr(t.info as *mut TypeInfo))
@@ -205,16 +212,16 @@ impl fmt::Display for TypeInfo {
     match self.kind {
       Kind::Primitive => {
         let s = match type_as_primitive(self).unwrap() {
-          Primitive::U64 => "U64",
-          Primitive::U32 => "U32",
-          Primitive::U16 => "U16",
-          Primitive::U8 => "U8",
-          Primitive::Void => "Void",
+          Primitive::U64 => "u64",
+          Primitive::U32 => "u32",
+          Primitive::U16 => "u16",
+          Primitive::U8 => "u8",
+          Primitive::Void => "void",
         };
         write!(f, "{}", s)?;
       }
       Kind::Tuple => {
-        write!(f, "(")?;
+        write!(f, "(tup ")?;
         let i = unsafe { &*(self.info as *const TupleInfo) };
         for &t in i.field_types.as_slice() {
           write!(f, "{}, ", t)?;
@@ -223,18 +230,18 @@ impl fmt::Display for TypeInfo {
       }
       Kind::Function => {
         let i = unsafe { &*(self.info as *const FunctionInfo) };
-        write!(f, "fn(")?;
+        write!(f, "(fn (")?;
         for &t in i.args.as_slice() {
           write!(f, "{}, ", t)?;
         }
-        write!(f, ") : {}", i.returns)?;
+        write!(f, ") {})", i.returns)?;
       }
       Kind::Pointer => {
         let t = unsafe { &*(self.info as *const TypeInfo) };
-        write!(f, "ptr({})", t)?;
+        write!(f, "(ptr {})", t)?;
       }
       Kind::Array => {
-        write!(f, "byte_chunk({})", self.size_of)?;
+        write!(f, "(array {})", self.size_of)?;
       }
       Kind::Macro => {
         write!(f, "macro")?;

@@ -7,15 +7,15 @@
 
 ;; pointers
 
-(debug (ptr u64)) ;; type
+(debug (ptr u64)) ;; (ptr u64)
 
-;; (do
-;;   (let p (cast (malloc 8) (ptr u64)))
-;;   (set (* p) 500)
-;;   (debug (* p)) ;; 500
-;;   (let local 1000)
-;;   (debug (* (ref local))) ;; 1000
-;; )
+(do
+  (let p (cast (malloc 8) (ptr u64)))
+  (set (* p) 500)
+  (debug (* p)) ;; 500
+  (let local 1000)
+  (debug (* (ref local))) ;; 1000
+)
 
 ;; ;; tuples
 

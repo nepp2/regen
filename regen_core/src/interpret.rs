@@ -8,7 +8,7 @@ use crate::{parse, bytecode, env, ffi, compile, types, debug};
 use env::Env;
 use parse::Node;
 use bytecode::{
-  Instr, Expr, FrameVar, Operator,
+  Instr, Expr, Register, Operator, Local,
 };
 use compile::Function;
 
@@ -30,7 +30,7 @@ pub fn interpret_function(f : *const Function, args : &[u64], env : Env) -> u64 
       pc: 0,
       sbp: stack_ptr,
       f,
-      return_addr: stack_ptr.byte_offset(0),
+      return_addr: stack_ptr.to_raw_ptr(0),
     }
   ];
   interpreter_loop(&mut shadow_stack, env);
@@ -72,35 +72,35 @@ struct Frame {
   return_addr : *mut u64,
 }
 
-fn reg(sbp : usize, i : FrameVar) -> usize {
-  i.byte_offset as usize + sbp
-}
-
 fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
   let mut frame = shadow_stack.pop().unwrap();
   'outer: loop {
     let fun = unsafe { &*frame.f };
-    let sbp = frame.sbp;
     loop {
       let instr = fun.bc.instrs[frame.pc];
       match instr {
         Instr::Expr(var, e) => {
           use Operator::*;
           match e {
+            Expr::Local(l) => {
+              let local_offset = frame.local_byte_offset(l);
+              let v = frame.sbp.to_raw_ptr(local_offset) as u64;
+              frame.set_reg_u64(var, v);
+            }
             Expr::Def(sym) => {
               if let Some(f) = env.get(sym) {
-                set_var(sbp, var, f.value);
+                frame.set_reg_u64(var, f.value);
               }
               else {
                 panic!("Symbol '{}' not present in env", sym);
               }
             }
             Expr::LiteralU64(val) => {
-              set_var(sbp, var, val as u64);
+              frame.set_reg_u64(var, val as u64);
             }
             Expr::BinaryOp(op, a, b) => {
-              let a = get_var(sbp, a);
-              let b  = get_var(sbp, b);
+              let a = frame.get_reg_u64(a);
+              let b  = frame.get_reg_u64(b);
               let val = match op {
                 Add => a + b,
                 Sub => a - b,
@@ -114,64 +114,61 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
                 GTE => (a >= b) as u64,
                 _ => panic!("op not binary"),
               };
-              set_var(sbp, var, val);
-            }
-            Expr::UnaryOp(Ref, a) => {
-              set_var(sbp, var, var_addr(sbp, a) as u64);
+              frame.set_reg_u64(var, val);
             }
             Expr::UnaryOp(op, a) => {
-              let a = get_var(sbp, a);
+              let a = frame.get_reg_u64(a);
               let val = match op {
                 Sub => panic!("signed types not yet supported"),
                 Not => !(a != 0) as u64,
                 _ => panic!("op not unary"),
               };
-              set_var(sbp, var, val);
+              frame.set_reg_u64(var, val);
             }
             Expr::Invoke(f) => {
-              let fun_address = get_var(sbp, f);
+              let fun_address = frame.get_reg_u64(f);
               let f = unsafe { &*(fun_address as *const Function) };
               // advance the current frame past the call, and store it on the
               // shadow stack to be returned to later
               frame.pc += 1;
+              let sbp = frame.sbp.advance_bytes(fun.bc.frame_bytes);
+              let return_addr = frame.reg_addr(var);
               shadow_stack.push(frame);
               // set the new frame
-              frame = Frame{
+              frame = Frame {
                 pc: 0,
-                sbp: sbp.advance_frame(fun.bc.frame_bytes),
-                f,
-                return_addr: var_addr(sbp, var),
+                sbp, f, return_addr,
               };
               break;
             }
             Expr::InvokeC(f, arg_count) => {
-              let fptr = get_var(sbp, f) as *const ();
+              println!("INVOKEC1");
+              let fptr = frame.get_reg_u64(f) as *const ();
               let args = unsafe {
-                let data = sbp.advance_frame(fun.bc.frame_bytes).u64_offset(0);
+                let data = frame.sbp.advance_bytes(fun.bc.frame_bytes).u64_offset(0);
                 std::slice::from_raw_parts(data, arg_count)
               };
+              println!("INVOKEC2 {} {:?}", fptr as u64, args);
               let val = unsafe { ffi::call_c_function(fptr, args) };
-              set_var(sbp, var, val);
+              frame.set_reg_u64(var, val);
+              println!("INVOKEC3");
             }
-            Expr::Load{ bytes, ptr } => {
-              let p = get_var(sbp, ptr);
-              let vaddr = var_addr(sbp, var);
-              unsafe { load(p as *mut (), vaddr, bytes as usize) }
+            Expr::Load(ptr) => {
+              let p = frame.get_reg_u64(ptr);
+              let vaddr = frame.reg_addr(var);
+              let bytes = frame.reg_byte_width(var) as usize;
+              unsafe { load(p as *mut (), vaddr, bytes) }
             }
           };
         }
-        Instr::Set(dest, src) => {
-          let src_addr = var_addr(sbp, src);
-          let dest_addr = var_addr(sbp, dest);
-          unsafe { store(src_addr, dest_addr as *mut (), src.bytes as usize) }
-        }
-        Instr::Store{ byte_width, pointer, value } => {
-          let dest = get_var(sbp, pointer);
-          let src_register = var_addr(sbp, value);
-          unsafe { store(src_register, dest as *mut (), byte_width as usize) }
+        Instr::Store{ pointer, value } => {
+          let dest = frame.get_reg_u64(pointer);
+          let src_register = frame.reg_addr(value);
+          let byte_width = frame.reg_byte_width(value) as usize;
+          unsafe { store(src_register, dest as *mut (), byte_width) }
         }
         Instr::CJump{ cond, then_seq, else_seq } => {
-          let v = get_var(sbp, cond);
+          let v = frame.get_reg_u64(cond);
           if v != 0 {
             frame.pc = fun.bc.sequence_info[then_seq.0].start_instruction;
           }
@@ -185,20 +182,21 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
           continue;
         }
         Instr::Arg{ byte_offset, value } => {
-          let arg_ptr = sbp.advance_frame(fun.bc.frame_bytes).byte_offset(byte_offset);
+          let arg_ptr = frame.sbp.advance_bytes(fun.bc.frame_bytes).to_raw_ptr(byte_offset);
           unsafe {
-            *arg_ptr = get_var(sbp, value);
+            *arg_ptr = frame.get_reg_u64(value);
           }
         }
         Instr::Debug(sym, r, t) => {
-          let p = var_addr(sbp, r);
+          let p = frame.reg_addr(r);
           println!("{}: {}", sym, debug::display(p as *const (), t));
         }
         Instr::Return(val) => {
           if let Some(val) = val {
-            let src_addr = var_addr(sbp, val);
+            let src_addr = frame.reg_addr(val);
+            let byte_width = frame.reg_byte_width(val) as usize;
             unsafe {
-              store(src_addr, frame.return_addr as *mut (), val.bytes as usize);
+              store(src_addr, frame.return_addr as *mut (), byte_width);
             }
           }
           if let Some(prev_frame) = shadow_stack.pop() {
@@ -224,7 +222,7 @@ struct StackPtr {
 }
 
 impl StackPtr {
-  fn advance_frame(self, frame_bytes : u64) -> Self {
+  fn advance_bytes(self, frame_bytes : u64) -> Self {
     let new_byte_pos = self.byte_pos + (frame_bytes as u32);
     if new_byte_pos >= self.max_bytes {
       panic!("exceeded stack")
@@ -232,7 +230,7 @@ impl StackPtr {
     StackPtr { mem: self.mem, byte_pos: new_byte_pos, max_bytes: self.max_bytes }
   }
 
-  fn byte_offset(self, byte_offset : u64) -> *mut u64 {
+  fn to_raw_ptr(self, byte_offset : u64) -> *mut u64 {
     unsafe { self.mem.add((self.byte_pos as u64 + byte_offset) as usize) as *mut u64 }
   }
 
@@ -241,18 +239,37 @@ impl StackPtr {
   }
 }
 
-fn var_addr(sbp : StackPtr, v : FrameVar) -> *mut u64 {
-  sbp.byte_offset(v.byte_offset as u64)
-}
-
-fn set_var(sbp : StackPtr, v : FrameVar, val : u64) {
-  unsafe {
-    *var_addr(sbp, v) = val;
+impl Frame {
+  fn fun(&self) -> &Function {
+    unsafe { &*self.f }
   }
-}
 
-fn get_var(sbp : StackPtr, v : FrameVar) -> u64 {
-  unsafe { *var_addr(sbp, v) }
+  fn reg_byte_offset(&self, r : Register) -> u64 {
+    self.fun().bc.registers[r.id].byte_offset as u64
+  }
+
+  fn reg_byte_width(&self, r : Register) -> u64 {
+    self.fun().bc.registers[r.id].t.size_of as u64
+  }
+
+  fn local_byte_offset(&self, l : Local) -> u64 {
+    self.fun().bc.locals[l.id].byte_offset as u64
+  }
+
+  fn reg_addr(&self, r : Register) -> *mut u64 {
+    let byte_offset = self.reg_byte_offset(r);
+    self.sbp.to_raw_ptr(byte_offset)
+  }
+
+  fn set_reg_u64(&self, r : Register, val : u64) {
+    unsafe {
+      *self.reg_addr(r) = val;
+    }
+  }
+  
+  fn get_reg_u64(&self, r : Register) -> u64 {
+    unsafe { *self.reg_addr(r) }
+  }
 }
 
 unsafe fn store(src_register : *mut u64, dest : *mut (), byte_width : usize) {
