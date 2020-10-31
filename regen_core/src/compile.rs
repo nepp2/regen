@@ -4,7 +4,7 @@ use crate::{bytecode, parse, symbols, env, perm_alloc, types, interpret};
 
 use bytecode::{
   SequenceId, SequenceInfo, Expr, FunctionBytecode,
-  Instr, Operator, Local, LocalInfo, Register, RegisterInfo,
+  Instr, Operator, LocalId, LocalInfo, RegId, RegisterInfo,
 };
 
 use types::{TypeHandle, CoreTypes, Kind};
@@ -54,10 +54,10 @@ enum VarType {
   /// A locator register contains a pointer to a value.
   /// Must be derefenced into value register to be read from.
   /// Can be written to.
-  Locator(Register),
+  Locator(RegId),
 
   /// A value register can be read from directly, but can't be written to.
-  Value(Register),
+  Value(RegId),
 }
 
 #[derive(Copy, Clone)]
@@ -95,7 +95,7 @@ impl Var {
 
 #[derive(Copy, Clone)]
 struct Val {
-  r : Register,
+  r : RegId,
   data_type : TypeHandle,
 }
 
@@ -107,12 +107,12 @@ impl Val {
 
 #[derive(Copy, Clone)]
 struct TypedLocal {
-  l : Local,
+  l : LocalId,
   name : Option<Symbol>,
   t : TypeHandle,
 }
 
-fn to_local(r : Register, data_type : TypeHandle) -> Var {
+fn to_local(r : RegId, data_type : TypeHandle) -> Var {
   Var { var_type: VarType::Locator(r), data_type }
 }
 
@@ -129,7 +129,7 @@ fn find_local_in_scope(b : &mut Builder, name : Symbol)
 }
 
 fn local_to_var(b : &mut Builder, l : TypedLocal) -> Var {
-  let e = Expr::Local(l.l);
+  let e = Expr::LocalId(l.l);
   let r = new_register(b, l.t);
   let var = Var { var_type: VarType::Locator(r), data_type: l.t };
   b.bc.instrs.push(Instr::Expr(r, e));
@@ -137,7 +137,7 @@ fn local_to_var(b : &mut Builder, l : TypedLocal) -> Var {
 }
 
 fn add_local(b : &mut Builder, name : Option<Symbol>, t : TypeHandle) -> TypedLocal {
-  let id = Local { id: 0 };
+  let id = LocalId { id: 0 };
   let info = LocalInfo {
     id,
     name,
@@ -150,8 +150,8 @@ fn add_local(b : &mut Builder, name : Option<Symbol>, t : TypeHandle) -> TypedLo
   tl
 }
 
-fn new_register(b : &mut Builder, t : TypeHandle) -> Register {
-  let id = Register { id: b.bc.registers.len() };
+fn new_register(b : &mut Builder, t : TypeHandle) -> RegId {
+  let id = RegId { id: b.bc.registers.len() };
   let info = RegisterInfo { id, byte_offset: 0, t };
   b.bc.registers.push(info);
   id

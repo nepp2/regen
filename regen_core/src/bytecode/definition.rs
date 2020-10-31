@@ -15,7 +15,7 @@ pub struct SequenceId(pub usize);
 /// Identifies a storage location that is local to a stack frame
 #[derive(Copy, Clone)]
 pub struct LocalInfo {
-  pub id : Local,
+  pub id : LocalId,
   pub name : Option<Symbol>,
   pub byte_offset : u64,
   pub t : TypeHandle,
@@ -24,20 +24,20 @@ pub struct LocalInfo {
 /// Identifies a storage location that is local to a stack frame
 #[derive(Copy, Clone)]
 pub struct RegisterInfo {
-  pub id : Register,
+  pub id : RegId,
   pub byte_offset : u64,
   pub t : TypeHandle,
 }
 
 /// Identifies a storage location that is local to a stack frame
 #[derive(Copy, Clone, Debug)]
-pub struct Local {
+pub struct LocalId {
   pub id : usize,
 }
 
 /// Identifies a storage location that is local to a stack frame
 #[derive(Copy, Clone, Debug)]
-pub struct Register {
+pub struct RegId {
   pub id : usize,
 }
 
@@ -49,23 +49,23 @@ pub enum Operator {
 #[derive(Copy, Clone, Debug)]
 pub enum Expr {
   Def(Symbol),
-  Local(Local),
+  LocalId(LocalId),
   LiteralU64(u64),
-  BinaryOp(Operator, Register, Register),
-  UnaryOp(Operator, Register),
-  Invoke(Register, PermSlice<Register>),
-  InvokeC(Register, PermSlice<Register>),
-  Load(Register),
+  BinaryOp(Operator, RegId, RegId),
+  UnaryOp(Operator, RegId),
+  Invoke(RegId, PermSlice<RegId>),
+  InvokeC(RegId, PermSlice<RegId>),
+  Load(RegId),
 }
 
 #[derive(Copy, Clone)]
 pub enum Instr {
-  Expr(Register, Expr),
-  CJump{ cond: Register, then_seq: SequenceId, else_seq: SequenceId },
-  Debug(Node, Register, TypeHandle),
+  Expr(RegId, Expr),
+  CJump{ cond: RegId, then_seq: SequenceId, else_seq: SequenceId },
+  Debug(Node, RegId, TypeHandle),
   Jump(SequenceId),
-  Store{ pointer : Register, value : Register },
-  Return(Option<Register>),
+  Store{ pointer : RegId, value : RegId },
+  Return(Option<RegId>),
 }
 
 /// A sequence of instructions. Equivalent to a basic block,

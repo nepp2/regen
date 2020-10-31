@@ -52,11 +52,11 @@ impl FunctionBytecode {
   }
 }
 
-fn display_reg(f: &mut fmt::Formatter<'_>, reg : Register) -> fmt::Result {
+fn display_reg(f: &mut fmt::Formatter<'_>, reg : RegId) -> fmt::Result {
   write!(f, "${}", reg.id)
 }
 
-impl <'l> fmt::Display for BytecodeDisplay<'l, Local> {
+impl <'l> fmt::Display for BytecodeDisplay<'l, LocalId> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     if let Some(n) = self.bc.locals[self.x.id].name {
       write!(f, "${}", n)
@@ -67,7 +67,7 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Local> {
   }
 }
 
-impl <'l> fmt::Display for BytecodeDisplay<'l, Register> {
+impl <'l> fmt::Display for BytecodeDisplay<'l, RegId> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "${}", self.x.id)
   }
@@ -134,7 +134,7 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Expr> {
         write!(f, "{}", v),
       Expr::Def(sym) =>
         write!(f, "{}", sym),
-      Expr::Local(local) =>
+      Expr::LocalId(local) =>
         write!(f, "{}", bc.d(local)),
       Expr::BinaryOp(op, a, b) =>
         write!(f, "({} {} {})", op, bc.d(a), bc.d(b)),

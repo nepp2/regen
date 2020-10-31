@@ -8,7 +8,7 @@ use crate::{parse, bytecode, env, ffi, compile, types, debug, perm_alloc};
 use env::Env;
 use parse::Node;
 use bytecode::{
-  Instr, Expr, Register, Operator, Local,
+  Instr, Expr, RegId, Operator, LocalId,
 };
 use compile::Function;
 use perm_alloc::PermSlice;
@@ -83,7 +83,7 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
         Instr::Expr(var, e) => {
           use Operator::*;
           match e {
-            Expr::Local(l) => {
+            Expr::LocalId(l) => {
               let local_offset = frame.local_byte_offset(l);
               let v = frame.sbp.to_raw_ptr(local_offset) as u64;
               frame.set_reg_u64(var, v);
@@ -235,7 +235,7 @@ impl StackPtr {
 
 impl Frame {
   
-  fn push_args(&self, args : PermSlice<Register>) {
+  fn push_args(&self, args : PermSlice<RegId>) {
     let args_ptr =
         self.sbp.advance_bytes(self.fun().bc.frame_bytes);
     let mut byte_offset = 0;
@@ -251,30 +251,30 @@ impl Frame {
     unsafe { &*self.f }
   }
 
-  fn reg_byte_offset(&self, r : Register) -> u64 {
+  fn reg_byte_offset(&self, r : RegId) -> u64 {
     self.fun().bc.registers[r.id].byte_offset as u64
   }
 
-  fn reg_byte_width(&self, r : Register) -> u64 {
+  fn reg_byte_width(&self, r : RegId) -> u64 {
     self.fun().bc.registers[r.id].t.size_of as u64
   }
 
-  fn local_byte_offset(&self, l : Local) -> u64 {
+  fn local_byte_offset(&self, l : LocalId) -> u64 {
     self.fun().bc.locals[l.id].byte_offset as u64
   }
 
-  fn reg_addr(&self, r : Register) -> *mut u64 {
+  fn reg_addr(&self, r : RegId) -> *mut u64 {
     let byte_offset = self.reg_byte_offset(r);
     self.sbp.to_raw_ptr(byte_offset)
   }
 
-  fn set_reg_u64(&self, r : Register, val : u64) {
+  fn set_reg_u64(&self, r : RegId, val : u64) {
     unsafe {
       *self.reg_addr(r) = val;
     }
   }
   
-  fn get_reg_u64(&self, r : Register) -> u64 {
+  fn get_reg_u64(&self, r : RegId) -> u64 {
     unsafe { *self.reg_addr(r) }
   }
 }
