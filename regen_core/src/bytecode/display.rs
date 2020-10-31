@@ -98,11 +98,6 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Instr> {
         write!(f, "(debug {} {})", sym, bc.d(reg))?,
       Instr::Jump(seq) =>
         write!(f, "(jump {})", bc.d(seq))?,
-      Instr::Arg{ byte_offset, value } => {
-        write!(f, "(arg {} {})",
-          byte_offset,
-          bc.d(value))?
-      }
       Instr::Return(Some(v)) =>
         write!(f, "(return ({} {}))", bc.registers[v.id].t, bc.d(v))?,
       Instr::Return(None) =>
@@ -145,10 +140,20 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Expr> {
         write!(f, "({} {} {})", op, bc.d(a), bc.d(b)),
       Expr::UnaryOp(op, a) =>
         write!(f, "({} {})", op, bc.d(a)),
-      Expr::Invoke(reg) =>
-        write!(f, "(call {})", bc.d(reg)),
-      Expr::InvokeC(reg, args) =>
-        write!(f, "(ccall {} (arg_count {}))", bc.d(reg), args),
+      Expr::Invoke(reg, args) => {
+        write!(f, "(call {} (", bc.d(reg))?;
+        for arg in args.as_slice() {
+          write!(f, "{}, ", bc.d(arg))?;
+        }
+        write!(f, "))")
+      }
+      Expr::InvokeC(reg, args) => {
+        write!(f, "(ccall {} (", bc.d(reg))?;
+        for arg in args.as_slice() {
+          write!(f, "{}, ", bc.d(arg))?;
+        }
+        write!(f, "))")
+      }
       Expr::Load(ptr) =>
         write!(f, "(load u{} {})",
           bc.registers[ptr.id].t,

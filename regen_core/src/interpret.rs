@@ -3,7 +3,7 @@
 /// Receives a sexp node tree and compiles/interprets the top level
 /// nodes one at a time.
 
-use crate::{parse, bytecode, env, ffi, compile, types, debug};
+use crate::{parse, bytecode, env, ffi, compile, types, debug, perm_alloc};
 
 use env::Env;
 use parse::Node;
@@ -11,6 +11,7 @@ use bytecode::{
   Instr, Expr, Register, Operator, Local,
 };
 use compile::Function;
+use perm_alloc::PermSlice;
 
 pub type CompileExpression = fn(env : &Env, fun : Node) -> Function;
 
@@ -125,7 +126,8 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
               };
               frame.set_reg_u64(var, val);
             }
-            Expr::Invoke(f) => {
+            Expr::Invoke(f, args) => {
+              frame.push_args(args);
               let fun_address = frame.get_reg_u64(f);
               let f = unsafe { &*(fun_address as *const Function) };
               // advance the current frame past the call, and store it on the
@@ -141,17 +143,15 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
               };
               break;
             }
-            Expr::InvokeC(f, arg_count) => {
-              println!("INVOKEC1");
+            Expr::InvokeC(f, args) => {
               let fptr = frame.get_reg_u64(f) as *const ();
+              frame.push_args(args);
               let args = unsafe {
                 let data = frame.sbp.advance_bytes(fun.bc.frame_bytes).u64_offset(0);
-                std::slice::from_raw_parts(data, arg_count)
+                std::slice::from_raw_parts(data, args.len)
               };
-              println!("INVOKEC2 {} {:?}", fptr as u64, args);
               let val = unsafe { ffi::call_c_function(fptr, args) };
               frame.set_reg_u64(var, val);
-              println!("INVOKEC3");
             }
             Expr::Load(ptr) => {
               let p = frame.get_reg_u64(ptr);
@@ -180,12 +180,6 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
         Instr::Jump(seq) => {
           frame.pc = fun.bc.sequence_info[seq.0].start_instruction;
           continue;
-        }
-        Instr::Arg{ byte_offset, value } => {
-          let arg_ptr = frame.sbp.advance_bytes(fun.bc.frame_bytes).to_raw_ptr(byte_offset);
-          unsafe {
-            *arg_ptr = frame.get_reg_u64(value);
-          }
         }
         Instr::Debug(sym, r, t) => {
           let p = frame.reg_addr(r);
@@ -240,6 +234,19 @@ impl StackPtr {
 }
 
 impl Frame {
+  
+  fn push_args(&self, args : PermSlice<Register>) {
+    let args_ptr =
+        self.sbp.advance_bytes(self.fun().bc.frame_bytes);
+    let mut byte_offset = 0;
+    for &a in args {
+      let arg_ptr = args_ptr.to_raw_ptr(byte_offset);
+      unsafe { *arg_ptr = self.get_reg_u64(a) };
+      let bytes = types::round_up_multiple(self.reg_byte_width(a), 8);
+      byte_offset += bytes;
+    }
+  }
+
   fn fun(&self) -> &Function {
     unsafe { &*self.f }
   }

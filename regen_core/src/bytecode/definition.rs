@@ -1,7 +1,8 @@
 /// Bytecode data structure is defined here
 
-use crate::{symbols, types, perm_alloc};
+use crate::{symbols, types, perm_alloc, parse};
 use symbols::Symbol;
+use parse::Node;
 use types::TypeHandle;
 use perm_alloc::PermSlice;
 
@@ -61,9 +62,8 @@ pub enum Expr {
 pub enum Instr {
   Expr(Register, Expr),
   CJump{ cond: Register, then_seq: SequenceId, else_seq: SequenceId },
-  Debug(Symbol, Register, TypeHandle),
+  Debug(Node, Register, TypeHandle),
   Jump(SequenceId),
-  Arg{ byte_offset: u64, value: Register },
   Store{ pointer : Register, value : Register },
   Return(Option<Register>),
 }

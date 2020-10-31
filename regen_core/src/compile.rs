@@ -9,7 +9,7 @@ use bytecode::{
 
 use types::{TypeHandle, CoreTypes, Kind};
 
-use perm_alloc::{Perm, perm, perm_slice};
+use perm_alloc::{Perm, perm, perm_slice, perm_slice_from_vec};
 
 use symbols::{to_symbol, Symbol, SymbolTable};
 use env::Env;
@@ -280,8 +280,8 @@ fn compile_function(env: Env, args : &[Node], body : &[Node]) -> Function {
   }
   let t = types::function_type(&arg_types, return_type); // TODO: fix arg types!
   let f = complete_function(b);
-  //for n in body { println!("{}", n) }
-  println!("{}", f);
+  // for n in body { println!("{}", n) }
+  // println!("{}", f);
   Function { bc: f, t }
 }
 
@@ -456,8 +456,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
   // Debug
     Command("debug", [n]) => {
       let val = compile_expr_to_val(b, *n);
-      let sym = to_symbol(b.env.st, parse::code_segment(&*n.loc.code, *n));
-      b.bc.instrs.push(Instr::Debug(sym, val.r, val.data_type));
+      b.bc.instrs.push(Instr::Debug(*n, val.r, val.data_type));
       None
     }
     // Return
@@ -585,23 +584,17 @@ fn compile_function_call(b : &mut Builder, list : &[Node]) -> Val {
     panic!("expected function, found {} expression '{}' at ({})",
       f.data_type, function, function.loc);
   };
-  let mut arg_values = vec![]; // TODO: remove allocation
+  let mut arg_values = vec![];
   for &arg in args {
     let v = compile_expr_to_val(b, arg);
-    arg_values.push(v);
-  }
-  let mut byte_offset = 0;
-  for v in arg_values.drain(..) {
-    // TODO: check arg values
-    b.bc.instrs.push(Instr::Arg{ byte_offset, value: v.r });
-    byte_offset += types::round_up_multiple(v.data_type.size_of, 8);
+    arg_values.push(v.r);
   }
   let e = {
     if info.c_function {
-      Expr::InvokeC(f.r, args.len())
+      Expr::InvokeC(f.r, perm_slice_from_vec(arg_values))
     }
     else {
-      Expr::Invoke(f.r)
+      Expr::Invoke(f.r, perm_slice_from_vec(arg_values))
     }
   };
   return push_expr(b, e, info.returns);
@@ -750,9 +743,8 @@ fn quote(b : &mut Builder, quoted : Node) -> Val {
       push_expr(b, Expr::Def(template_quote), u64_tag)
     };
     // call template_quote
-    b.bc.instrs.push(Instr::Arg{byte_offset: 0, value: node_value.r}); // quoted node
-    b.bc.instrs.push(Instr::Arg{byte_offset: 8, value: slice_ptr.r}); // slice reference
-    push_expr(b, Expr::InvokeC(f.r, 2), u64_tag)
+    let args = perm_slice(&[node_value.r, slice_ptr.r]);
+    push_expr(b, Expr::InvokeC(f.r, args), u64_tag)
   }
   else {
     node_value
@@ -788,40 +780,3 @@ fn def_macro(b : &NodeBuilder, def_name : Node, value : Node) -> Node {
     b.list(&[b.sym("sym"), def_name]),
     value, b.sym("u64")])
 }
-
-// fn def_macro(b : &mut Builder, def_name : Node, value : Node) {
-//   use Expr::*;
-//   // evaluate the expression
-//   let val_reg = compile_expr_to_val(b, value);
-//   // call env insert
-//   let env = {
-//     let env = to_symbol(b.env.st, "env");
-//     let v = new_register(b, 8);
-//     b.bc.instrs.push(Instr::Expr(v, Def(env)));
-//     v
-//   };
-//   let def_sym = {
-//     let def = def_name.as_symbol().as_u64();
-//     let v = new_register(b, 8);
-//     b.bc.instrs.push(Instr::Expr(v, LiteralU64(def)));
-//     v
-//   };
-//   let type_tag = {
-//     let t = Perm::to_u64(val_reg.data_type); // TODO: this is very inefficient
-//     let v = new_register(b, 8);
-//     b.bc.instrs.push(Instr::Expr(v, LiteralU64(t)));
-//     v
-//   };
-//   let f = {
-//     let env_insert = to_symbol(b.env.st, "env_insert");
-//     let f = new_register(b, 8);
-//     b.bc.instrs.push(Instr::Expr(f, Def(env_insert)));
-//     f
-//   };
-//   b.bc.instrs.push(Instr::Arg{byte_offset: 0, value: env}); // env
-//   b.bc.instrs.push(Instr::Arg{byte_offset: 8, value: def_sym}); // symbol name
-//   b.bc.instrs.push(Instr::Arg{byte_offset: 16, value: val_reg.r}); // value
-//   b.bc.instrs.push(Instr::Arg{byte_offset: 24, value: type_tag}); // type
-//   let v = new_register(b, 8);
-//   b.bc.instrs.push(Instr::Expr(v, InvokeC(f, 4)));
-// }
