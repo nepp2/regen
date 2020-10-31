@@ -1,8 +1,9 @@
 /// Bytecode data structure is defined here
 
-use crate::{symbols, types};
+use crate::{symbols, types, perm_alloc};
 use symbols::Symbol;
 use types::TypeHandle;
+use perm_alloc::PermSlice;
 
 /// ID of the sequence, which is actually its offset within
 /// the function it belongs to; this ID is only unique within
@@ -51,8 +52,8 @@ pub enum Expr {
   LiteralU64(u64),
   BinaryOp(Operator, Register, Register),
   UnaryOp(Operator, Register),
-  Invoke(Register),
-  InvokeC(Register, usize),
+  Invoke(Register, PermSlice<Register>),
+  InvokeC(Register, PermSlice<Register>),
   Load(Register),
 }
 
