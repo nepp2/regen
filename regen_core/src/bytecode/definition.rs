@@ -17,27 +17,14 @@ pub struct SequenceId(pub usize);
 pub struct LocalInfo {
   pub id : LocalId,
   pub name : Option<Symbol>,
-  pub byte_offset : u64,
   pub t : TypeHandle,
-}
-
-/// Identifies a storage location that is local to a stack frame
-#[derive(Copy, Clone)]
-pub struct RegisterInfo {
-  pub id : RegId,
+  pub mutable : bool,
   pub byte_offset : u64,
-  pub t : TypeHandle,
 }
 
 /// Identifies a storage location that is local to a stack frame
 #[derive(Copy, Clone, Debug)]
 pub struct LocalId {
-  pub id : usize,
-}
-
-/// Identifies a storage location that is local to a stack frame
-#[derive(Copy, Clone, Debug)]
-pub struct RegId {
   pub id : usize,
 }
 
@@ -49,26 +36,25 @@ pub enum Operator {
 #[derive(Copy, Clone)]
 pub enum Expr {
   Def(Symbol),
-  Local(LocalId),
-  Init(TypeHandle, PermSlice<RegId>),
-  // FieldAddr { tuple_pointer: RegId, index: u64 },
-  // FieldVal { tuple_value: RegId, index: u64 },
+  LocalAddr(LocalId),
+  Init(TypeHandle, PermSlice<LocalId>),
+  FieldIndex { tuple_addr : LocalId, index : u64 },
   LiteralU64(u64),
-  BinaryOp(Operator, RegId, RegId),
-  UnaryOp(Operator, RegId),
-  Invoke(RegId, PermSlice<RegId>),
-  InvokeC(RegId, PermSlice<RegId>),
-  Load(RegId),
+  BinaryOp(Operator, LocalId, LocalId),
+  UnaryOp(Operator, LocalId),
+  Invoke(LocalId, PermSlice<LocalId>),
+  InvokeC(LocalId, PermSlice<LocalId>),
+  Load(LocalId),
 }
 
 #[derive(Copy, Clone)]
 pub enum Instr {
-  Expr(RegId, Expr),
-  CJump{ cond: RegId, then_seq: SequenceId, else_seq: SequenceId },
-  Debug(Node, RegId, TypeHandle),
+  Expr(LocalId, Expr),
+  CJump{ cond: LocalId, then_seq: SequenceId, else_seq: SequenceId },
+  Debug(Node, LocalId, TypeHandle),
   Jump(SequenceId),
-  Store{ pointer : RegId, value : RegId },
-  Return(Option<RegId>),
+  Store{ pointer : LocalId, value : LocalId },
+  Return(Option<LocalId>),
 }
 
 /// A sequence of instructions. Equivalent to a basic block,
@@ -85,6 +71,5 @@ pub struct FunctionBytecode {
   pub instrs : Vec<Instr>,
   pub args : usize,
   pub locals : Vec<LocalInfo>,
-  pub registers : Vec<RegisterInfo>,
   pub frame_bytes : u64,
 }

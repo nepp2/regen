@@ -27,6 +27,10 @@
   (let v (init pos 20 30))
   (debug (. v 0)) ;; 20
   (debug (. v 1)) ;; 30
+
+  ;; field assignment
+  (set (. v 1) 100)
+  (debug (. v 1)) ;; 100
 )
 
 ;; ;; structs

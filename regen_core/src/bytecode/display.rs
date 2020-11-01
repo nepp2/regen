@@ -8,7 +8,7 @@ impl fmt::Display for FunctionBytecode {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     writeln!(f, ";; Frame size: {}", self.frame_bytes)?;
     write!(f, ";; Frame vars:")?;
-    for v in self.registers.as_slice() {
+    for v in self.locals.as_slice() {
       writeln!(f)?;
       write!(f, "  {}: {}", self.d(&v.id), v.t)?;
     }
@@ -18,14 +18,6 @@ impl fmt::Display for FunctionBytecode {
       write!(f, " ({} {})", v.t, self.d(&v.id))?;
     }
     writeln!(f, ") (")?;
-    let locals = &self.locals.as_slice()[self.args..];
-    if locals.len() > 0 {
-      write!(f, " (locals")?;
-      for v in locals {
-        write!(f, " ({} {})", v.t, self.d(&v.id))?;
-      }
-      writeln!(f, ")")?;
-    }
     for b in self.sequence_info.iter() {
       writeln!(f, "  (seq {} (", b.name)?;
       let end = b.start_instruction + b.num_instructions;
@@ -52,24 +44,14 @@ impl FunctionBytecode {
   }
 }
 
-fn display_reg(f: &mut fmt::Formatter<'_>, reg : RegId) -> fmt::Result {
-  write!(f, "${}", reg.id)
-}
-
 impl <'l> fmt::Display for BytecodeDisplay<'l, LocalId> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     if let Some(n) = self.bc.locals[self.x.id].name {
       write!(f, "${}", n)
     }
     else {
-      write!(f, "${}_local", self.x.id)
+      write!(f, "${}", self.x.id)
     }
-  }
-}
-
-impl <'l> fmt::Display for BytecodeDisplay<'l, RegId> {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "${}", self.x.id)
   }
 }
 
@@ -99,7 +81,7 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Instr> {
       Instr::Jump(seq) =>
         write!(f, "(jump {})", bc.d(seq))?,
       Instr::Return(Some(v)) =>
-        write!(f, "(return ({} {}))", bc.registers[v.id].t, bc.d(v))?,
+        write!(f, "(return ({} {}))", bc.locals[v.id].t, bc.d(v))?,
       Instr::Return(None) =>
         write!(f, "return")?,
     }
@@ -134,8 +116,8 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Expr> {
         write!(f, "{}", v),
       Expr::Def(sym) =>
         write!(f, "{}", sym),
-      Expr::Local(local) =>
-        write!(f, "{}", bc.d(local)),
+      Expr::LocalAddr(local) =>
+        write!(f, "(ref {})", bc.d(local)),
       Expr::Init(t, fields) => {
         write!(f, "(init {} ", t)?;
         for fv in fields.as_slice() {
@@ -143,6 +125,8 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Expr> {
         }
         write!(f, ")")
       }
+      Expr::FieldIndex{ tuple_addr, index } =>
+        write!(f, "(. {} {})", bc.d(tuple_addr), index),
       Expr::BinaryOp(op, a, b) =>
         write!(f, "({} {} {})", op, bc.d(a), bc.d(b)),
       Expr::UnaryOp(op, a) =>
@@ -163,7 +147,7 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Expr> {
       }
       Expr::Load(ptr) =>
         write!(f, "(load u{} {})",
-          bc.registers[ptr.id].t,
+          bc.locals[ptr.id].t,
           bc.d(ptr)),
     }
   }

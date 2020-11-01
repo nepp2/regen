@@ -4,7 +4,7 @@ use crate::{bytecode, parse, symbols, env, perm_alloc, types, interpret};
 
 use bytecode::{
   SequenceId, SequenceInfo, Expr, FunctionBytecode,
-  Instr, Operator, LocalId, LocalInfo, RegId, RegisterInfo,
+  Instr, Operator, LocalId, LocalInfo,
 };
 
 use types::{TypeHandle, CoreTypes, Kind};
@@ -34,7 +34,7 @@ struct Builder {
   bc : FunctionBytecode,
   
   /// local variables in scope
-  scoped_locals : Vec<TypedLocal>,
+  scoped_locals : Vec<NamedLocal>,
   
   /// the instruction sequence currently being built
   cur_seq : Option<SequenceId>,
@@ -54,32 +54,37 @@ enum VarType {
   /// A locator register contains a pointer to a value.
   /// Must be derefenced into value register to be read from.
   /// Can be written to.
-  Locator(RegId),
+  Locator(LocalId),
 
   /// A value register can be read from directly, but can't be written to.
-  Value(RegId),
+  Value(LocalId),
 }
 
 #[derive(Copy, Clone)]
 pub struct Var {
   var_type : VarType,
   data_type : TypeHandle,
+  mutable : bool,
 }
 
 impl Var {
 
   fn from_val(val : Val) -> Self {
-    Var{ var_type: VarType::Value(val.r), data_type: val.data_type }
+    Var{ var_type: VarType::Value(val.id), data_type: val.data_type, mutable: val.mutable }
   }
 
-  fn get_address(&self) -> Val {
-    match self.var_type {
-      VarType::Locator(r) => Val {
-        r,
-        data_type: types::pointer_type(self.data_type)
-      },
-      VarType::Value(_) => panic!("this expression has no address"),
-    }
+  fn get_address(&self, b : &mut Builder) -> Val {
+    let t = types::pointer_type(self.data_type);
+    let id = match self.var_type {
+      VarType::Locator(id) => id,
+      VarType::Value(id) => {
+        let e = Expr::LocalAddr(id);
+        let addr_id = new_local(b, None, t, self.mutable);
+        b.bc.instrs.push(Instr::Expr(addr_id, e));
+        addr_id
+      }
+    };
+    Val { id, data_type: t, mutable: self.mutable }
   }
   
   fn to_val(&self, b : &mut Builder) -> Val {
@@ -88,15 +93,20 @@ impl Var {
         let e = Expr::Load(r);
         push_expr(b, e, self.data_type)
       }
-      VarType::Value(r) => Val { r, data_type: self.data_type },
+      VarType::Value(r) => Val {
+        id: r,
+        data_type: self.data_type,
+        mutable: self.mutable,
+      },
     }
   }
 }
 
 #[derive(Copy, Clone)]
 struct Val {
-  r : RegId,
+  id : LocalId,
   data_type : TypeHandle,
+  mutable : bool,
 }
 
 impl Val {
@@ -106,70 +116,52 @@ impl Val {
 }
 
 #[derive(Copy, Clone)]
-struct TypedLocal {
-  l : LocalId,
-  name : Option<Symbol>,
-  t : TypeHandle,
-}
-
-fn to_local(r : RegId, data_type : TypeHandle) -> Var {
-  Var { var_type: VarType::Locator(r), data_type }
+struct NamedLocal {
+  name : Symbol,
+  v : Val,
 }
 
 fn find_local_in_scope(b : &mut Builder, name : Symbol)
-  -> Option<Var>
+  -> Option<Val>
 {
-  let r =
+  let result =
     b.scoped_locals.iter().rev()
-    .find(|&l| l.name == Some(name)).cloned();
-  if let Some(tl) = r {
-    return Some(local_to_var(b, tl));
+    .find(|&l| l.name == name).cloned();
+  if let Some(nl) = result {
+    return Some(nl.v);
   }
   None
 }
 
-fn local_to_var(b : &mut Builder, l : TypedLocal) -> Var {
-  let e = Expr::Local(l.l);
-  let r = new_register(b, types::pointer_type(l.t));
-  let var = Var { var_type: VarType::Locator(r), data_type: l.t };
-  b.bc.instrs.push(Instr::Expr(r, e));
-  var
+fn new_scoped_var(b : &mut Builder, name : Symbol, t : TypeHandle) -> Val {
+  let id = new_local(b, Some(name), t, true);
+  let v = Val { id, data_type: t, mutable: true };
+  let tl = NamedLocal{ name, v };
+  b.scoped_locals.push(tl);
+  v
 }
 
-fn add_local(b : &mut Builder, name : Option<Symbol>, t : TypeHandle) -> TypedLocal {
-  let id = LocalId { id: 0 };
+fn new_local(b : &mut Builder, name : Option<Symbol>, t : TypeHandle, mutable : bool) -> LocalId {
+  let id = LocalId { id: b.bc.locals.len() };
   let info = LocalInfo {
     id,
     name,
     byte_offset: 0,
     t,
+    mutable,
   };
   b.bc.locals.push(info);
-  let tl = TypedLocal{ l: id, name, t};
-  b.scoped_locals.push(tl);
-  tl
-}
-
-fn new_register(b : &mut Builder, t : TypeHandle) -> RegId {
-  let id = RegId { id: b.bc.registers.len() };
-  let info = RegisterInfo { id, byte_offset: 0, t };
-  b.bc.registers.push(info);
   id
 }
 
-fn new_val(b : &mut Builder, t : TypeHandle) -> Val {
-  let r = new_register(b, t);
-  Val { r, data_type: t }
-}
-
-fn new_anonymous_local(b : &mut Builder, t : TypeHandle) -> Var {
-  let l = add_local(b, None, t);
-  local_to_var(b, l)
+fn new_val(b : &mut Builder, t : TypeHandle, mutable : bool) -> Val {
+  let id = new_local(b, None, t, mutable);
+  Val { id, data_type: t, mutable }
 }
 
 fn push_expr(b : &mut Builder, e : Expr, t : TypeHandle) -> Val {
-  let v = new_val(b, t);
-  b.bc.instrs.push(Instr::Expr(v.r, e));
+  let v = new_val(b, t, false);
+  b.bc.instrs.push(Instr::Expr(v.id, e));
   return v;
 }
 
@@ -224,11 +216,6 @@ fn complete_function(mut b : Builder) -> FunctionBytecode {
     let bytes = types::round_up_multiple(l.t.size_of, 8);
     b.bc.frame_bytes += bytes;
   }
-  for r in b.bc.registers.as_mut_slice() {
-    r.byte_offset = b.bc.frame_bytes;
-    let bytes = types::round_up_multiple(r.t.size_of, 8);
-    b.bc.frame_bytes += bytes;
-  }
   b.bc
 }
 
@@ -239,7 +226,6 @@ fn compile_function(env: Env, args : &[Node], body : &[Node]) -> Function {
       instrs: vec![],
       args: 0,
       locals: vec![],
-      registers: vec![],
       frame_bytes: 0,
     },
     scoped_locals: vec![],
@@ -263,7 +249,7 @@ fn compile_function(env: Env, args : &[Node], body : &[Node]) -> Function {
         (arg.as_symbol(), env.c.u64_tag)
       }
     };
-    add_local(&mut b, Some(name), t);
+    new_scoped_var(&mut b, name, t);
     arg_types.push(t);
   }
   // start a sequence
@@ -273,7 +259,7 @@ fn compile_function(env: Env, args : &[Node], body : &[Node]) -> Function {
   let mut return_type = b.env.c.void_tag;
   if let Some(v) = v {
     return_type = v.data_type;
-    b.bc.instrs.push(Instr::Return(Some(v.r)));
+    b.bc.instrs.push(Instr::Return(Some(v.id)));
   }
   else {
     b.bc.instrs.push(Instr::Return(None));
@@ -295,13 +281,13 @@ fn compile_if_else(b : &mut Builder, cond : Node, then_expr : Node, else_expr : 
   let then_seq = create_sequence(b, "then");
   let else_seq = create_sequence(b, "else");
   let exit_seq = create_sequence(b, "exit");
-  let cond = compile_expr_to_val(b, cond).r;
+  let cond = compile_expr_to_val(b, cond).id;
   b.bc.instrs.push(Instr::CJump{ cond, then_seq, else_seq });
   set_current_sequence(b, then_seq);
   let then_result =
     compile_block_expr(b, then_expr.children());
   if let Some(v) = then_result {
-    let l = new_anonymous_local(b, v.data_type);
+    let l = new_val(b, v.data_type, true).to_var();
     result_local = Some(l);
     compile_set_local(b, l, v);
   }
@@ -322,10 +308,13 @@ fn compile_set_local(b : &mut Builder, dest : Var, value : Val) {
   if dest.data_type.size_of != value.data_type.size_of {
     panic!("types don't match")
   }
-  let pointer = dest.get_address().r;
+  if !dest.mutable {
+    panic!("can't assign to this value")
+  }
+  let pointer = dest.get_address(b).id;
   b.bc.instrs.push(Instr::Store {
     pointer,
-    value: value.r,
+    value: value.id,
   });
 }
 
@@ -377,7 +366,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       let mut field_values = vec![];
       for f in field_nodes {
         // TODO: check types
-        field_values.push(compile_expr_to_val(b, *f).r);
+        field_values.push(compile_expr_to_val(b, *f).id);
       }
       let e = Expr::Init(t, perm_slice_from_vec(field_values));
       Some(push_expr(b, e, t).to_var())
@@ -386,19 +375,12 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     Command(".", [tuple, index]) => {
       let tup = compile_expr_to_var(b, *tuple);
       let i = index.as_literal();
-      let t = types::type_as_tuple(&tup.data_type).unwrap().field_types[i as usize];
-      // match tup.var_type {
-      //   VarType::Locator(r) => {
-      //     let e = Expr::FieldIndex(r, i);
-      //     let fr = new_register(b, t);
-      //     b.bc.instrs.push(Instr::Expr(fr, e));
-      //     Some(Var { var_type: VarType::Locator(fr), data_type: t})
-      //   }
-      //   VarType::Value(r) => {
-          
-      //   }
-      // }
-      panic!()
+      let tuple_addr = compile_expr_to_var(b, *tuple).get_address(b).id;
+      let field_type = types::type_as_tuple(&tup.data_type).unwrap().field_types[i as usize];
+      let e = Expr::FieldIndex{ tuple_addr, index: i };
+      let id = new_local(b, None, types::pointer_type(field_type), tup.mutable);
+      b.bc.instrs.push(Instr::Expr(id, e));
+      Some(Var { var_type: VarType::Locator(id), data_type: field_type, mutable: tup.mutable})
     }
     // quotation
     Command("#", [quoted]) => {
@@ -414,9 +396,9 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     Command("fun", [arg_nodes, body]) => {
       let f = compile_function(
         b.env, arg_nodes.children(), body.children());
-      let r = new_val(b, f.t);
+      let r = new_val(b, f.t, false);
       let f_addr = Box::into_raw(Box::new(f)) as u64;
-      b.bc.instrs.push(Instr::Expr(r.r, Expr::LiteralU64(f_addr)));
+      b.bc.instrs.push(Instr::Expr(r.id, Expr::LiteralU64(f_addr)));
       Some(r.to_var())
     }
     // set var
@@ -428,31 +410,30 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     }
     // store var
     Command("store", [pointer, value]) => {
-      let pointer = compile_expr_to_val(b, *pointer).r;
-      let value = compile_expr_to_val(b, *value).r;
+      let pointer = compile_expr_to_val(b, *pointer).id;
+      let value = compile_expr_to_val(b, *value).id;
       b.bc.instrs.push(Instr::Store{ pointer, value });
       None
     }
     // stack allocate
     Command("byte_chunk", [value]) => {
       let array = types::array_type(&b.env.c, value.as_literal());
-      Some(new_val(b, array).to_var())
+      Some(new_val(b, array, false).to_var())
     }
     // let
     Command("let", [var_name, value]) => {
       let name = var_name.as_symbol();
       // evaluate the expression
       let value = compile_expr_to_val(b, *value);
-      let local = add_local(b, Some(name), value.data_type);
-      let dest = local_to_var(b, local);
-      compile_set_local(b, dest, value);
+      let local = new_scoped_var(b, name, value.data_type);
+      compile_set_local(b, local.to_var(), value);
       None
     }
     // if then
     Command("if", [cond, then_expr]) => {
       let then_seq = create_sequence(b, "then");
       let exit_seq = create_sequence(b, "exit");
-      let cond = compile_expr_to_val(b, *cond).r;
+      let cond = compile_expr_to_val(b, *cond).id;
       b.bc.instrs.push(Instr::CJump{ cond, then_seq, else_seq: exit_seq });
       set_current_sequence(b, then_seq);
       compile_block_expr(b, then_expr.children());
@@ -486,13 +467,13 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
   // Debug
     Command("debug", [n]) => {
       let val = compile_expr_to_val(b, *n);
-      b.bc.instrs.push(Instr::Debug(*n, val.r, val.data_type));
+      b.bc.instrs.push(Instr::Debug(*n, val.id, val.data_type));
       None
     }
     // Return
     Command("return", [n]) => {
       let r = compile_expr_to_val(b, *n);
-      b.bc.instrs.push(Instr::Return(Some(r.r)));
+      b.bc.instrs.push(Instr::Return(Some(r.id)));
       None
     }
     // symbol
@@ -513,13 +494,13 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       let t =
         types::deref_pointer_type(&ptr.data_type)
         .expect("expected pointer type");
-      let var = Var{ var_type: VarType::Locator(ptr.r), data_type: t};
+      let var = Var{ var_type: VarType::Locator(ptr.id), data_type: t, mutable: true };
       return Some(var);
     }
     // ref
     Command("ref", [locator]) => {
       let val = compile_expr_to_var(b, *locator);
-      return Some(val.get_address().to_var())
+      return Some(val.get_address(b).to_var())
     }
     // cast
     Command("cast", [value, type_tag]) => {
@@ -528,7 +509,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       if v.data_type.size_of != t.size_of {
         panic!("can't cast {} to {}", v.data_type, t)
       }
-      let cv = Val { r: v.r, data_type: t };
+      let cv = Val { id: v.id, data_type: t, mutable: v.mutable };
       Some(cv.to_var())
     }
     _ => {
@@ -600,7 +581,7 @@ fn atom_to_value(b : &mut Builder, node : Node) -> Var {
   }
   // Look for local
   if let Some(r) = find_local_in_scope(b, sym) {
-    return r;
+    return r.to_var();
   }
   // Assume global
   if let Some(entry) = b.env.get(sym) {
@@ -626,14 +607,14 @@ fn compile_function_call(b : &mut Builder, list : &[Node]) -> Val {
   for &arg in args {
     // TODO: check types
     let v = compile_expr_to_val(b, arg);
-    arg_values.push(v.r);
+    arg_values.push(v.id);
   }
   let e = {
     if info.c_function {
-      Expr::InvokeC(f.r, perm_slice_from_vec(arg_values))
+      Expr::InvokeC(f.id, perm_slice_from_vec(arg_values))
     }
     else {
-      Expr::Invoke(f.r, perm_slice_from_vec(arg_values))
+      Expr::Invoke(f.id, perm_slice_from_vec(arg_values))
     }
   };
   return push_expr(b, e, info.returns);
@@ -703,12 +684,12 @@ fn compile_list_expr(b : &mut Builder, node : Node) -> Option<Var> {
         if let [v1, v2] = tail {
           let v1 = compile_expr_to_val(b, *v1);
           let v2 = compile_expr_to_val(b, *v2);
-          let e = Expr::BinaryOp(op, v1.r, v2.r);
+          let e = Expr::BinaryOp(op, v1.id, v2.id);
           return Some(push_expr(b, e, t).to_var());
         }
         if let [v1] = tail {
           let v1 = compile_expr_to_val(b, *v1);
-          let e = Expr::UnaryOp(op, v1.r);
+          let e = Expr::UnaryOp(op, v1.id);
           return Some(push_expr(b, e, t).to_var());
         }
       }
@@ -745,7 +726,8 @@ fn quote(b : &mut Builder, quoted : Node) -> Val {
     let args = template_args.len() as u64;
     let data_ptr = {
       let t = types::array_type(&b.env.c, args * 8);
-      new_anonymous_local(b, t).get_address()
+      let v = new_val(b, t, true);
+      v.to_var().get_address(b)
     };
     // Codegen args
     let mut arg_values = vec![];
@@ -756,26 +738,29 @@ fn quote(b : &mut Builder, quoted : Node) -> Val {
     for (i, a) in arg_values.iter().enumerate() {
       let pointer = {
         let offset = push_expr(b, Expr::LiteralU64(i as u64 * 8), u64_tag);
-        push_expr(b, Expr::BinaryOp(Add, data_ptr.r, offset.r), u64_tag).r
+        push_expr(b, Expr::BinaryOp(Add, data_ptr.id, offset.id), u64_tag).id
       };
-      b.bc.instrs.push(Instr::Store{ pointer, value: a.r });
+      b.bc.instrs.push(Instr::Store{ pointer, value: a.id });
     }
     // slice struct
-    let slice_ptr = new_anonymous_local(b, b.env.c.slice_tag).get_address();
+    let slice_ptr = {
+      let v = new_val(b, b.env.c.slice_tag, true);
+      v.to_var().get_address(b)
+    };
     // store slice length
     let slice_length = push_expr(b, Expr::LiteralU64(args), u64_tag);
     b.bc.instrs.push(Instr::Store{
-      pointer: slice_ptr.r,
-      value: slice_length.r,
+      pointer: slice_ptr.id,
+      value: slice_length.id,
     });
     // store slice data
     let data_pointer = {
       let eight = push_expr(b, Expr::LiteralU64(8), u64_tag);
-      push_expr(b, Expr::BinaryOp(Add, slice_ptr.r, eight.r), u64_tag)
+      push_expr(b, Expr::BinaryOp(Add, slice_ptr.id, eight.id), u64_tag)
     };
     b.bc.instrs.push(Instr::Store{
-      pointer: data_pointer.r,
-      value: data_ptr.r,
+      pointer: data_pointer.id,
+      value: data_ptr.id,
     });
     // template quote reference
     let f = {
@@ -783,8 +768,8 @@ fn quote(b : &mut Builder, quoted : Node) -> Val {
       push_expr(b, Expr::Def(template_quote), u64_tag)
     };
     // call template_quote
-    let args = perm_slice(&[node_value.r, slice_ptr.r]);
-    push_expr(b, Expr::InvokeC(f.r, args), u64_tag)
+    let args = perm_slice(&[node_value.id, slice_ptr.id]);
+    push_expr(b, Expr::InvokeC(f.id, args), u64_tag)
   }
   else {
     node_value
