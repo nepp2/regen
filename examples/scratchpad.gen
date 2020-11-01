@@ -8,6 +8,7 @@
 ;; pointers
 
 (debug (ptr u64)) ;; (ptr u64)
+(debug (typeof (ptr u64))) ;; type
 
 (do
   (let p (cast (malloc 8) (ptr u64)))
@@ -17,16 +18,16 @@
   (debug (* (ref local))) ;; 1000
 )
 
-;; ;; tuples
+;; tuples
 
-;; (def pos (tuple i64 i64))
-;; (debug (typeof pos)) ;; type
+(def pos (tuple u64 u64))
+(debug (typeof pos)) ;; type
 
-;; (do
-;;   (let v (init pos 20 30))
-;;   (debug (. v 0)) ;; 20
-;;   (debug (. v 1)) ;; 30
-;; )
+(do
+  (let v (init pos 20 30))
+  (debug (. v 0)) ;; 20
+  (debug (. v 1)) ;; 30
+)
 
 ;; ;; structs
 

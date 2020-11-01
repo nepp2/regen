@@ -86,6 +86,13 @@ pub fn type_as_function(t : &TypeInfo) -> Option<&FunctionInfo> {
   None
 }
 
+pub fn type_as_tuple(t : &TypeInfo) -> Option<&TupleInfo> {
+  if let Kind::Tuple = t.kind {
+    return Some(unsafe { &*(t.info as *const TupleInfo) })
+  }
+  None
+}
+
 pub fn deref_pointer_type(t : &TypeInfo) -> Option<TypeHandle> {
   if let Kind::Pointer = t.kind {
     return Some(TypeHandle::from_u64(t.info))

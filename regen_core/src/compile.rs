@@ -129,8 +129,8 @@ fn find_local_in_scope(b : &mut Builder, name : Symbol)
 }
 
 fn local_to_var(b : &mut Builder, l : TypedLocal) -> Var {
-  let e = Expr::LocalId(l.l);
-  let r = new_register(b, l.t);
+  let e = Expr::Local(l.l);
+  let r = new_register(b, types::pointer_type(l.t));
   let var = Var { var_type: VarType::Locator(r), data_type: l.t };
   b.bc.instrs.push(Instr::Expr(r, e));
   var
@@ -370,6 +370,36 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       let e = Expr::LiteralU64(v);
       Some(push_expr(b, e, b.env.c.u64_tag).to_var())
     }
+    // Init
+    Command("init", ns) => {
+      let t = node_to_type(b, ns[0]).expect("expected type");
+      let field_nodes = &ns[1..];
+      let mut field_values = vec![];
+      for f in field_nodes {
+        // TODO: check types
+        field_values.push(compile_expr_to_val(b, *f).r);
+      }
+      let e = Expr::Init(t, perm_slice_from_vec(field_values));
+      Some(push_expr(b, e, t).to_var())
+    }
+    // field deref
+    Command(".", [tuple, index]) => {
+      let tup = compile_expr_to_var(b, *tuple);
+      let i = index.as_literal();
+      let t = types::type_as_tuple(&tup.data_type).unwrap().field_types[i as usize];
+      // match tup.var_type {
+      //   VarType::Locator(r) => {
+      //     let e = Expr::FieldIndex(r, i);
+      //     let fr = new_register(b, t);
+      //     b.bc.instrs.push(Instr::Expr(fr, e));
+      //     Some(Var { var_type: VarType::Locator(fr), data_type: t})
+      //   }
+      //   VarType::Value(r) => {
+          
+      //   }
+      // }
+      panic!()
+    }
     // quotation
     Command("#", [quoted]) => {
       Some(quote(b, *quoted).to_var())
@@ -532,6 +562,14 @@ fn node_to_type(b: &Builder, n : Node) -> Option<TypeHandle> {
       let inner = node_to_type(b, *inner_type).unwrap();
       Some(types::pointer_type(inner))
     }
+    // tuple type
+    Command("tuple", fields) => {
+      let mut field_types = vec![];
+      for f in fields {
+        field_types.push(node_to_type(b, *f).expect("invalid type"));
+      }
+      Some(types::tuple_type(field_types.as_slice()))
+    }
     _ => None,
   }
 }
@@ -586,6 +624,7 @@ fn compile_function_call(b : &mut Builder, list : &[Node]) -> Val {
   };
   let mut arg_values = vec![];
   for &arg in args {
+    // TODO: check types
     let v = compile_expr_to_val(b, arg);
     arg_values.push(v.r);
   }
@@ -692,6 +731,7 @@ fn find_template_arguments(n : Node, args : &mut Vec<Node>) {
 }
 
 /// Handles templating if necessary
+// TODO: reimplement with NodeBuilder!
 fn quote(b : &mut Builder, quoted : Node) -> Val {
   let u64_tag = b.env.c.u64_tag;
   let node_value = {
@@ -775,8 +815,13 @@ impl NodeBuilder {
 
 fn def_macro(b : &NodeBuilder, def_name : Node, value : Node) -> Node {
   b.list(&[
-    b.sym("env_insert"),
-    b.sym("env"),
-    b.list(&[b.sym("sym"), def_name]),
-    value, b.sym("u64")])
+    b.sym("do"),
+    b.list(&[b.sym("let"), b.sym("v"), value]),
+    b.list(&[
+      b.sym("env_insert"),
+      b.sym("env"),
+      b.list(&[b.sym("sym"), def_name]),
+      b.sym("v"),
+      b.list(&[b.sym("typeof"), b.sym("v")])])
+  ])
 }

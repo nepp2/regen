@@ -134,25 +134,32 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Expr> {
         write!(f, "{}", v),
       Expr::Def(sym) =>
         write!(f, "{}", sym),
-      Expr::LocalId(local) =>
+      Expr::Local(local) =>
         write!(f, "{}", bc.d(local)),
+      Expr::Init(t, fields) => {
+        write!(f, "(init {} ", t)?;
+        for fv in fields.as_slice() {
+          write!(f, "{} ", bc.d(fv))?;
+        }
+        write!(f, ")")
+      }
       Expr::BinaryOp(op, a, b) =>
         write!(f, "({} {} {})", op, bc.d(a), bc.d(b)),
       Expr::UnaryOp(op, a) =>
         write!(f, "({} {})", op, bc.d(a)),
       Expr::Invoke(reg, args) => {
-        write!(f, "(call {} (", bc.d(reg))?;
+        write!(f, "(call {} ", bc.d(reg))?;
         for arg in args.as_slice() {
-          write!(f, "{}, ", bc.d(arg))?;
+          write!(f, "{} ", bc.d(arg))?;
         }
-        write!(f, "))")
+        write!(f, ")")
       }
       Expr::InvokeC(reg, args) => {
-        write!(f, "(ccall {} (", bc.d(reg))?;
+        write!(f, "(ccall {} ", bc.d(reg))?;
         for arg in args.as_slice() {
-          write!(f, "{}, ", bc.d(arg))?;
+          write!(f, "{} ", bc.d(arg))?;
         }
-        write!(f, "))")
+        write!(f, ")")
       }
       Expr::Load(ptr) =>
         write!(f, "(load u{} {})",

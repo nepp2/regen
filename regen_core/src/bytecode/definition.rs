@@ -46,10 +46,13 @@ pub enum Operator {
   Add, Sub, Mul, Div, Rem, Eq, LT, GT, LTE, GTE, Not,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone)]
 pub enum Expr {
   Def(Symbol),
-  LocalId(LocalId),
+  Local(LocalId),
+  Init(TypeHandle, PermSlice<RegId>),
+  // FieldAddr { tuple_pointer: RegId, index: u64 },
+  // FieldVal { tuple_value: RegId, index: u64 },
   LiteralU64(u64),
   BinaryOp(Operator, RegId, RegId),
   UnaryOp(Operator, RegId),
