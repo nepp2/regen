@@ -33,22 +33,22 @@
   (debug (. v 1)) ;; 100
 )
 
-;; ;; structs
+;; structs
 
-;; (def pos2 (struct (x i64) (y i64)))
-;; (debug (typeof pos2)) ;; type
+(def pos2 (struct (x i64) (y i64)))
+(debug (typeof pos2)) ;; type
 
-;; (do
-;;   (let v (init pos2 40 50))
-;;   (debug (. v x)) ;; 40
-;;   (debug (. v y)) ;; 50
+(do
+  (let v (init pos2 40 50))
+  (debug (. v x)) ;; 40
+  (debug (. v y)) ;; 50
 
-;;   ;; field assignment
-;;   (debug (do 
-;;     (set (. v y) 100)
-;;     (. v y) ;; 100
-;;   ))
-;; )
+  ;; field assignment
+  (debug (do 
+    (set (. v y) 100)
+    (. v y) ;; 100
+  ))
+)
 
 ;; ;; strings
 
