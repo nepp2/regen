@@ -361,7 +361,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     }
     // Init
     Command("init", ns) => {
-      let t = node_to_type(b, ns[0]).expect("expected type");
+      let t = node_to_type(b, ns[0]);
       let field_nodes = &ns[1..];
       let mut field_values = vec![];
       for f in field_nodes {
@@ -372,12 +372,28 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       Some(push_expr(b, e, t).to_var())
     }
     // field deref
-    Command(".", [tuple, index]) => {
-      let tup = compile_expr_to_var(b, *tuple);
-      let i = index.as_literal();
-      let tuple_addr = compile_expr_to_var(b, *tuple).get_address(b).id;
-      let field_type = types::type_as_tuple(&tup.data_type).unwrap().field_types[i as usize];
-      let e = Expr::FieldIndex{ tuple_addr, index: i };
+    Command(".", [v, field]) => {
+      let tup = compile_expr_to_var(b, *v);
+      let tuple_addr = compile_expr_to_var(b, *v).get_address(b).id;
+      let (i, field_type) = {
+        if let Some(info) = types::type_as_tuple(&tup.data_type) {
+          let i = field.as_literal() as usize;
+          (i, info.field_types[i])
+        }
+        else if let Some(info) = types::type_as_struct(&tup.data_type) {
+          let name = field.as_symbol();
+          if let Some(i) = info.field_names.as_slice().iter().position(|n| *n == name) {
+            (i, info.field_types[i])
+          }
+          else {
+            panic!("type {} has no field {}", tup.data_type, field)
+          }
+        }
+        else {
+          panic!("expected tuple or struct")
+        }
+      };
+      let e = Expr::FieldIndex{ tuple_addr, index: i as u64 };
       let id = new_local(b, None, types::pointer_type(field_type), tup.mutable);
       b.bc.instrs.push(Instr::Expr(id, e));
       Some(Var { var_type: VarType::Locator(id), data_type: field_type, mutable: tup.mutable})
@@ -505,7 +521,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     // cast
     Command("cast", [value, type_tag]) => {
       let v = compile_expr_to_val(b, *value);
-      let t = node_to_type(b, *type_tag).unwrap();
+      let t = node_to_type(b, *type_tag);
       if v.data_type.size_of != t.size_of {
         panic!("can't cast {} to {}", v.data_type, t)
       }
@@ -513,7 +529,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       Some(cv.to_var())
     }
     _ => {
-      if let Some(type_tag) = node_to_type(b, node) {
+      if let Some(type_tag) = try_node_to_type(b, node) {
         let e = Expr::LiteralU64(Perm::to_u64(type_tag));
         return Some(push_expr(b, e, b.env.c.type_tag).to_var());
       }
@@ -533,26 +549,48 @@ fn symbol_to_type(b : &Builder, s : Symbol) -> Option<TypeHandle> {
   None
 }
 
-fn node_to_type(b: &Builder, n : Node) -> Option<TypeHandle> {
+fn try_node_to_type(b: &Builder, n : Node) -> Option<TypeHandle> {
   match node_shape(&n) {
     Atom(s) => {
       symbol_to_type(b, to_symbol(b.env.st, s))
     }
     // pointer type
     Command("ptr", [inner_type]) => {
-      let inner = node_to_type(b, *inner_type).unwrap();
+      let inner = node_to_type(b, *inner_type);
       Some(types::pointer_type(inner))
     }
     // tuple type
     Command("tuple", fields) => {
       let mut field_types = vec![];
       for f in fields {
-        field_types.push(node_to_type(b, *f).expect("invalid type"));
+        field_types.push(node_to_type(b, *f));
       }
-      Some(types::tuple_type(field_types.as_slice()))
+      Some(types::tuple_type(perm_slice_from_vec(field_types)))
+    }
+    // struct type
+    Command("struct", fields) => {
+      let mut field_names = vec![];
+      let mut field_types = vec![];
+      for &f in fields {
+        if let [name, type_tag] = f.children() {
+          field_names.push(name.as_symbol());
+          field_types.push(node_to_type(b, *type_tag));
+        }
+        else {
+          panic!("expected name/type pair")
+        }
+      }
+      Some(types::struct_type(
+        perm_slice_from_vec(field_names),
+        perm_slice_from_vec(field_types)))
     }
     _ => None,
   }
+}
+
+fn node_to_type(b: &Builder, n : Node) -> TypeHandle {
+  if let Some(t) = try_node_to_type(b, n) { t }
+  else { panic!("{} is not valid type", n) }
 }
 
 fn compile_block_expr(b : &mut Builder, nodes : &[Node]) -> Option<Val> {  

@@ -12,7 +12,7 @@ use bytecode::{
 };
 use compile::Function;
 use perm_alloc::PermSlice;
-use types::{TupleInfo, TypeHandle};
+use types::TypeHandle;
 
 pub type CompileExpression = fn(env : &Env, fun : Node) -> Function;
 
@@ -98,14 +98,30 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
               }
             }
             Expr::Init(t, field_vals) => {
-              let tuple = types::type_as_tuple(&t).expect("expected tuple");
-              frame.initialise_tuple(var, tuple, field_vals)
+              if let Some(info) = types::type_as_tuple(&t) {
+                frame.initialise_tuple(var, info.field_offsets, field_vals)
+              }
+              else if let Some(info) = types::type_as_struct(&t) {
+                frame.initialise_tuple(var, info.field_offsets, field_vals)
+              }
+              else {
+                panic!("expected tuple or struct")
+              }
             }
             Expr::FieldIndex { tuple_addr, index } => {
               let t = frame.local_type(tuple_addr);
               let t = types::deref_pointer_type(&t).unwrap();
-              let tuple = types::type_as_tuple(&t).unwrap();
-              let field_offset = tuple.field_offsets[index as usize];
+              let field_offset = {
+                if let Some(info) = types::type_as_tuple(&t) {
+                  info.field_offsets[index as usize]
+                }
+                else if let Some(info) = types::type_as_struct(&t) {
+                  info.field_offsets[index as usize]
+                }
+                else {
+                  panic!("expected tuple or struct")
+                }
+              };
               let tuple_ptr : *const u8 = frame.get_local(tuple_addr);
               let field_ptr = unsafe { tuple_ptr.add(field_offset as usize) };
               frame.set_local(var, &field_ptr);
@@ -250,10 +266,10 @@ impl StackPtr {
 
 impl Frame {
   
-  fn initialise_tuple(&self, l : LocalId, t : &TupleInfo, field_vals : PermSlice<LocalId>) {
+  fn initialise_tuple(&self, l : LocalId, field_offsets : PermSlice<u64>, field_vals : PermSlice<LocalId>) {
     let addr = self.local_addr(l) as *mut u8;
     for i in 0..field_vals.len() {
-      let offset = t.field_offsets[i];
+      let offset = field_offsets[i];
       let val_addr = self.local_addr(field_vals[i]);
       let byte_width = self.local_sizeof(l);
       unsafe {

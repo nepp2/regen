@@ -35,8 +35,8 @@
 
 ;; structs
 
-(def pos2 (struct (x i64) (y i64)))
-(debug (typeof pos2)) ;; type
+(def pos2 (struct (x u64) (y u64)))
+(debug pos2) ;; type
 
 (do
   (let v (init pos2 40 50))

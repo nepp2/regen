@@ -30,6 +30,9 @@ impl fmt::Display for DebugDisplay {
       Kind::Tuple => {
         write!(f, "tuple")
       }
+      Kind::Struct => {
+        write!(f, "struct")
+      }
       Kind::Function => {
         write!(f, "function")
       }

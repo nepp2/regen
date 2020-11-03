@@ -1,6 +1,7 @@
 /// Defines the an extensible TypeInfo data structure to be used by the
 /// compiler & interpreter.
 
+use crate::symbols::Symbol;
 use crate::perm_alloc::{Perm, PermSlice, perm, perm_slice, perm_slice_from_vec};
 use std::fmt;
 
@@ -19,13 +20,14 @@ pub enum Primitive {
 #[derive(Copy, Clone, PartialEq, Debug)]
 #[repr(u64)]
 pub enum Kind {
-  Primitive = 0,
-  Tuple = 1,
-  Function = 2,
-  Pointer = 3,
-  Array = 4,
-  Macro = 5,
-  Type = 6,
+  Primitive = 1,
+  Tuple = 2,
+  Struct = 3,
+  Function = 4,
+  Pointer = 5,
+  Array = 6,
+  Macro = 7,
+  Type = 8,
 }
 
 #[derive(Copy, Clone)]
@@ -39,6 +41,14 @@ pub struct TypeInfo {
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct TupleInfo {
+  pub field_types : PermSlice<TypeHandle>,
+  pub field_offsets : PermSlice<u64>,
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct StructInfo {
+  pub field_names : PermSlice<Symbol>,
   pub field_types : PermSlice<TypeHandle>,
   pub field_offsets : PermSlice<u64>,
 }
@@ -93,6 +103,13 @@ pub fn type_as_tuple(t : &TypeInfo) -> Option<&TupleInfo> {
   None
 }
 
+pub fn type_as_struct(t : &TypeInfo) -> Option<&StructInfo> {
+  if let Kind::Struct = t.kind {
+    return Some(unsafe { &*(t.info as *const StructInfo) })
+  }
+  None
+}
+
 pub fn deref_pointer_type(t : &TypeInfo) -> Option<TypeHandle> {
   if let Kind::Pointer = t.kind {
     return Some(TypeHandle::from_u64(t.info))
@@ -134,17 +151,30 @@ pub fn calculate_packed_field_offsets(field_types : &[TypeHandle]) -> (Vec<u64>,
   (fields, size)
 }
 
-pub fn tuple_type(fields : &[TypeHandle]) -> TypeHandle {
-  let (offsets, size) = calculate_packed_field_offsets(fields);
+pub fn tuple_type(field_types : PermSlice<TypeHandle>) -> TypeHandle {
+  let (offsets, size) = calculate_packed_field_offsets(field_types.as_slice());
   let info =
     Box::into_raw(Box::new(
       TupleInfo {
-        field_types: perm_slice(&fields),
+        field_types,
         field_offsets: perm_slice_from_vec(offsets),
       }
     ))
     as u64;
   new_type(Kind::Tuple, size, info)
+}
+
+pub fn struct_type(field_names : PermSlice<Symbol>, field_types : PermSlice<TypeHandle>) -> TypeHandle {
+  let (offsets, size) = calculate_packed_field_offsets(field_types.as_slice());
+  let info =
+    Box::into_raw(Box::new(
+      StructInfo {
+        field_names, field_types,
+        field_offsets: perm_slice_from_vec(offsets),
+      }
+    ))
+    as u64;
+  new_type(Kind::Struct, size, info)
 }
 
 pub fn array_type(c : &CoreTypes, bytes : u64) -> TypeHandle {
@@ -186,10 +216,10 @@ pub fn core_types() -> CoreTypes {
 
   let type_tag = new_type(Kind::Type, 8, 0);
 
-  let slice_tag = tuple_type(&[
+  let slice_tag = tuple_type(perm_slice(&[
     u64_tag,
     u64_tag,
-  ]);
+  ]));
 
   let mut array_types = vec![];
   for i in 2..20 {
@@ -231,7 +261,15 @@ impl fmt::Display for TypeInfo {
         write!(f, "(tup ")?;
         let i = unsafe { &*(self.info as *const TupleInfo) };
         for &t in i.field_types.as_slice() {
-          write!(f, "{}, ", t)?;
+          write!(f, "{} ", t)?;
+        }
+        write!(f, ")")?;
+      }
+      Kind::Struct => {
+        write!(f, "(struct ")?;
+        let info = unsafe { &*(self.info as *const StructInfo) };
+        for i in 0..info.field_names.len() {
+          write!(f, "({} {}) ", info.field_names[i], info.field_types[i])?;
         }
         write!(f, ")")?;
       }
@@ -239,7 +277,7 @@ impl fmt::Display for TypeInfo {
         let i = unsafe { &*(self.info as *const FunctionInfo) };
         write!(f, "(fn (")?;
         for &t in i.args.as_slice() {
-          write!(f, "{}, ", t)?;
+          write!(f, "{} ", t)?;
         }
         write!(f, ") {})", i.returns)?;
       }
@@ -265,9 +303,9 @@ impl fmt::Display for TypeInfo {
 fn test_types() {
   let c = core_types();
   let a =
-    tuple_type(&[c.u16_tag, c.u32_tag, c.u16_tag, c.u64_tag]);
+    tuple_type(perm_slice(&[c.u16_tag, c.u32_tag, c.u16_tag, c.u64_tag]));
   let b =
-    tuple_type(&[c.u16_tag, c.u16_tag, c.u32_tag, c.u64_tag]);
+    tuple_type(perm_slice(&[c.u16_tag, c.u16_tag, c.u32_tag, c.u64_tag]));
 
   if a.size_of != 24 { panic!("tuple A alignment incorrect") }
   if b.size_of != 16 { panic!("tuple B alignment incorrect") }
