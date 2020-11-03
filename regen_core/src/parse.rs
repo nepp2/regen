@@ -107,7 +107,13 @@ pub type Node = Perm<NodeInfo>;
 pub enum NodeContent {
   List(PermSlice<Node>),
   Sym(Symbol),
-  Literal(u64),
+  Literal(NodeLiteral),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum NodeLiteral {
+  U64(u64),
+  String(Perm<String>),
 }
 
 use NodeContent::*;
@@ -140,36 +146,36 @@ impl NodeInfo {
 
   pub fn perm_children(&self) -> PermSlice<Node> {
     match self.content {
-      NodeContent::List(l) => l,
+      List(l) => l,
       _ => perm_slice(&[]),
     }
   }
 
   pub fn is_list(&self) -> bool {
     match self.content {
-      NodeContent::List(_) => true,
+      List(_) => true,
       _ => false,
     }
   }
 
   pub fn as_symbol(&self) -> Symbol {
     match self.content {
-      NodeContent::Sym(s) => s,
+      Sym(s) => s,
       _ => panic!("expected symbol, found {}", self),
     }
   }
 
-  pub fn as_literal(&self) -> u64 {
+  pub fn as_literal_u64(&self) -> u64 {
     match self.content {
-      NodeContent::Literal(v) => v,
-      _ => panic!("expected literal"),
+      Literal(NodeLiteral::U64(v)) => v,
+      _ => panic!("expected literal u64"),
     }
   }
 }
 
 fn parse_atom(st : SymbolTable, s : &str) -> NodeContent {
   if let Ok(v) = s.parse::<u64>() {
-    Literal(v)
+    Literal(NodeLiteral::U64(v))
   }
   else {
     Sym(to_symbol(st, s))
@@ -225,7 +231,7 @@ fn parse_list(ns : &mut Vec<Node>, ts : &mut TokenStream) {
 pub enum NodeShape<'l> {
   Command(&'l str, &'l [Node]),
   Atom(&'l str),
-  Literal(u64),
+  Literal(NodeLiteral),
   Other,
 }
 
@@ -288,7 +294,14 @@ fn display_node(f: &mut fmt::Formatter<'_>, depth: usize, n : &NodeInfo, newline
   match n.content {
     List(children) => display_list(f, depth, children.as_slice(), newline),
     Sym(s) => write!(f, "{}", s),
-    Literal(l) => write!(f, "{}", l),
+    Literal(l) => display_literal(f, &l),
+  }
+}
+
+fn display_literal(f: &mut fmt::Formatter<'_>, l : &NodeLiteral) -> fmt::Result {
+  match l {
+    NodeLiteral::U64(v) => write!(f, "{}", v),
+    NodeLiteral::String(s) => write!(f, "\"{}\"", s),
   }
 }
 

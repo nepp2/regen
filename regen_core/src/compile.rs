@@ -14,7 +14,7 @@ use perm_alloc::{Perm, perm, perm_slice, perm_slice_from_vec};
 use symbols::{to_symbol, Symbol, SymbolTable};
 use env::Env;
 use parse::{
-  Node, NodeInfo, NodeContent,
+  Node, NodeInfo, NodeContent, NodeLiteral,
   node_shape, NodeShape, SrcLocation,
 };
 use NodeShape::*;
@@ -355,7 +355,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       Some(atom_to_value(b, node))
     }
     // Literal
-    Literal(v) => {
+    Literal(NodeLiteral::U64(v)) => {
       let e = Expr::LiteralU64(v);
       Some(push_expr(b, e, b.env.c.u64_tag).to_var())
     }
@@ -381,8 +381,8 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
           info.field_names.as_slice().iter().position(|n| *n == name)
             .expect("no such field") as u64
         }
-        NodeContent::Literal(i) => i,
-        NodeContent::List(_) => panic!("invalid field name"),
+        NodeContent::Literal(NodeLiteral::U64(i)) => i,
+        _ => panic!("invalid field name"),
       };
       let field_type = info.field_types[i as usize];
       let e = Expr::FieldIndex{ struct_addr, index: i };
@@ -425,7 +425,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     }
     // stack allocate
     Command("byte_chunk", [value]) => {
-      let array = types::array_type(&b.env.c, value.as_literal());
+      let array = types::array_type(&b.env.c, value.as_literal_u64());
       Some(new_val(b, array, false).to_var())
     }
     // let

@@ -75,6 +75,7 @@ pub struct CoreTypes {
   pub u8_tag : TypeHandle,
   pub void_tag : TypeHandle,
   pub slice_tag : TypeHandle,
+  pub string_tag : TypeHandle,
 
   pub array_types : Vec<TypeHandle>,
 
@@ -200,7 +201,12 @@ pub fn core_types() -> CoreTypes {
   let type_tag = new_type(Kind::Type, 8, 0);
 
   let slice_tag = tuple_type(perm_slice(&[
+    pointer_type(u8_tag),
     u64_tag,
+  ]));
+
+  let string_tag = tuple_type(perm_slice(&[
+    pointer_type(u8_tag),
     u64_tag,
   ]));
 
@@ -210,7 +216,8 @@ pub fn core_types() -> CoreTypes {
   }
 
   CoreTypes {
-    type_tag, u64_tag, u32_tag, u16_tag, u8_tag, void_tag, slice_tag,
+    type_tag, u64_tag, u32_tag, u16_tag,
+    u8_tag, void_tag, slice_tag, string_tag,
 
     array_types,
 
@@ -223,6 +230,7 @@ pub fn core_types() -> CoreTypes {
         ("u8", u8_tag),
         ("void", void_tag),
         ("slice", slice_tag),
+        ("string", string_tag),
       ],
   }
 }

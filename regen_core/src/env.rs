@@ -5,7 +5,7 @@ use crate::types;
 use types::{ TypeHandle, CoreTypes, core_types, c_function_type };
 use crate::parse;
 use crate::interpret;
-use parse::{Node, NodeInfo, NodeContent, SrcLocation, node_shape, NodeShape::*};
+use parse::{Node, NodeInfo, NodeContent, NodeLiteral, SrcLocation, node_shape, NodeShape::*};
 use crate::perm_alloc::{Perm, PermSlice, perm_slice, perm_slice_from_vec, perm};
 use std::collections::HashMap;
 
@@ -110,7 +110,7 @@ pub extern "C" fn node_from_symbol(s : Symbol) -> Node {
 pub extern "C" fn node_from_literal(v : u64) -> Node {
   let info = NodeInfo {
     loc: SrcLocation::zero(),
-    content: NodeContent::Literal(v),
+    content: NodeContent::Literal(NodeLiteral::U64(v)),
   };
   perm(info)
 }

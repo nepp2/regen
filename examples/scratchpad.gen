@@ -44,15 +44,15 @@
   (debug (. v y)) ;; 50
 
   ;; field assignment
+  (set (. v y) 300)
   (debug (do 
-    (set (. v y) 100)
-    (. v y) ;; 100
+    (. v y) ;; 300
   ))
 )
 
-;; ;; strings
+;; strings
 
-;; (debug (typeof "hello")) ;; (ptr u8)
+(debug (typeof "hello")) ;; (struct (ptr u8) u64)
 
 ;; ;; arrays
 
