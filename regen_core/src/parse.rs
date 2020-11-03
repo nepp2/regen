@@ -2,8 +2,10 @@
 
 use std::str::CharIndices;
 
-use crate::symbols::{Symbol, SymbolTable, to_symbol};
-use crate::perm_alloc::{perm, perm_slice, Perm, PermSlice};
+use crate::{symbols, perm_alloc, interop };
+use symbols::{Symbol, SymbolTable, to_symbol};
+use perm_alloc::{perm, perm_slice, Perm, PermSlice};
+use interop::RegenString;
 
 struct TokenStream<'l>{
   code : &'l str,
@@ -13,7 +15,7 @@ struct TokenStream<'l>{
   perm_code : Perm<String>,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 enum TokenType { Normal, Comment, Whitespace, Empty }
 use TokenType::*;
 
@@ -103,17 +105,17 @@ fn skip<'l>(ts : &mut TokenStream<'l>) {
 
 pub type Node = Perm<NodeInfo>;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub enum NodeContent {
   List(PermSlice<Node>),
   Sym(Symbol),
   Literal(NodeLiteral),
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub enum NodeLiteral {
   U64(u64),
-  String(Perm<String>),
+  String(Perm<RegenString>),
 }
 
 use NodeContent::*;
@@ -133,7 +135,7 @@ impl SrcLocation {
   }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct NodeInfo {
   pub loc : SrcLocation,
   pub content : NodeContent,
@@ -182,6 +184,20 @@ fn parse_atom(st : SymbolTable, s : &str) -> NodeContent {
   }
 }
 
+fn parse_string(ts : &mut TokenStream) -> NodeContent {
+  let start = ts.next_start;
+  let mut end = ts.next_start;
+  loop {
+    let t = peek(ts);
+    if t.0 == Empty { break }
+    skip(ts);
+    if t.0 == Normal && t.1 == "\"" { break }
+    end = ts.next_start;
+  }
+  let s = interop::from_string(ts.perm_code[start..end].to_string());
+  NodeContent::Literal(NodeLiteral::String(perm(s)))
+}
+
 /// parse sexp list
 fn parse_list(ns : &mut Vec<Node>, ts : &mut TokenStream) {
   let node_index = ns.len();
@@ -206,6 +222,13 @@ fn parse_list(ns : &mut Vec<Node>, ts : &mut TokenStream) {
               panic!("syntax error: unbalanced list");
             }
             skip(ts);
+          }
+          "\"" => {
+            let start = ts.next_start;
+            skip(ts);
+            let content = parse_string(ts);
+            let loc = SrcLocation { start, end: ts.next_start, code: ts.perm_code };
+            ns.push(perm(NodeInfo{ loc, content }));
           }
           _ => {
             let loc = SrcLocation {
@@ -301,7 +324,7 @@ fn display_node(f: &mut fmt::Formatter<'_>, depth: usize, n : &NodeInfo, newline
 fn display_literal(f: &mut fmt::Formatter<'_>, l : &NodeLiteral) -> fmt::Result {
   match l {
     NodeLiteral::U64(v) => write!(f, "{}", v),
-    NodeLiteral::String(s) => write!(f, "\"{}\"", s),
+    NodeLiteral::String(s) => write!(f, "\"{}\"", s.as_str()),
   }
 }
 

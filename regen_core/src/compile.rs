@@ -359,6 +359,11 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       let e = Expr::LiteralU64(v);
       Some(push_expr(b, e, b.env.c.u64_tag).to_var())
     }
+    // Literal
+    Literal(NodeLiteral::String(s)) => {
+      let e = Expr::Literal(b.env.c.string_tag, s.ptr as *const ());
+      Some(push_expr(b, e, b.env.c.string_tag).to_var())
+    }
     // Init
     Command("init", ns) => {
       let t = node_to_type(b, ns[0]);

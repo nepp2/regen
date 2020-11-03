@@ -40,6 +40,7 @@ pub enum Expr {
   Init(TypeHandle, PermSlice<LocalId>),
   FieldIndex { struct_addr : LocalId, index : u64 },
   LiteralU64(u64),
+  Literal(TypeHandle, *const ()),
   BinaryOp(Operator, LocalId, LocalId),
   UnaryOp(Operator, LocalId),
   Invoke(LocalId, PermSlice<LocalId>),

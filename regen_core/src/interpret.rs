@@ -113,6 +113,9 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
             Expr::LiteralU64(val) => {
               frame.set_local(var, &val);
             }
+            Expr::Literal(_t, p) => {
+              frame.set_local_from_ptr(var, p);
+            }
             Expr::BinaryOp(op, a, b) => {
               let a : u64 = frame.get_local(a);
               let b : u64  = frame.get_local(b);
@@ -301,6 +304,15 @@ impl Frame {
     unsafe {
       store(
         src as *const (),
+        self.local_addr(dest),
+        self.local_sizeof(dest) as usize);
+    }
+  }
+
+  fn set_local_from_ptr(&self, dest : LocalId, src : *const ()) {
+    unsafe {
+      store(
+        src,
         self.local_addr(dest),
         self.local_sizeof(dest) as usize);
     }

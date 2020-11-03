@@ -114,6 +114,8 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Expr> {
     match self.x {
       Expr::LiteralU64(v) =>
         write!(f, "{}", v),
+      Expr::Literal(t, _v) =>
+        write!(f, "(literal {})", t),
       Expr::Def(sym) =>
         write!(f, "{}", sym),
       Expr::LocalAddr(local) =>

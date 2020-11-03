@@ -251,7 +251,7 @@ impl fmt::Display for TypeInfo {
       Kind::Struct => {
         write!(f, "(struct ")?;
         let info = unsafe { &*(self.info as *const StructInfo) };
-        for i in 0..info.field_names.len() {
+        for i in 0..info.field_types.len() {
           if let Some(name) = info.field_names.as_slice().get(i) {
             write!(f, "({} {}) ", name, info.field_types[i])?;
           }

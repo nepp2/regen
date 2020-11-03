@@ -8,6 +8,7 @@ mod bytecode;
 mod compile;
 pub mod interpret;
 mod ffi;
+mod interop;
 pub mod types;
 pub mod debug;
 
