@@ -27,9 +27,6 @@ impl fmt::Display for DebugDisplay {
             write!(f, "void"),
         }
       }
-      Kind::Tuple => {
-        write!(f, "tuple")
-      }
       Kind::Struct => {
         write!(f, "struct")
       }

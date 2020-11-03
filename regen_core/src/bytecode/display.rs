@@ -125,8 +125,8 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Expr> {
         }
         write!(f, ")")
       }
-      Expr::FieldIndex{ tuple_addr, index } =>
-        write!(f, "(. {} {})", bc.d(tuple_addr), index),
+      Expr::FieldIndex{ struct_addr, index } =>
+        write!(f, "(. {} {})", bc.d(struct_addr), index),
       Expr::BinaryOp(op, a, b) =>
         write!(f, "({} {} {})", op, bc.d(a), bc.d(b)),
       Expr::UnaryOp(op, a) =>

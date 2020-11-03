@@ -373,30 +373,22 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     }
     // field deref
     Command(".", [v, field]) => {
-      let tup = compile_expr_to_var(b, *v);
-      let tuple_addr = compile_expr_to_var(b, *v).get_address(b).id;
-      let (i, field_type) = {
-        if let Some(info) = types::type_as_tuple(&tup.data_type) {
-          let i = field.as_literal() as usize;
-          (i, info.field_types[i])
+      let struct_val = compile_expr_to_var(b, *v);
+      let struct_addr = compile_expr_to_var(b, *v).get_address(b).id;
+      let info = types::type_as_struct(&struct_val.data_type).expect("expected struct");
+      let i = match field.content {
+        NodeContent::Sym(name) => {
+          info.field_names.as_slice().iter().position(|n| *n == name)
+            .expect("no such field") as u64
         }
-        else if let Some(info) = types::type_as_struct(&tup.data_type) {
-          let name = field.as_symbol();
-          if let Some(i) = info.field_names.as_slice().iter().position(|n| *n == name) {
-            (i, info.field_types[i])
-          }
-          else {
-            panic!("type {} has no field {}", tup.data_type, field)
-          }
-        }
-        else {
-          panic!("expected tuple or struct")
-        }
+        NodeContent::Literal(i) => i,
+        NodeContent::List(_) => panic!("invalid field name"),
       };
-      let e = Expr::FieldIndex{ tuple_addr, index: i as u64 };
-      let id = new_local(b, None, types::pointer_type(field_type), tup.mutable);
+      let field_type = info.field_types[i as usize];
+      let e = Expr::FieldIndex{ struct_addr, index: i };
+      let id = new_local(b, None, types::pointer_type(field_type), struct_val.mutable);
       b.bc.instrs.push(Instr::Expr(id, e));
-      Some(Var { var_type: VarType::Locator(id), data_type: field_type, mutable: tup.mutable})
+      Some(Var { var_type: VarType::Locator(id), data_type: field_type, mutable: struct_val.mutable})
     }
     // quotation
     Command("#", [quoted]) => {

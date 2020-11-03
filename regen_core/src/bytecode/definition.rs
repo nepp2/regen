@@ -38,7 +38,7 @@ pub enum Expr {
   Def(Symbol),
   LocalAddr(LocalId),
   Init(TypeHandle, PermSlice<LocalId>),
-  FieldIndex { tuple_addr : LocalId, index : u64 },
+  FieldIndex { struct_addr : LocalId, index : u64 },
   LiteralU64(u64),
   BinaryOp(Operator, LocalId, LocalId),
   UnaryOp(Operator, LocalId),

@@ -21,13 +21,12 @@ pub enum Primitive {
 #[repr(u64)]
 pub enum Kind {
   Primitive = 1,
-  Tuple = 2,
+  Type = 2,
   Struct = 3,
   Function = 4,
   Pointer = 5,
   Array = 6,
   Macro = 7,
-  Type = 8,
 }
 
 #[derive(Copy, Clone)]
@@ -96,13 +95,6 @@ pub fn type_as_function(t : &TypeInfo) -> Option<&FunctionInfo> {
   None
 }
 
-pub fn type_as_tuple(t : &TypeInfo) -> Option<&TupleInfo> {
-  if let Kind::Tuple = t.kind {
-    return Some(unsafe { &*(t.info as *const TupleInfo) })
-  }
-  None
-}
-
 pub fn type_as_struct(t : &TypeInfo) -> Option<&StructInfo> {
   if let Kind::Struct = t.kind {
     return Some(unsafe { &*(t.info as *const StructInfo) })
@@ -152,16 +144,7 @@ pub fn calculate_packed_field_offsets(field_types : &[TypeHandle]) -> (Vec<u64>,
 }
 
 pub fn tuple_type(field_types : PermSlice<TypeHandle>) -> TypeHandle {
-  let (offsets, size) = calculate_packed_field_offsets(field_types.as_slice());
-  let info =
-    Box::into_raw(Box::new(
-      TupleInfo {
-        field_types,
-        field_offsets: perm_slice_from_vec(offsets),
-      }
-    ))
-    as u64;
-  new_type(Kind::Tuple, size, info)
+  struct_type(perm_slice(&[]), field_types)
 }
 
 pub fn struct_type(field_names : PermSlice<Symbol>, field_types : PermSlice<TypeHandle>) -> TypeHandle {
@@ -257,19 +240,17 @@ impl fmt::Display for TypeInfo {
         };
         write!(f, "{}", s)?;
       }
-      Kind::Tuple => {
-        write!(f, "(tup ")?;
-        let i = unsafe { &*(self.info as *const TupleInfo) };
-        for &t in i.field_types.as_slice() {
-          write!(f, "{} ", t)?;
-        }
-        write!(f, ")")?;
-      }
       Kind::Struct => {
         write!(f, "(struct ")?;
         let info = unsafe { &*(self.info as *const StructInfo) };
         for i in 0..info.field_names.len() {
-          write!(f, "({} {}) ", info.field_names[i], info.field_types[i])?;
+          if let Some(name) = info.field_names.as_slice().get(i) {
+            write!(f, "({} {}) ", name, info.field_types[i])?;
+          }
+          else {
+            write!(f, "{} ", info.field_types[i])?;
+          }
+          
         }
         write!(f, ")")?;
       }
