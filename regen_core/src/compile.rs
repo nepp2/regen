@@ -284,19 +284,18 @@ fn compile_if_else(b : &mut Builder, cond : Node, then_expr : Node, else_expr : 
   let cond = compile_expr_to_val(b, cond).id;
   b.bc.instrs.push(Instr::CJump{ cond, then_seq, else_seq });
   set_current_sequence(b, then_seq);
-  let then_result =
-    compile_block_expr(b, then_expr.children());
+  let then_result = compile_expr(b, then_expr);
   if let Some(v) = then_result {
     let l = new_val(b, v.data_type, true).to_var();
     result_local = Some(l);
+    let v = v.to_val(b);
     compile_set_local(b, l, v);
   }
   b.bc.instrs.push(Instr::Jump(exit_seq));
   set_current_sequence(b, else_seq);
-  let else_result =
-    compile_block_expr(b, else_expr.children());
+  let else_result = compile_expr(b, else_expr);
   if let Some(l) = result_local {
-    let v = else_result.expect("expected block expression");
+    let v = else_result.expect("expected block expression").to_val(b);
     compile_set_local(b, l, v);
   }
   b.bc.instrs.push(Instr::Jump(exit_seq));

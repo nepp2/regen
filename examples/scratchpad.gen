@@ -66,9 +66,9 @@
   (debug (index a 2)) ;; 4
 )
 
-;; ;; conditions
+;; conditions
 
-;; (debug (if (> 3 5) 3 5)) ;; 5
+(debug (if (> 3 5) 3 5)) ;; 5
 
 ;; ;; functions
 
