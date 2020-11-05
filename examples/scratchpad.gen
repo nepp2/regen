@@ -70,11 +70,11 @@
 
 (debug (if (> 3 5) 3 5)) ;; 5
 
-;; ;; functions
+;; functions
 
-;; (def add (fun (a i64) (b i64)
-;;   (+ a b)
-;; ))
+(def add (fun ((a u64) (b u64)) u64
+  (+ a b)
+))
 
 ;; (debug (typeof add)) ;; (fn (i64 i64) i64)
 

@@ -454,9 +454,9 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       compile_expr(b, def_node)
     }
     // fun
-    Command("fun", [arg_nodes, body]) => {
+    Command("fun", [arg_nodes, return_type, body]) => {
       let f = compile_function(
-        b.env, arg_nodes.children(), body.children());
+        b.env, arg_nodes.children(), &[*body]);
       let r = new_val(b, f.t, false);
       let f_addr = Box::into_raw(Box::new(f)) as u64;
       b.bc.instrs.push(Instr::Expr(r.id, Expr::LiteralU64(f_addr)));
