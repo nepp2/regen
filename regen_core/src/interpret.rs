@@ -97,7 +97,13 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
                 panic!("Symbol '{}' not present in env", sym);
               }
             }
-            Expr::Init(t, field_vals) => {
+            Expr::Array(element_vals) => {
+              let t = frame.local_type(var);
+              let info = types::type_as_array(&t).expect("expected array");
+              frame.initialise_array(var, info.inner, element_vals)
+            }
+            Expr::Init(field_vals) => {
+              let t = frame.local_type(var);
               let info = types::type_as_struct(&t).expect("expected struct");
               frame.initialise_struct(var, info.field_offsets, field_vals)
             }
@@ -177,6 +183,16 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
               let bytes = frame.local_sizeof(var) as usize;
               unsafe { store(p as *mut (), vaddr, bytes) }
             }
+            Expr::PtrOffset{ ptr, offset } => {
+              let sizeof = frame.local_sizeof(var);
+              let offset : u64 = frame.get_local(offset);
+              let p : u64 = frame.get_local(ptr);
+              frame.set_local(var, &(p + (sizeof * offset)));
+            }
+            Expr::BitCopy(v) => {
+              let v_addr = frame.local_addr(v);
+              frame.set_local_from_ptr(var, v_addr);
+            }
           };
         }
         Instr::Store{ pointer, value } => {
@@ -252,7 +268,19 @@ impl StackPtr {
 }
 
 impl Frame {
-  
+
+  fn initialise_array(&self, l : LocalId, element_type : TypeHandle, element_vals : PermSlice<LocalId>) {
+    let addr = self.local_addr(l) as *mut u8;
+    let byte_width = element_type.size_of as usize;
+    for i in 0..element_vals.len() {
+      let val_addr = self.local_addr(element_vals[i]);
+      unsafe {
+        let dest = addr.add(byte_width * i);
+        store(val_addr, dest as *mut (), byte_width as usize);
+      }
+    }
+  }
+
   fn initialise_struct(&self, l : LocalId, field_offsets : PermSlice<u64>, field_vals : PermSlice<LocalId>) {
     let addr = self.local_addr(l) as *mut u8;
     for i in 0..field_vals.len() {

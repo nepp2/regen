@@ -4,6 +4,8 @@ use super::definition::*;
 
 use std::fmt;
 
+use crate::types::TypeHandle;
+
 impl fmt::Display for FunctionBytecode {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     writeln!(f, ";; Frame size: {}", self.frame_bytes)?;
@@ -65,10 +67,12 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Instr> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let bc = self.bc;
     match self.x {
-      Instr::Expr(reg, expr) =>
+      Instr::Expr(reg, expr) => {
+        let t = bc.locals[reg.id].t;
         write!(f, "(let {} {})",
           bc.d(reg),
-          bc.d(expr))?,
+          bc.d(&(t, *expr)))?
+      }
       Instr::Store{ pointer, value } =>
         write!(f, "(store {} {})",
           bc.d(pointer),
@@ -108,10 +112,10 @@ impl fmt::Display for Operator {
   }
 }
 
-impl <'l> fmt::Display for BytecodeDisplay<'l, Expr> {
+impl <'l> fmt::Display for BytecodeDisplay<'l, (TypeHandle, Expr)> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let bc = self.bc;
-    match self.x {
+    match &self.x.1 {
       Expr::LiteralU64(v) =>
         write!(f, "{}", v),
       Expr::Literal(t, _v) =>
@@ -120,8 +124,15 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Expr> {
         write!(f, "{}", sym),
       Expr::LocalAddr(local) =>
         write!(f, "(ref {})", bc.d(local)),
-      Expr::Init(t, fields) => {
-        write!(f, "(init {} ", t)?;
+      Expr::Array(elements) => {
+        write!(f, "(array {} ", self.x.0)?;
+        for ev in elements.as_slice() {
+          write!(f, "{} ", bc.d(ev))?;
+        }
+        write!(f, ")")
+      }
+      Expr::Init(fields) => {
+        write!(f, "(init {} ", self.x.0)?;
         for fv in fields.as_slice() {
           write!(f, "{} ", bc.d(fv))?;
         }
@@ -148,9 +159,14 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, Expr> {
         write!(f, ")")
       }
       Expr::Load(ptr) =>
-        write!(f, "(load u{} {})",
+        write!(f, "(load {} {})",
           bc.locals[ptr.id].t,
           bc.d(ptr)),
+      Expr::PtrOffset {ptr, offset } => {
+        write!(f, "(ptr_offset {} {})", bc.d(ptr), bc.d(offset))
+      }
+      Expr::BitCopy(v) =>
+        write!(f, "(bitcopy {})", bc.d(v)),
     }
   }
 }

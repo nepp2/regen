@@ -39,9 +39,9 @@ pub struct TypeInfo {
 
 #[derive(Copy, Clone)]
 #[repr(C)]
-pub struct TupleInfo {
-  pub field_types : PermSlice<TypeHandle>,
-  pub field_offsets : PermSlice<u64>,
+pub struct ArrayInfo {
+  pub inner : TypeHandle,
+  pub length : u64,
 }
 
 #[derive(Copy, Clone)]
@@ -77,8 +77,6 @@ pub struct CoreTypes {
   pub slice_tag : TypeHandle,
   pub string_tag : TypeHandle,
 
-  pub array_types : Vec<TypeHandle>,
-
   pub core_types : Vec<(&'static str, TypeHandle)>,
 }
 
@@ -99,6 +97,13 @@ pub fn type_as_function(t : &TypeInfo) -> Option<&FunctionInfo> {
 pub fn type_as_struct(t : &TypeInfo) -> Option<&StructInfo> {
   if let Kind::Struct = t.kind {
     return Some(unsafe { &*(t.info as *const StructInfo) })
+  }
+  None
+}
+
+pub fn type_as_array(t : &TypeInfo) -> Option<&ArrayInfo> {
+  if let Kind::Array = t.kind {
+    return Some(unsafe { &*(t.info as *const ArrayInfo) })
   }
   None
 }
@@ -161,13 +166,9 @@ pub fn struct_type(field_names : PermSlice<Symbol>, field_types : PermSlice<Type
   new_type(Kind::Struct, size, info)
 }
 
-pub fn array_type(c : &CoreTypes, bytes : u64) -> TypeHandle {
-  for t in &c.array_types {
-    if t.size_of == bytes {
-      return *t;
-    }
-  }
-  new_type(Kind::Array, bytes, 0)
+pub fn array_type(inner : TypeHandle, length : u64) -> TypeHandle {
+  let info = Box::into_raw(Box::new(ArrayInfo { inner, length })) as u64;
+  new_type(Kind::Array, length * inner.size_of, info)
 }
 
 pub fn pointer_type(inner : TypeHandle) -> TypeHandle {
@@ -218,8 +219,6 @@ pub fn core_types() -> CoreTypes {
   CoreTypes {
     type_tag, u64_tag, u32_tag, u16_tag,
     u8_tag, void_tag, slice_tag, string_tag,
-
-    array_types,
 
     core_types:
       vec![
@@ -275,7 +274,8 @@ impl fmt::Display for TypeInfo {
         write!(f, "(ptr {})", t)?;
       }
       Kind::Array => {
-        write!(f, "(array {})", self.size_of)?;
+        let t = unsafe { &*(self.info as *const ArrayInfo) };
+        write!(f, "(sized_array {} {})", t.inner, t.length)?;
       }
       Kind::Macro => {
         write!(f, "macro")?;

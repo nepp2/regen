@@ -54,15 +54,17 @@
 
 (debug (typeof "hello")) ;; (struct (ptr u8) u64)
 
-;; ;; arrays
+;; arrays
 
-;; (do
-;;   (let a (array 1 2 3 4))
-;;   (debug (typeof a)) ;; (array u64 4)
-;;   (debug (index a 0)) ;; 1
-;;   (let p (ref (index a 0)))
-;;   (debug (index p 3)) ;; 4
-;; )
+(do
+  (let a (array 1 2 3 4))
+  (debug (typeof a)) ;; (sized_array u64 4)
+  (debug (index a 0)) ;; 1
+  (debug (index a 3)) ;; 4
+  (let p (ref (index a 2)))
+  (set (* p) 300)
+  (debug (index a 2)) ;; 4
+)
 
 ;; ;; conditions
 

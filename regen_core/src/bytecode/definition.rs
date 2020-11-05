@@ -37,7 +37,8 @@ pub enum Operator {
 pub enum Expr {
   Def(Symbol),
   LocalAddr(LocalId),
-  Init(TypeHandle, PermSlice<LocalId>),
+  Init(PermSlice<LocalId>),
+  Array(PermSlice<LocalId>),
   FieldIndex { struct_addr : LocalId, index : u64 },
   LiteralU64(u64),
   Literal(TypeHandle, *const ()),
@@ -46,6 +47,8 @@ pub enum Expr {
   Invoke(LocalId, PermSlice<LocalId>),
   InvokeC(LocalId, PermSlice<LocalId>),
   Load(LocalId),
+  PtrOffset { ptr: LocalId, offset: LocalId },
+  BitCopy(LocalId),
 }
 
 #[derive(Copy, Clone)]

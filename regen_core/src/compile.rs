@@ -332,39 +332,87 @@ fn compile_expr_to_val(b : &mut Builder, node : Node) -> Val {
   var.to_val(b)
 }
 
+fn compile_bitcast(b : &mut Builder, v : Val, t : TypeHandle) -> Val {
+  if v.data_type.size_of != t.size_of {
+    panic!("can't cast {} to {}", v.data_type, t)
+  }
+  push_expr(b, Expr::BitCopy(v.id), t)
+}
+
 fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
   match node_shape(&node) {
-    // Return
+    // return
     Atom("return") => {
       b.bc.instrs.push(Instr::Return(None));
       None
     }
-    // Break
+    // break
     Atom("break") => {
       let break_to = b.label_stack.last().unwrap().exit_seq;
       b.bc.instrs.push(Instr::Jump(break_to));
       None
     }
-    // Repeat
+    // repeat
     Atom("repeat") => {
       let loop_back_to = b.label_stack.last().unwrap().entry_seq;
       b.bc.instrs.push(Instr::Jump(loop_back_to));
       None
     }
-    Atom(_) => {
-      Some(atom_to_value(b, node))
-    }
-    // Literal
-    Literal(NodeLiteral::U64(v)) => {
-      let e = Expr::LiteralU64(v);
+    // true
+    Atom("true") => {
+      let e = Expr::LiteralU64(1);
       Some(push_expr(b, e, b.env.c.u64_tag).to_var())
     }
-    // Literal
-    Literal(NodeLiteral::String(s)) => {
-      let e = Expr::Literal(b.env.c.string_tag, s.ptr as *const ());
-      Some(push_expr(b, e, b.env.c.string_tag).to_var())
+    // false
+    Atom("false") => {
+      let e = Expr::LiteralU64(0);
+      Some(push_expr(b, e, b.env.c.u64_tag).to_var())
     }
-    // Init
+    // symbol reference (local var or global def)
+    Atom(_) => {
+      Some(compile_symbol_reference(b, node))
+    }
+    // literal
+    Literal(l) => {
+      match l {
+        NodeLiteral::U64(v) => {
+          let e = Expr::LiteralU64(v);
+          Some(push_expr(b, e, b.env.c.u64_tag).to_var())
+        }
+        NodeLiteral::String(s) => {
+          let e = Expr::Literal(b.env.c.string_tag, s.ptr as *const ());
+          Some(push_expr(b, e, b.env.c.string_tag).to_var())
+        }
+      }
+    }
+    // array
+    Command("array", elements) => {
+      let e = compile_expr_to_val(b, elements[0]);
+      let element_type = e.data_type;
+      let mut element_values = vec![e.id];
+      for e in &elements[1..] {
+        let v = compile_expr_to_val(b, *e);
+        // TODO: check type
+        element_values.push(v.id);
+      }
+      let t = types::array_type(element_type, elements.len() as u64);
+      let e = Expr::Array(perm_slice_from_vec(element_values));
+      Some(push_expr(b, e, t).to_var())
+    }
+    // array index
+    Command("index", [v, index]) => {
+      let array_val = compile_expr_to_var(b, *v);
+      let array_ptr = array_val.get_address(b);
+      let info = types::type_as_array(&array_val.data_type).expect("expected array");
+      let element_ptr_type = types::pointer_type(info.inner);
+      let ptr = compile_bitcast(b, array_ptr, element_ptr_type).id;
+      let offset = compile_expr_to_val(b, *index).id;
+      let e = Expr::PtrOffset { ptr, offset };
+      let id = new_local(b, None, element_ptr_type, array_val.mutable);
+      b.bc.instrs.push(Instr::Expr(id, e));
+      Some(Var { var_type: VarType::Locator(id), data_type: info.inner, mutable: array_val.mutable})
+    }
+    // init
     Command("init", ns) => {
       let t = node_to_type(b, ns[0]);
       let field_nodes = &ns[1..];
@@ -373,13 +421,13 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
         // TODO: check types
         field_values.push(compile_expr_to_val(b, *f).id);
       }
-      let e = Expr::Init(t, perm_slice_from_vec(field_values));
+      let e = Expr::Init(perm_slice_from_vec(field_values));
       Some(push_expr(b, e, t).to_var())
     }
     // field deref
     Command(".", [v, field]) => {
       let struct_val = compile_expr_to_var(b, *v);
-      let struct_addr = compile_expr_to_var(b, *v).get_address(b).id;
+      let struct_addr = struct_val.get_address(b).id;
       let info = types::type_as_struct(&struct_val.data_type).expect("expected struct");
       let i = match field.content {
         NodeContent::Sym(name) => {
@@ -397,7 +445,8 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     }
     // quotation
     Command("#", [quoted]) => {
-      Some(quote(b, *quoted).to_var())
+      // Some(quote(b, *quoted).to_var())
+      panic!()
     }
     // def
     Command("def", [def_name, value]) => {
@@ -420,18 +469,6 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       let value = compile_expr_to_val(b, *value);
       compile_set_local(b, dest, value);
       None
-    }
-    // store var
-    Command("store", [pointer, value]) => {
-      let pointer = compile_expr_to_val(b, *pointer).id;
-      let value = compile_expr_to_val(b, *value).id;
-      b.bc.instrs.push(Instr::Store{ pointer, value });
-      None
-    }
-    // stack allocate
-    Command("byte_chunk", [value]) => {
-      let array = types::array_type(&b.env.c, value.as_literal_u64());
-      Some(new_val(b, array, false).to_var())
     }
     // let
     Command("let", [var_name, value]) => {
@@ -517,13 +554,9 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     }
     // cast
     Command("cast", [value, type_tag]) => {
-      let v = compile_expr_to_val(b, *value);
       let t = node_to_type(b, *type_tag);
-      if v.data_type.size_of != t.size_of {
-        panic!("can't cast {} to {}", v.data_type, t)
-      }
-      let cv = Val { id: v.id, data_type: t, mutable: v.mutable };
-      Some(cv.to_var())
+      let v = compile_expr_to_val(b, *value);
+      Some(compile_bitcast(b, v, t).to_var())
     }
     _ => {
       if let Some(type_tag) = try_node_to_type(b, node) {
@@ -600,20 +633,8 @@ fn compile_block_expr(b : &mut Builder, nodes : &[Node]) -> Option<Val> {
   v.map(|v| v.to_val(b))
 }
 
-fn atom_to_value(b : &mut Builder, node : Node) -> Var {
+fn compile_symbol_reference(b : &mut Builder, node : Node) -> Var {
   let sym = node.as_symbol();
-  // boolean literals
-  match sym.as_str() {
-    "true" => {
-      let e = Expr::LiteralU64(1);
-      return push_expr(b, e, b.env.c.u64_tag).to_var();
-    }
-    "false" => {
-      let e = Expr::LiteralU64(0);
-      return push_expr(b, e, b.env.c.u64_tag).to_var();
-    }
-    _ => (),
-  }
   // Look for local
   if let Some(r) = find_local_in_scope(b, sym) {
     return r.to_var();
@@ -748,68 +769,68 @@ fn find_template_arguments(n : Node, args : &mut Vec<Node>) {
 
 /// Handles templating if necessary
 // TODO: reimplement with NodeBuilder!
-fn quote(b : &mut Builder, quoted : Node) -> Val {
-  let u64_tag = b.env.c.u64_tag;
-  let node_value = {
-    let e = Expr::LiteralU64(Perm::to_ptr(quoted) as u64);
-    push_expr(b, e, u64_tag)
-  };
-  let mut template_args = vec![];
-  find_template_arguments(quoted, &mut template_args);
-  if template_args.len() > 0 {
-    use Operator::*;
-    let args = template_args.len() as u64;
-    let data_ptr = {
-      let t = types::array_type(&b.env.c, args * 8);
-      let v = new_val(b, t, true);
-      v.to_var().get_address(b)
-    };
-    // Codegen args
-    let mut arg_values = vec![];
-    for a in template_args {
-      arg_values.push(compile_expr_to_val(b, a));
-    }
-    // Store args
-    for (i, a) in arg_values.iter().enumerate() {
-      let pointer = {
-        let offset = push_expr(b, Expr::LiteralU64(i as u64 * 8), u64_tag);
-        push_expr(b, Expr::BinaryOp(Add, data_ptr.id, offset.id), u64_tag).id
-      };
-      b.bc.instrs.push(Instr::Store{ pointer, value: a.id });
-    }
-    // slice struct
-    let slice_ptr = {
-      let v = new_val(b, b.env.c.slice_tag, true);
-      v.to_var().get_address(b)
-    };
-    // store slice length
-    let slice_length = push_expr(b, Expr::LiteralU64(args), u64_tag);
-    b.bc.instrs.push(Instr::Store{
-      pointer: slice_ptr.id,
-      value: slice_length.id,
-    });
-    // store slice data
-    let data_pointer = {
-      let eight = push_expr(b, Expr::LiteralU64(8), u64_tag);
-      push_expr(b, Expr::BinaryOp(Add, slice_ptr.id, eight.id), u64_tag)
-    };
-    b.bc.instrs.push(Instr::Store{
-      pointer: data_pointer.id,
-      value: data_ptr.id,
-    });
-    // template quote reference
-    let f = {
-      let template_quote = to_symbol(b.env.st, "template_quote");
-      push_expr(b, Expr::Def(template_quote), u64_tag)
-    };
-    // call template_quote
-    let args = perm_slice(&[node_value.id, slice_ptr.id]);
-    push_expr(b, Expr::InvokeC(f.id, args), u64_tag)
-  }
-  else {
-    node_value
-  }
-}
+// fn quote(b : &mut Builder, quoted : Node) -> Val {
+//   let u64_tag = b.env.c.u64_tag;
+//   let node_value = {
+//     let e = Expr::LiteralU64(Perm::to_ptr(quoted) as u64);
+//     push_expr(b, e, u64_tag)
+//   };
+//   let mut template_args = vec![];
+//   find_template_arguments(quoted, &mut template_args);
+//   if template_args.len() > 0 {
+//     use Operator::*;
+//     let args = template_args.len() as u64;
+//     let data_ptr = {
+//       let t = types::array_type(&b.env.c, args * 8);
+//       let v = new_val(b, t, true);
+//       v.to_var().get_address(b)
+//     };
+//     // Codegen args
+//     let mut arg_values = vec![];
+//     for a in template_args {
+//       arg_values.push(compile_expr_to_val(b, a));
+//     }
+//     // Store args
+//     for (i, a) in arg_values.iter().enumerate() {
+//       let pointer = {
+//         let offset = push_expr(b, Expr::LiteralU64(i as u64 * 8), u64_tag);
+//         push_expr(b, Expr::BinaryOp(Add, data_ptr.id, offset.id), u64_tag).id
+//       };
+//       b.bc.instrs.push(Instr::Store{ pointer, value: a.id });
+//     }
+//     // slice struct
+//     let slice_ptr = {
+//       let v = new_val(b, b.env.c.slice_tag, true);
+//       v.to_var().get_address(b)
+//     };
+//     // store slice length
+//     let slice_length = push_expr(b, Expr::LiteralU64(args), u64_tag);
+//     b.bc.instrs.push(Instr::Store{
+//       pointer: slice_ptr.id,
+//       value: slice_length.id,
+//     });
+//     // store slice data
+//     let data_pointer = {
+//       let eight = push_expr(b, Expr::LiteralU64(8), u64_tag);
+//       push_expr(b, Expr::BinaryOp(Add, slice_ptr.id, eight.id), u64_tag)
+//     };
+//     b.bc.instrs.push(Instr::Store{
+//       pointer: data_pointer.id,
+//       value: data_ptr.id,
+//     });
+//     // template quote reference
+//     let f = {
+//       let template_quote = to_symbol(b.env.st, "template_quote");
+//       push_expr(b, Expr::Def(template_quote), u64_tag)
+//     };
+//     // call template_quote
+//     let args = perm_slice(&[node_value.id, slice_ptr.id]);
+//     push_expr(b, Expr::InvokeC(f.id, args), u64_tag)
+//   }
+//   else {
+//     node_value
+//   }
+// }
 
 struct NodeBuilder {
   loc : SrcLocation,
