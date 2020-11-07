@@ -19,7 +19,8 @@ use parse::{
 };
 use NodeShape::*;
 
-struct LabelledBlockExpr {
+struct LabelledExpr {
+  name : Symbol,
   entry_seq: SequenceId,
   exit_seq: SequenceId,
 }
@@ -37,13 +38,13 @@ struct Builder {
   scoped_locals : Vec<NamedLocal>,
   
   /// the instruction sequence currently being built
-  cur_seq : Option<SequenceId>,
+  current_sequence : Option<SequenceId>,
 
   /// flags indicating which sequences have been finalised
   seq_completion : Vec<bool>,
 
   /// labels indicating the start and end of a labelled block expression
-  label_stack : Vec<LabelledBlockExpr>,
+  label_stack : Vec<LabelledExpr>,
 
   /// the environment containing all visible symbols
   env : Env,
@@ -191,16 +192,16 @@ fn set_current_sequence(b : &mut Builder, sequence : SequenceId) {
   if b.seq_completion[sequence.0] {
     panic!("this sequence has already been completed");
   }
-  b.cur_seq = Some(sequence);
+  b.current_sequence = Some(sequence);
   b.bc.sequence_info[sequence.0].start_instruction = b.bc.instrs.len();
 }
 
 fn complete_sequence(b : &mut Builder) {
-  if let Some(i) = b.cur_seq {
+  if let Some(i) = b.current_sequence {
     let seq = &mut b.bc.sequence_info[i.0];
     seq.num_instructions = b.bc.instrs.len() - seq.start_instruction;
     b.seq_completion[i.0] = true;
-    b.cur_seq = None;
+    b.current_sequence = None;
   }
 }
 
@@ -219,7 +220,15 @@ fn complete_function(mut b : Builder) -> FunctionBytecode {
   b.bc
 }
 
-fn compile_function(env: Env, args : &[Node], body : &[Node]) -> Function {
+fn compile_function_to_value(b : &mut Builder, args : &[Node], return_tag : Option<Node>, body : &[Node]) -> Val {
+  let f = compile_function(b.env, args, return_tag, body);
+  let r = new_val(b, f.t, false);
+  let f_addr = Box::into_raw(Box::new(f)) as u64;
+  b.bc.instrs.push(Instr::Expr(r.id, Expr::LiteralU64(f_addr)));
+  r
+}
+
+fn compile_function(env: Env, args : &[Node], return_tag : Option<Node>, body : &[Node]) -> Function {
   let mut b = Builder {
     bc: FunctionBytecode {
       sequence_info: vec![],
@@ -230,7 +239,7 @@ fn compile_function(env: Env, args : &[Node], body : &[Node]) -> Function {
     },
     scoped_locals: vec![],
     seq_completion: vec![],
-    cur_seq: None,
+    current_sequence: None,
     label_stack: vec![],
     env,
   };
@@ -238,15 +247,14 @@ fn compile_function(env: Env, args : &[Node], body : &[Node]) -> Function {
   let mut arg_types = vec![];
   for &arg in args {
     let (name, t) = {
-      if let [type_tag, name] = arg.children() {
+      if let [name, type_tag] = arg.children() {
         let t =
           TypeHandle::from_u64(
             b.env.get(type_tag.as_symbol()).unwrap().value);
         (name.as_symbol(), t)
       }
       else {
-        // TODO: fix type
-        (arg.as_symbol(), env.c.u64_tag)
+        panic!("expected typed argument")
       }
     };
     new_scoped_var(&mut b, name, t);
@@ -256,6 +264,7 @@ fn compile_function(env: Env, args : &[Node], body : &[Node]) -> Function {
   let entry_seq = create_sequence(&mut b, "entry");
   set_current_sequence(&mut b, entry_seq);
   let v = compile_block_expr(&mut b, body);
+
   let mut return_type = b.env.c.void_tag;
   if let Some(v) = v {
     return_type = v.data_type;
@@ -263,6 +272,10 @@ fn compile_function(env: Env, args : &[Node], body : &[Node]) -> Function {
   }
   else {
     b.bc.instrs.push(Instr::Return(None));
+  }
+  if let Some(rt) = return_tag {
+    // TODO: check return type
+    let rt = node_to_type(&b, rt);
   }
   let t = types::function_type(&arg_types, return_type); // TODO: fix arg types!
   let f = complete_function(b);
@@ -273,7 +286,7 @@ fn compile_function(env: Env, args : &[Node], body : &[Node]) -> Function {
 
 /// Compile basic imperative language into bytecode
 pub fn compile_expr_to_function(env: Env, root : Node) -> Function {
-  compile_function(env, &[], &[root])
+  compile_function(env, &[], None, &[root])
 }
 
 fn compile_if_else(b : &mut Builder, cond : Node, then_expr : Node, else_expr : Node) -> Option<Var> {
@@ -384,6 +397,16 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
         }
       }
     }
+    // break to label
+    Command("break", [label]) => {
+      let label = label.as_symbol();
+      let break_to =
+        b.label_stack.iter().rev()
+        .find(|l| l.name == label)
+        .expect("label not found");
+      b.bc.instrs.push(Instr::Jump(break_to.exit_seq));
+      None
+    }
     // array
     Command("array", elements) => {
       let e = compile_expr_to_val(b, elements[0]);
@@ -454,13 +477,13 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       compile_expr(b, def_node)
     }
     // fun
-    Command("fun", [arg_nodes, return_type, body]) => {
-      let f = compile_function(
-        b.env, arg_nodes.children(), &[*body]);
-      let r = new_val(b, f.t, false);
-      let f_addr = Box::into_raw(Box::new(f)) as u64;
-      b.bc.instrs.push(Instr::Expr(r.id, Expr::LiteralU64(f_addr)));
-      Some(r.to_var())
+    Command("fun", [arg_nodes, body]) => {
+      let v = compile_function_to_value(b, arg_nodes.children(), None, &[*body]);
+      Some(v.to_var())
+    }
+    Command("fun", [arg_nodes, return_tag, body]) => {
+      let v = compile_function_to_value(b, arg_nodes.children(), Some(*return_tag), &[*body]);
+      Some(v.to_var())
     }
     // set var
     Command("set", [dest, value]) => {
@@ -485,7 +508,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       let cond = compile_expr_to_val(b, *cond).id;
       b.bc.instrs.push(Instr::CJump{ cond, then_seq, else_seq: exit_seq });
       set_current_sequence(b, then_seq);
-      compile_block_expr(b, then_expr.children());
+      compile_expr(b, *then_expr);
       b.bc.instrs.push(Instr::Jump(exit_seq));
       set_current_sequence(b, exit_seq);
       None
@@ -494,20 +517,21 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     Command("if", [cond, then_expr, else_expr]) => {
       compile_if_else(b, *cond, *then_expr, *else_expr)
     }
-    // block expression
-    Command("block", [body]) => {
+    // label expression
+    Command("label", [label, body]) => {
+      let name = label.as_symbol();
       let entry_seq = create_sequence(b, "block_entry");
       let exit_seq = create_sequence(b, "block_exit");
       b.bc.instrs.push(Instr::Jump(entry_seq));
       set_current_sequence(b, entry_seq);
       b.label_stack.push(
-        LabelledBlockExpr{ entry_seq, exit_seq }
+        LabelledExpr{ name, entry_seq, exit_seq }
       );
-      let result = compile_block_expr(b, body.children());
+      let result = compile_expr(b, *body);
       b.label_stack.pop();
       b.bc.instrs.push(Instr::Jump(exit_seq));
       set_current_sequence(b, exit_seq);
-      result.map(|x| x.to_var())
+      result.map(|x| x)
     }
     Command("do", exprs) => {
       let result = compile_block_expr(b, exprs);

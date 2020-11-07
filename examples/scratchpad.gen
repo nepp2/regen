@@ -76,19 +76,19 @@
   (+ a b)
 ))
 
-;; (debug (typeof add)) ;; (fn (i64 i64) i64)
+(debug (typeof add)) ;; (fn (i64 i64) i64)
 
-;; (debug (add 6 7)) ;; 13
+(debug (add 6 7)) ;; 13
 
-;; ;; labelled blocks
+;; labelled blocks
 
-;; (block foo
-;;   (if true (do
-;;     (debug "success")
-;;     (break foo)
-;;   ))
-;;   (debug "failure")
-;; )
+(label foo (do
+  (if true (do
+    (debug "success") ;; "success"
+    (break foo)
+  ))
+  (debug "failure")
+))
 
 ;; ;; macros and loops
 
