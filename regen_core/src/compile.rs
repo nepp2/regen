@@ -166,6 +166,12 @@ fn push_expr(b : &mut Builder, e : Expr, t : TypeHandle) -> Val {
   return v;
 }
 
+fn find_label(b : &mut Builder, label : Symbol) -> &LabelledExpr {
+  b.label_stack.iter().rev()
+  .find(|l| l.name == label)
+  .expect("label not found")
+}
+
 fn create_sequence(b : &mut Builder, name : &str) -> SequenceId {
   // Make sure the name is unique
   let mut i = 1;
@@ -399,12 +405,14 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     }
     // break to label
     Command("break", [label]) => {
-      let label = label.as_symbol();
-      let break_to =
-        b.label_stack.iter().rev()
-        .find(|l| l.name == label)
-        .expect("label not found");
-      b.bc.instrs.push(Instr::Jump(break_to.exit_seq));
+      let break_to = find_label(b, label.as_symbol()).exit_seq;
+      b.bc.instrs.push(Instr::Jump(break_to));
+      None
+    }
+    // repeat to label
+    Command("repeat", [label]) => {
+      let repeat_to = find_label(b, label.as_symbol()).entry_seq;
+      b.bc.instrs.push(Instr::Jump(repeat_to));
       None
     }
     // array

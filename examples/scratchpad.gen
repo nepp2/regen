@@ -80,26 +80,46 @@
 
 (debug (add 6 7)) ;; 13
 
-;; labelled blocks
+;; labelled blocks (and loops)
 
-(label foo (do
-  (if true (do
-    (debug "success") ;; "success"
-    (break foo)
+(do
+  (let v 0)
+  (label loop (do
+    (if (> v 10) (do
+      (break loop)
+    ))
+    (set v (+ v 1))
+    (repeat loop)
   ))
-  (debug "failure")
-))
+  (debug v) ;; 11
+)
 
-;; ;; macros and loops
+;; macros? typed macros? const expressions?
+
+;; can't make typed macros until type inference is separated from code generation
+;; what do i actually need macros for in order to create a demo?
+
+;; alternative path: hack macros into the compiler until patterns start to emerge
+;; and a pattern becomes obvious. then design as a language feature.
+
+;; (def + (macro ((t type) (args ((slice node)))) (
+;;   (if (= t (struct u64 u64))
+;;     (return (# (add_u64 ($ (index args 0)) ($ (index args 1)))))
+;;   )
+;;   (if (= t (struct i64 i64))
+;;     (return (# (add_i64 ($ (index args 0)) ($ (index args 1)))))
+;;   )
+;; )))
+
 
 ;; (def while
 ;;   (macro (condition body)
-;;     (# (block
-;;       (if ($ condition)
+;;     (# (label while_loop
+;;       (if ($ condition) (do
 ;;         ($ body)
 ;;         break
-;;       )
-;;       repeat
+;;       ))
+;;       (repeat while_loop)
 ;;     ))
 ;;   )
 ;; )
