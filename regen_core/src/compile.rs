@@ -442,16 +442,26 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     }
     // array index
     Command("index", [v, index]) => {
-      let array_val = compile_expr_to_var(b, *v);
-      let array_ptr = array_val.get_address(b);
-      let info = types::type_as_array(&array_val.data_type).expect("expected array");
-      let element_ptr_type = types::pointer_type(info.inner);
-      let ptr = compile_bitcast(b, array_ptr, element_ptr_type).id;
+      let v = compile_expr_to_var(b, *v);
+      let ptr = {
+        if let Some(info) = types::type_as_array(&v.data_type) {
+          let array_ptr = v.get_address(b);
+          let element_ptr_type = types::pointer_type(info.inner);
+          compile_bitcast(b, array_ptr, element_ptr_type)
+        }
+        else if v.data_type.kind == Kind::Pointer {
+          v.to_val(b)
+        }
+        else {
+          panic!("expected pointer or array")
+        }
+      };
       let offset = compile_expr_to_val(b, *index).id;
-      let e = Expr::PtrOffset { ptr, offset };
-      let id = new_local(b, None, element_ptr_type, array_val.mutable);
+      let e = Expr::PtrOffset { ptr: ptr.id, offset };
+      let id = new_local(b, None, ptr.data_type, v.mutable);
       b.bc.instrs.push(Instr::Expr(id, e));
-      Some(Var { var_type: VarType::Locator(id), data_type: info.inner, mutable: array_val.mutable})
+      let inner = types::deref_pointer_type(&ptr.data_type).unwrap();
+      Some(Var { var_type: VarType::Locator(id), data_type: inner, mutable: v.mutable})
     }
     // init
     Command("init", ns) => {
@@ -491,11 +501,6 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     // quotation
     Command("quote", [quoted]) => {
       Some(compile_quote(b, *quoted).to_var())
-    }
-    // macro
-    Command("macro", [ns, body]) => {
-      // Some(quote(b, *quoted).to_var())
-      panic!()
     }
     // def
     Command("def", [def_name, value]) => {
@@ -631,6 +636,10 @@ fn symbol_to_type(b : &Builder, s : Symbol) -> Option<TypeHandle> {
 
 fn try_node_to_type(b: &Builder, n : Node) -> Option<TypeHandle> {
   match node_shape(&n) {
+    // pointer type
+    Atom("node") => {
+      Some(b.env.c.node_tag)
+    }
     Atom(s) => {
       symbol_to_type(b, to_symbol(b.env.st, s))
     }
@@ -727,12 +736,11 @@ fn compile_function_call(b : &mut Builder, list : &[Node]) -> Val {
 }
 
 fn compile_macro_call(b : &mut Builder, f : &Function, n : Node) -> Option<Var> {
-  let args = n.perm_children().slice_range(1..);
-  let node = perm(NodeInfo{
-    loc: n.loc,
-    content: NodeContent::List(args),
-  });
-  let v = interpret::interpret_function(f, &[Perm::to_ptr(node) as u64], b.env);
+  let args = unsafe {
+    let args = &n.children()[1..];
+    std::slice::from_raw_parts_mut(args.as_ptr() as *mut u64, args.len())
+  };
+  let v = interpret::interpret_function(f, args, b.env);
   let new_node = Perm { p: v as *mut NodeInfo };
   compile_expr(b, new_node)
 }
@@ -833,6 +841,6 @@ fn compile_template(b : &mut Builder, quoted : Node) -> Val {
 
 fn compile_quote(b : &mut Builder, quoted : Node) -> Val {
   let e = Expr::LiteralU64(Perm::to_ptr(quoted) as u64);
-  let u64_tag = b.env.c.u64_tag;
-  push_expr(b, e, u64_tag)
+  let node_tag = b.env.c.node_tag;
+  push_expr(b, e, node_tag)
 }

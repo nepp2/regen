@@ -46,6 +46,9 @@ impl fmt::Display for DebugDisplay {
         let v = unsafe{ *(self.p as *const TypeHandle) };
         write!(f, "{}", v)
       }
+      Kind::Node => {
+        write!(f, "node")
+      }
     }
   }
 }

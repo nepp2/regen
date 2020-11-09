@@ -181,6 +181,7 @@ pub fn new_env(st : SymbolTable) -> Env {
 
   let u64 = env.c.u64_tag;
   let void = env.c.void_tag;
+  let node = env.c.node_tag;
 
   env.insert_str("c_add", c_add as u64,
     c_function_type(&[u64, u64], u64));
@@ -233,7 +234,7 @@ pub fn new_env(st : SymbolTable) -> Env {
     c_function_type(&[u64, u64], u64));
 
   env.insert_str("template_quote", template_quote as u64,
-    c_function_type(&[u64, u64, u64], u64));
+    c_function_type(&[node, types::pointer_type(node), u64], node));
 
   env.insert_str("calculate_packed_field_offsets", calculate_packed_field_offsets as u64,
     c_function_type(&[u64, u64], u64));

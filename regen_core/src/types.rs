@@ -3,6 +3,7 @@
 
 use crate::symbols::Symbol;
 use crate::perm_alloc::{Perm, PermSlice, perm, perm_slice, perm_slice_from_vec};
+use crate::parse::Node;
 use std::fmt;
 
 pub type TypeHandle = Perm<TypeInfo>;
@@ -27,6 +28,7 @@ pub enum Kind {
   Pointer = 5,
   Array = 6,
   Macro = 7,
+  Node = 8,
 }
 
 #[derive(Copy, Clone)]
@@ -55,7 +57,14 @@ pub struct StructInfo {
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct PointerInfo {
-  pub points_to : TypeInfo,
+  pub points_to : TypeHandle,
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub struct NominalInfo {
+  pub name : Node,
+  pub t : TypeHandle,
 }
 
 #[derive(Copy, Clone)]
@@ -76,6 +85,7 @@ pub struct CoreTypes {
   pub void_tag : TypeHandle,
   pub slice_tag : TypeHandle,
   pub string_tag : TypeHandle,
+  pub node_tag : TypeHandle,
 
   pub core_types : Vec<(&'static str, TypeHandle)>,
 }
@@ -199,6 +209,8 @@ pub fn core_types() -> CoreTypes {
   let u8_tag = new_type(Kind::Primitive, 1, Primitive::U8 as u64);
   let void_tag = new_type(Kind::Primitive, 0, Primitive::Void as u64);
 
+  let node_tag = new_type(Kind::Node, 8, 0);
+
   let type_tag = new_type(Kind::Type, 8, 0);
 
   let slice_tag = tuple_type(perm_slice(&[
@@ -219,6 +231,7 @@ pub fn core_types() -> CoreTypes {
   CoreTypes {
     type_tag, u64_tag, u32_tag, u16_tag,
     u8_tag, void_tag, slice_tag, string_tag,
+    node_tag,
 
     core_types:
       vec![
@@ -276,6 +289,9 @@ impl fmt::Display for TypeInfo {
       Kind::Array => {
         let t = unsafe { &*(self.info as *const ArrayInfo) };
         write!(f, "(sized_array {} {})", t.inner, t.length)?;
+      }
+      Kind::Node => {
+        write!(f, "node")?;
       }
       Kind::Macro => {
         write!(f, "macro")?;
