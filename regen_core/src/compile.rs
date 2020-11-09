@@ -1,6 +1,9 @@
 /// Compiles core language into bytecode
 
-use crate::{bytecode, parse, symbols, env, perm_alloc, types, interpret};
+use crate::{
+  bytecode, parse, symbols, env, perm_alloc,
+  types, interpret, node_builder,
+};
 
 use bytecode::{
   SequenceId, SequenceInfo, Expr, FunctionBytecode,
@@ -18,6 +21,7 @@ use parse::{
   node_shape, NodeShape, SrcLocation,
 };
 use NodeShape::*;
+use node_builder::{NodeBuilder, def_macro, template_macro};
 
 struct LabelledExpr {
   name : Symbol,
@@ -429,6 +433,13 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       let e = Expr::Array(perm_slice_from_vec(element_values));
       Some(push_expr(b, e, t).to_var())
     }
+    // array length
+    Command("array_len", [e]) => {
+      let v = compile_expr_to_val(b, *e);
+      let t = types::type_as_array(&v.data_type).expect("expected array");
+      let e = Expr::LiteralU64(t.length);
+      Some(push_expr(b, e, b.env.c.u64_tag).to_var())
+    }
     // array index
     Command("index", [v, index]) => {
       let array_val = compile_expr_to_var(b, *v);
@@ -473,8 +484,16 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       b.bc.instrs.push(Instr::Expr(id, e));
       Some(Var { var_type: VarType::Locator(id), data_type: field_type, mutable: struct_val.mutable})
     }
-    // quotation
+    // template
     Command("#", [quoted]) => {
+      Some(compile_template(b, *quoted).to_var())
+    }
+    // quotation
+    Command("quote", [quoted]) => {
+      Some(compile_quote(b, *quoted).to_var())
+    }
+    // macro
+    Command("macro", [ns, body]) => {
       // Some(quote(b, *quoted).to_var())
       panic!()
     }
@@ -786,114 +805,34 @@ fn compile_list_expr(b : &mut Builder, node : Node) -> Option<Var> {
   compile_call(b, node)
 }
 
-fn find_template_arguments(n : Node, args : &mut Vec<Node>) {
-  match node_shape(&n) {
-    Command("$", [e]) => {
-      args.push(*e);
+fn compile_template(b : &mut Builder, quoted : Node) -> Val {
+  
+  fn find_template_arguments(n : Node, args : &mut Vec<Node>) {
+    match node_shape(&n) {
+      Command("$", [e]) => {
+        args.push(*e);
+      }
+      _ => (),
     }
-    _ => (),
-  }
-  for &c in n.children() {
-    find_template_arguments(c, args);
-  }
-}
-
-/// Handles templating if necessary
-// TODO: reimplement with NodeBuilder!
-// fn quote(b : &mut Builder, quoted : Node) -> Val {
-//   let u64_tag = b.env.c.u64_tag;
-//   let node_value = {
-//     let e = Expr::LiteralU64(Perm::to_ptr(quoted) as u64);
-//     push_expr(b, e, u64_tag)
-//   };
-//   let mut template_args = vec![];
-//   find_template_arguments(quoted, &mut template_args);
-//   if template_args.len() > 0 {
-//     use Operator::*;
-//     let args = template_args.len() as u64;
-//     let data_ptr = {
-//       let t = types::array_type(&b.env.c, args * 8);
-//       let v = new_val(b, t, true);
-//       v.to_var().get_address(b)
-//     };
-//     // Codegen args
-//     let mut arg_values = vec![];
-//     for a in template_args {
-//       arg_values.push(compile_expr_to_val(b, a));
-//     }
-//     // Store args
-//     for (i, a) in arg_values.iter().enumerate() {
-//       let pointer = {
-//         let offset = push_expr(b, Expr::LiteralU64(i as u64 * 8), u64_tag);
-//         push_expr(b, Expr::BinaryOp(Add, data_ptr.id, offset.id), u64_tag).id
-//       };
-//       b.bc.instrs.push(Instr::Store{ pointer, value: a.id });
-//     }
-//     // slice struct
-//     let slice_ptr = {
-//       let v = new_val(b, b.env.c.slice_tag, true);
-//       v.to_var().get_address(b)
-//     };
-//     // store slice length
-//     let slice_length = push_expr(b, Expr::LiteralU64(args), u64_tag);
-//     b.bc.instrs.push(Instr::Store{
-//       pointer: slice_ptr.id,
-//       value: slice_length.id,
-//     });
-//     // store slice data
-//     let data_pointer = {
-//       let eight = push_expr(b, Expr::LiteralU64(8), u64_tag);
-//       push_expr(b, Expr::BinaryOp(Add, slice_ptr.id, eight.id), u64_tag)
-//     };
-//     b.bc.instrs.push(Instr::Store{
-//       pointer: data_pointer.id,
-//       value: data_ptr.id,
-//     });
-//     // template quote reference
-//     let f = {
-//       let template_quote = to_symbol(b.env.st, "template_quote");
-//       push_expr(b, Expr::Def(template_quote), u64_tag)
-//     };
-//     // call template_quote
-//     let args = perm_slice(&[node_value.id, slice_ptr.id]);
-//     push_expr(b, Expr::InvokeC(f.id, args), u64_tag)
-//   }
-//   else {
-//     node_value
-//   }
-// }
-
-struct NodeBuilder {
-  loc : SrcLocation,
-  st : SymbolTable,
-}
-
-impl NodeBuilder {
-  fn list(&self, ns : &[Node]) -> Node {
-    perm(NodeInfo {
-      loc: self.loc,
-      content: NodeContent::List(perm_slice(ns)),
-    })
+    for &c in n.children() {
+      find_template_arguments(c, args);
+    }
   }
 
-  fn sym(&self, s : &str) -> Node {
-    let sym = to_symbol(self.st, s);
-    perm(NodeInfo {
-      loc: self.loc,
-      content: NodeContent::Sym(sym),
-    })
+  let mut template_args = vec![];
+  find_template_arguments(quoted, &mut template_args);
+  if template_args.len() > 0 {
+    let nb = NodeBuilder { loc: quoted.loc, st: b.env.st };
+    let n = template_macro(&nb, quoted, template_args.as_slice());
+    compile_expr_to_val(b, n)
+  }
+  else {
+    compile_quote(b, quoted)
   }
 }
 
-fn def_macro(b : &NodeBuilder, def_name : Node, value : Node) -> Node {
-  b.list(&[
-    b.sym("do"),
-    b.list(&[b.sym("let"), b.sym("v"), value]),
-    b.list(&[
-      b.sym("env_insert"),
-      b.sym("env"),
-      b.list(&[b.sym("sym"), def_name]),
-      b.sym("v"),
-      b.list(&[b.sym("typeof"), b.sym("v")])])
-  ])
+fn compile_quote(b : &mut Builder, quoted : Node) -> Val {
+  let e = Expr::LiteralU64(Perm::to_ptr(quoted) as u64);
+  let u64_tag = b.env.c.u64_tag;
+  push_expr(b, e, u64_tag)
 }

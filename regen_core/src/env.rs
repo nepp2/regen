@@ -137,7 +137,7 @@ pub extern "C" fn calculate_packed_field_offsets(
   size_of
 }
 
-pub extern "C" fn template_quote(n : Node, args : &PermSlice<Node>) -> Node {
+pub extern "C" fn template_quote(n : Node, args_ptr : *const Node, num_args : u64) -> Node {
   fn template(n : Node, args : &[Node], next_arg : &mut usize) -> Node {
     match node_shape(&n) {
       Atom(_) | Literal(_) => n,
@@ -157,7 +157,8 @@ pub extern "C" fn template_quote(n : Node, args : &PermSlice<Node>) -> Node {
       },
     }
   }
-  template(n, args.as_slice(), &mut 0)
+  let args = unsafe { std::slice::from_raw_parts(args_ptr, num_args as usize) };
+  template(n, args, &mut 0)
 }
 
 pub extern "C" fn type_display(t : TypeHandle) {
@@ -232,7 +233,7 @@ pub fn new_env(st : SymbolTable) -> Env {
     c_function_type(&[u64, u64], u64));
 
   env.insert_str("template_quote", template_quote as u64,
-    c_function_type(&[u64, u64], u64));
+    c_function_type(&[u64, u64, u64], u64));
 
   env.insert_str("calculate_packed_field_offsets", calculate_packed_field_offsets as u64,
     c_function_type(&[u64, u64], u64));
