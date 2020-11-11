@@ -12,13 +12,13 @@ use bytecode::{
 
 use types::{TypeHandle, CoreTypes, Kind};
 
-use perm_alloc::{Perm, perm, perm_slice, perm_slice_from_vec};
+use perm_alloc::{Perm, perm_slice_from_vec};
 
-use symbols::{to_symbol, Symbol, SymbolTable};
+use symbols::{to_symbol, Symbol};
 use env::Env;
 use parse::{
   Node, NodeInfo, NodeContent, NodeLiteral,
-  node_shape, NodeShape, SrcLocation,
+  node_shape, NodeShape,
 };
 use NodeShape::*;
 use node_builder::{NodeBuilder, def_macro, template_macro};
