@@ -83,9 +83,9 @@ pub struct CoreTypes {
   pub u16_tag : TypeHandle,
   pub u8_tag : TypeHandle,
   pub void_tag : TypeHandle,
-  pub slice_tag : TypeHandle,
   pub string_tag : TypeHandle,
   pub node_tag : TypeHandle,
+  pub node_slice_tag : TypeHandle,
 
   pub core_types : Vec<(&'static str, TypeHandle)>,
 }
@@ -185,6 +185,10 @@ pub fn pointer_type(inner : TypeHandle) -> TypeHandle {
   new_type(Kind::Pointer, 8, Perm::to_u64(inner))
 }
 
+pub fn macro_type(inner : TypeHandle) -> TypeHandle {
+  new_type(Kind::Macro, 8, Perm::to_u64(inner))
+}
+
 fn function_type_inner(args : &[TypeHandle], returns : TypeHandle, c_function : bool) -> TypeHandle {
   let info =
     Box::into_raw(Box::new(
@@ -210,13 +214,12 @@ pub fn core_types() -> CoreTypes {
   let void_tag = new_type(Kind::Primitive, 0, Primitive::Void as u64);
 
   let node_tag = new_type(Kind::Node, 8, 0);
-
-  let type_tag = new_type(Kind::Type, 8, 0);
-
-  let slice_tag = tuple_type(perm_slice(&[
-    pointer_type(u8_tag),
+  let node_slice_tag = tuple_type(perm_slice(&[
+    pointer_type(node_tag),
     u64_tag,
   ]));
+
+  let type_tag = new_type(Kind::Type, 8, 0);
 
   let string_tag = tuple_type(perm_slice(&[
     pointer_type(u8_tag),
@@ -230,8 +233,8 @@ pub fn core_types() -> CoreTypes {
 
   CoreTypes {
     type_tag, u64_tag, u32_tag, u16_tag,
-    u8_tag, void_tag, slice_tag, string_tag,
-    node_tag,
+    u8_tag, void_tag, string_tag,
+    node_tag, node_slice_tag,
 
     core_types:
       vec![
@@ -241,7 +244,8 @@ pub fn core_types() -> CoreTypes {
         ("u16", u16_tag),
         ("u8", u8_tag),
         ("void", void_tag),
-        ("slice", slice_tag),
+        ("node", node_tag),
+        ("node_slice", node_slice_tag),
         ("string", string_tag),
       ],
   }

@@ -54,6 +54,25 @@ struct Builder {
   env : Env,
 }
 
+impl Builder {
+  fn new(env : Env) -> Self {
+    Builder {
+      bc: FunctionBytecode {
+        sequence_info: vec![],
+        instrs: vec![],
+        args: 0,
+        locals: vec![],
+        frame_bytes: 0,
+      },
+      scoped_locals: vec![],
+      seq_completion: vec![],
+      current_sequence: None,
+      label_stack: vec![],
+      env,
+    }
+  }
+}
+
 #[derive(Copy, Clone)]
 enum VarType {
   /// A locator register contains a pointer to a value.
@@ -230,29 +249,24 @@ fn complete_function(mut b : Builder) -> FunctionBytecode {
   b.bc
 }
 
-fn compile_function_to_value(b : &mut Builder, args : &[Node], return_tag : Option<Node>, body : &[Node]) -> Val {
-  let f = compile_function(b.env, args, return_tag, body);
-  let r = new_val(b, f.t, false);
-  let f_addr = Box::into_raw(Box::new(f)) as u64;
-  b.bc.instrs.push(Instr::Expr(r.id, Expr::LiteralU64(f_addr)));
-  r
+fn compile_macro_def(env: Env, arg : Node, body : Node) -> Function {
+  let mut b = Builder::new(env);
+  b.bc.args = 1;
+  let name = arg.as_symbol();
+  let arg_type = env.c.node_slice_tag;
+  new_scoped_var(&mut b, name, arg_type);
+  compile_function(b, body, &[arg_type], Some(env.c.node_tag))
 }
 
-fn compile_function(env: Env, args : &[Node], return_tag : Option<Node>, body : &[Node]) -> Function {
-  let mut b = Builder {
-    bc: FunctionBytecode {
-      sequence_info: vec![],
-      instrs: vec![],
-      args: 0,
-      locals: vec![],
-      frame_bytes: 0,
-    },
-    scoped_locals: vec![],
-    seq_completion: vec![],
-    current_sequence: None,
-    label_stack: vec![],
-    env,
-  };
+fn function_to_value(b : &mut Builder, f : Function) -> Val {
+  let function_val = new_val(b, f.t, false);
+  let f_addr = Box::into_raw(Box::new(f)) as u64;
+  b.bc.instrs.push(Instr::Expr(function_val.id, Expr::LiteralU64(f_addr)));
+  function_val
+}
+
+fn compile_function_def(env: Env, args : &[Node], return_tag : Option<Node>, body : Node) -> Function {
+  let mut b = Builder::new(env);
   b.bc.args = args.len();
   let mut arg_types = vec![];
   for &arg in args {
@@ -270,22 +284,30 @@ fn compile_function(env: Env, args : &[Node], return_tag : Option<Node>, body : 
     new_scoped_var(&mut b, name, t);
     arg_types.push(t);
   }
+  let expected_return = return_tag.map(|n| node_to_type(&mut b, n));
+  compile_function(b, body, &arg_types, expected_return)
+}
+
+fn compile_function(
+  mut b : Builder, body : Node, arg_types : &[TypeHandle],
+  expected_return : Option<TypeHandle>) -> Function
+{
   // start a sequence
   let entry_seq = create_sequence(&mut b, "entry");
   set_current_sequence(&mut b, entry_seq);
-  let v = compile_block_expr(&mut b, body);
 
   let mut return_type = b.env.c.void_tag;
-  if let Some(v) = v {
+  let r = compile_expr(&mut b, body);
+  if let Some(var) = r {
+    let v = var.to_val(&mut b);
     return_type = v.data_type;
     b.bc.instrs.push(Instr::Return(Some(v.id)));
   }
   else {
     b.bc.instrs.push(Instr::Return(None));
   }
-  if let Some(rt) = return_tag {
+  if let Some(et) = expected_return {
     // TODO: check return type
-    let rt = node_to_type(&b, rt);
   }
   let t = types::function_type(&arg_types, return_type); // TODO: fix arg types!
   let f = complete_function(b);
@@ -296,7 +318,7 @@ fn compile_function(env: Env, args : &[Node], return_tag : Option<Node>, body : 
 
 /// Compile basic imperative language into bytecode
 pub fn compile_expr_to_function(env: Env, root : Node) -> Function {
-  compile_function(env, &[], None, &[root])
+  compile_function(Builder::new(env), root, &[], None)
 }
 
 fn compile_if_else(b : &mut Builder, cond : Node, then_expr : Node, else_expr : Node) -> Option<Var> {
@@ -510,12 +532,21 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     }
     // fun
     Command("fun", [arg_nodes, body]) => {
-      let v = compile_function_to_value(b, arg_nodes.children(), None, &[*body]);
+      let f = compile_function_def(b.env, arg_nodes.children(), None, *body);
+      let v = function_to_value(b, f);
       Some(v.to_var())
     }
     Command("fun", [arg_nodes, return_tag, body]) => {
-      let v = compile_function_to_value(b, arg_nodes.children(), Some(*return_tag), &[*body]);
+      let f = compile_function_def(b.env, arg_nodes.children(), Some(*return_tag), *body);
+      let v = function_to_value(b, f);
       Some(v.to_var())
+    }
+    // macro
+    Command("macro", [arg, body]) => {
+      let f = compile_macro_def(b.env, *arg, *body);
+      let v = function_to_value(b, f);
+      let mv = compile_bitcast(b, v, types::macro_type(v.data_type));
+      Some(mv.to_var())
     }
     // set var
     Command("set", [dest, value]) => {
@@ -636,10 +667,6 @@ fn symbol_to_type(b : &Builder, s : Symbol) -> Option<TypeHandle> {
 
 fn try_node_to_type(b: &Builder, n : Node) -> Option<TypeHandle> {
   match node_shape(&n) {
-    // pointer type
-    Atom("node") => {
-      Some(b.env.c.node_tag)
-    }
     Atom(s) => {
       symbol_to_type(b, to_symbol(b.env.st, s))
     }
@@ -736,10 +763,10 @@ fn compile_function_call(b : &mut Builder, list : &[Node]) -> Val {
 }
 
 fn compile_macro_call(b : &mut Builder, f : &Function, n : Node) -> Option<Var> {
-  let args = unsafe {
-    let args = &n.children()[1..];
-    std::slice::from_raw_parts_mut(args.as_ptr() as *mut u64, args.len())
-  };
+  let nodes = &n.children()[1..];
+  // macros actually take one argument, which is a node slice.
+  // node_slice matches the layout of the two u64 args below.
+  let args = &[nodes.as_ptr() as u64, nodes.len() as u64];
   let v = interpret::interpret_function(f, args, b.env);
   let new_node = Perm { p: v as *mut NodeInfo };
   compile_expr(b, new_node)

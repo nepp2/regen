@@ -101,32 +101,26 @@
   (debug (# (+ 500 ($ n))))
 )
 
-(def node_list (struct
-  (data (ptr node))
-  (len u64)
-))
-
-(def node_index (fun ((ns node_list) (i u64)) node (do
-  (index (. ns data) i)
+(def node_index (fun ((ns node_slice) (i u64)) node (do
+  (index (. ns 0) i)
 )))
 
-;; (def while (macro ns (do
-;;   (let condition (node_index ns 0))
-;;   (let body (node_index ns 1))
-;;   (# (label while_loop (do
-;;     (if ($ condition) (do
-;;       ($ body)
-;;       break
-;;     ))
-;;     repeat
-;;   )))
-;; )))
+(def while (macro ns (do
+  (let condition (node_index ns 0))
+  (let body (node_index ns 1))
+  (# (label while_loop (do
+    (if ($ condition) (do
+      ($ body)
+      repeat
+    ))
+  )))
+)))
 
-;; (do
-;;   (let i 0)
-;;   (while (< i 10) (set i (i + 1)))
-;;   (debug i) ;; 10
-;; )
+(do
+  (let i 0)
+  (while (< i 10) (set i (+ i 1)))
+  (debug i) ;; 10
+)
 
 ;; typed macros? const expressions?
 
