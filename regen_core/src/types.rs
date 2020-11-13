@@ -39,14 +39,29 @@ pub struct TypeInfo {
   pub info : u64,
 }
 
-#[derive(Copy, Clone)]
+impl PartialEq for TypeInfo {
+  fn eq(&self, rhs : &Self) -> bool {
+    (self.kind == rhs.kind) && (self.size_of == rhs.size_of) && {
+      match self.kind {
+        Kind::Primitive => self.info == rhs.info,
+        Kind::Macro | Kind::Type | Kind::Node => true,
+        Kind::Array => type_as_array(self) == type_as_array(rhs),
+        Kind::Function => type_as_function(self) == type_as_function(rhs),
+        Kind::Pointer => deref_pointer_type(self) == deref_pointer_type(rhs),
+        Kind::Struct => type_as_struct(self) == type_as_struct(rhs),
+      }
+    }
+  }
+}
+
+#[derive(Copy, Clone, PartialEq)]
 #[repr(C)]
 pub struct ArrayInfo {
   pub inner : TypeHandle,
   pub length : u64,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 #[repr(C)]
 pub struct StructInfo {
   pub field_names : PermSlice<Symbol>,
@@ -67,7 +82,7 @@ pub struct NominalInfo {
   pub t : TypeHandle,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 #[repr(C)]
 pub struct FunctionInfo {
   pub args : PermSlice<TypeHandle>,
@@ -243,6 +258,10 @@ pub fn core_types() -> CoreTypes {
         ("u32", u32_tag),
         ("u16", u16_tag),
         ("u8", u8_tag),
+        ("i64", u64_tag), // TODO: fix
+        ("i32", u32_tag), // TODO: fix
+        ("i16", u16_tag), // TODO: fix
+        ("i8", u8_tag), // TODO: fix
         ("void", void_tag),
         ("node", node_tag),
         ("node_slice", node_slice_tag),
@@ -280,7 +299,7 @@ impl fmt::Display for TypeInfo {
       }
       Kind::Function => {
         let i = unsafe { &*(self.info as *const FunctionInfo) };
-        write!(f, "(fn (")?;
+        write!(f, "({} (", if i.c_function {"cfun"} else {"fn"})?;
         for &t in i.args.as_slice() {
           write!(f, "{} ", t)?;
         }

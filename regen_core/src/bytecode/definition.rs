@@ -48,7 +48,7 @@ pub enum Expr {
   InvokeC(LocalId, PermSlice<LocalId>),
   Load(LocalId),
   PtrOffset { ptr: LocalId, offset: LocalId },
-  BitCopy(LocalId),
+  Cast(LocalId),
 }
 
 #[derive(Copy, Clone)]

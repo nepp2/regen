@@ -2,7 +2,7 @@
 
 use crate::{
   bytecode, parse, symbols, env, perm_alloc,
-  types, interpret, node_builder,
+  types, interpret, node_macros,
 };
 
 use bytecode::{
@@ -21,7 +21,7 @@ use parse::{
   node_shape, NodeShape,
 };
 use NodeShape::*;
-use node_builder::{NodeBuilder, def_macro, template_macro};
+use node_macros::{NodeBuilder, def_macro, template_macro};
 
 struct LabelledExpr {
   name : Symbol,
@@ -307,7 +307,9 @@ fn compile_function(
     b.bc.instrs.push(Instr::Return(None));
   }
   if let Some(et) = expected_return {
-    // TODO: check return type
+    if et != return_type {
+      panic!("expected return type {}, found {}", et, return_type);
+    }
   }
   let t = types::function_type(&arg_types, return_type); // TODO: fix arg types!
   let f = complete_function(b);
@@ -376,11 +378,16 @@ fn compile_expr_to_val(b : &mut Builder, node : Node) -> Val {
   var.to_val(b)
 }
 
-fn compile_bitcast(b : &mut Builder, v : Val, t : TypeHandle) -> Val {
-  if v.data_type.size_of != t.size_of {
-    panic!("can't cast {} to {}", v.data_type, t)
+fn compile_cast(b : &mut Builder, v : Val, t : TypeHandle) -> Val {
+  fn ptr_or_prim(t : TypeHandle) -> bool {
+    t.kind == Kind::Pointer || t.kind == Kind::Primitive
   }
-  push_expr(b, Expr::BitCopy(v.id), t)
+  if t.size_of != v.data_type.size_of {
+    if !(ptr_or_prim(t) && ptr_or_prim(v.data_type)) {
+      panic!("cannot cast from {} to {}", v.data_type, t);
+    }
+  }
+  push_expr(b, Expr::Cast(v.id), t)
 }
 
 fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
@@ -418,16 +425,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     }
     // literal
     Literal(l) => {
-      match l {
-        NodeLiteral::U64(v) => {
-          let e = Expr::LiteralU64(v);
-          Some(push_expr(b, e, b.env.c.u64_tag).to_var())
-        }
-        NodeLiteral::String(s) => {
-          let e = Expr::Literal(b.env.c.string_tag, s.ptr as *const ());
-          Some(push_expr(b, e, b.env.c.string_tag).to_var())
-        }
-      }
+      Some(compile_literal(b, l).to_var())
     }
     // break to label
     Command("break", [label]) => {
@@ -469,7 +467,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
         if let Some(info) = types::type_as_array(&v.data_type) {
           let array_ptr = v.get_address(b);
           let element_ptr_type = types::pointer_type(info.inner);
-          compile_bitcast(b, array_ptr, element_ptr_type)
+          compile_cast(b, array_ptr, element_ptr_type)
         }
         else if v.data_type.kind == Kind::Pointer {
           v.to_val(b)
@@ -545,7 +543,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     Command("macro", [arg, body]) => {
       let f = compile_macro_def(b.env, *arg, *body);
       let v = function_to_value(b, f);
-      let mv = compile_bitcast(b, v, types::macro_type(v.data_type));
+      let mv = compile_cast(b, v, types::macro_type(v.data_type));
       Some(mv.to_var())
     }
     // set var
@@ -642,7 +640,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     Command("cast", [value, type_tag]) => {
       let t = node_to_type(b, *type_tag);
       let v = compile_expr_to_val(b, *value);
-      Some(compile_bitcast(b, v, t).to_var())
+      Some(compile_cast(b, v, t).to_var())
     }
     _ => {
       if let Some(type_tag) = try_node_to_type(b, node) {
@@ -656,6 +654,19 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
   }
 }
 
+fn compile_literal(b : &mut Builder, l : NodeLiteral) -> Val {
+  match l {
+    NodeLiteral::U64(v) => {
+      let e = Expr::LiteralU64(v);
+      push_expr(b, e, b.env.c.u64_tag)
+    }
+    NodeLiteral::String(s) => {
+      let e = Expr::Literal(b.env.c.string_tag, s.ptr as *const ());
+      push_expr(b, e, b.env.c.string_tag)
+    }
+  }
+}
+
 fn symbol_to_type(b : &Builder, s : Symbol) -> Option<TypeHandle> {
   if let Some(entry) = b.env.get(s) {
     if entry.tag.kind == Kind::Type {
@@ -663,6 +674,17 @@ fn symbol_to_type(b : &Builder, s : Symbol) -> Option<TypeHandle> {
     }
   }
   None
+}
+
+fn parse_args(b: &Builder, arg_nodes : Node) -> Vec<TypeHandle> {
+  let mut args = vec![];
+  for &arg in arg_nodes.children() {
+    let t =
+      if let [_name, t] = arg.children() { *t }
+      else { arg };
+    args.push(node_to_type(b, t));
+  }
+  args
 }
 
 fn try_node_to_type(b: &Builder, n : Node) -> Option<TypeHandle> {
@@ -674,6 +696,24 @@ fn try_node_to_type(b: &Builder, n : Node) -> Option<TypeHandle> {
     Command("ptr", [inner_type]) => {
       let inner = node_to_type(b, *inner_type);
       Some(types::pointer_type(inner))
+    }
+    // function type
+    Command("fn", [arg_nodes, ret]) => {
+      let args = parse_args(b, *arg_nodes);
+      let returns = node_to_type(b, *ret);
+      Some(types::function_type(&args, returns))
+    }
+    // c function type
+    Command("cfun", [arg_nodes, ret]) => {
+      let args = parse_args(b, *arg_nodes);
+      let returns = node_to_type(b, *ret);
+      Some(types::c_function_type(&args, returns))
+    }
+    // array type
+    Command("sized_array", [element, size]) => {
+      let element = node_to_type(b, *element);
+      let size = size.as_literal_u64();
+      Some(types::array_type(element, size))
     }
     // tuple type
     Command("tuple", fields) => {
@@ -746,9 +786,13 @@ fn compile_function_call(b : &mut Builder, list : &[Node]) -> Val {
       f.data_type, function, function.loc);
   };
   let mut arg_values = vec![];
-  for &arg in args {
+  for i in 0..args.len() {
+    let arg = args[i];
     // TODO: check types
     let v = compile_expr_to_val(b, arg);
+    if info.args[i] != v.data_type  {
+      panic!("expected arg of type {}, found type {}, at ({})", info.args[i], v.data_type, arg.loc);
+    }
     arg_values.push(v.id);
   }
   let e = {
@@ -814,9 +858,24 @@ fn op_result_type(c : &CoreTypes, op : Operator) -> TypeHandle {
   }
 }
 
+fn compile_typed_literal(b : &mut Builder, node : Node) -> Option<Val> {
+  if let [lit, tag] = node.children() {
+    if let NodeContent::Literal(l) = lit.content {
+      if let Some(t) = try_node_to_type(b, *tag) {
+        let v = compile_literal(b, l);
+        return Some(compile_cast(b, v, t))
+      }
+    }
+  }
+  None
+}
+
 fn compile_list_expr(b : &mut Builder, node : Node) -> Option<Var> {
   if node.children().len() == 0 {
     return None;
+  }
+  if let Some(v) = compile_typed_literal(b, node) {
+    return Some(v.to_var());
   }
   match node_shape(&node) {
     Command(head, tail) => {

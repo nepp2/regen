@@ -12,7 +12,7 @@ use bytecode::{
 };
 use compile::Function;
 use perm_alloc::PermSlice;
-use types::TypeHandle;
+use types::{TypeHandle, Primitive};
 
 pub type CompileExpression = fn(env : &Env, fun : Node) -> Function;
 
@@ -189,9 +189,8 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
               let p : u64 = frame.get_local(ptr);
               frame.set_local(var, &(p + (sizeof * offset)));
             }
-            Expr::BitCopy(v) => {
-              let v_addr = frame.local_addr(v);
-              frame.set_local_from_ptr(var, v_addr);
+            Expr::Cast(v) => {
+              frame.cast(v, var);
             }
           };
         }
@@ -345,9 +344,40 @@ impl Frame {
         self.local_sizeof(dest) as usize);
     }
   }
+
+  fn cast(&self, src : LocalId, dest : LocalId) {
+    let src_type = self.local_type(src);
+    let dest_type = self.local_type(dest);
+    let src_addr = self.local_addr(src);
+    if src_type.size_of == dest_type.size_of {
+      self.set_local_from_ptr(dest, src_addr);
+    }
+    else {
+      let dest_addr = self.local_addr(dest);
+      unsafe {
+        cast(src_addr, dest_addr, src_type, dest_type);
+      }
+    }
+  }
   
   fn get_local<T : Copy>(&self, l : LocalId) -> T {
     unsafe { *(self.local_addr(l) as *const T) }
+  }
+}
+
+unsafe fn cast(src : *const (), dest : *mut (), src_type : TypeHandle, dest_type : TypeHandle) {
+  use Primitive::*;
+  let src_prim = types::type_as_primitive(&src_type).unwrap();
+  let dest_prim = types::type_as_primitive(&dest_type).unwrap();
+  match (src_prim, dest_prim) {
+    (U64, U32) => *(dest as *mut u64) = (*(src as *mut u32)) as u64,
+    (U64, U16) => *(dest as *mut u64) = (*(src as *mut u16)) as u64,
+    (U64, U8) => *(dest as *mut u64) = (*(src as *mut u8)) as u64,
+
+    (U32, U64) => *(dest as *mut u32) = (*(src as *mut u64)) as u32,
+    (U16, U64) => *(dest as *mut u16) = (*(src as *mut u64)) as u16,
+    (U8, U64) => *(dest as *mut u8) = (*(src as *mut u64)) as u8,
+    _ => panic!("unsupported cast between {} and {}", src_type, dest_type)
   }
 }
 

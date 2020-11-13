@@ -182,6 +182,7 @@ pub fn new_env(st : SymbolTable) -> Env {
   let u64 = env.c.u64_tag;
   let void = env.c.void_tag;
   let node = env.c.node_tag;
+  let type_tag = env.c.type_tag;
 
   env.insert_str("c_add", c_add as u64,
     c_function_type(&[u64, u64], u64));
@@ -204,7 +205,7 @@ pub fn new_env(st : SymbolTable) -> Env {
   env.insert_str("env", Perm::to_ptr(e) as u64, u64);
 
   env.insert_str("env_insert", env_insert as u64,
-    c_function_type(&[u64, u64, u64, u64], void));
+    c_function_type(&[u64, u64, u64, type_tag], void));
 
   env.insert_str("env_get", env_get as u64, 
     c_function_type(&[u64, u64], u64));

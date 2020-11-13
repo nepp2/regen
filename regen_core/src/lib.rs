@@ -3,7 +3,7 @@
 mod perm_alloc;
 pub mod symbols;
 mod parse;
-mod node_builder;
+mod node_macros;
 pub mod env;
 mod bytecode;
 mod compile;

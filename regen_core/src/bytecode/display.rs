@@ -165,8 +165,8 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, (TypeHandle, Expr)> {
       Expr::PtrOffset {ptr, offset } => {
         write!(f, "(ptr_offset {} {})", bc.d(ptr), bc.d(offset))
       }
-      Expr::BitCopy(v) =>
-        write!(f, "(bitcopy {})", bc.d(v)),
+      Expr::Cast(v) =>
+        write!(f, "(cast {})", bc.d(v)),
     }
   }
 }
