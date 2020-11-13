@@ -1,6 +1,6 @@
 
 use regen_core::{
-  env::Env,
+  env::{Env, define_global},
   symbols::{Symbol, to_symbol},
   types::c_function_type,
   interpret,
@@ -15,18 +15,17 @@ const LIB_PATH : &'static str = "examples/lib";
 #[cfg(test)]
 const LIB_PATH : &'static str = "../examples/lib";
 
-pub extern "C" fn include(mut env : Env, file_name : Symbol) {
+pub extern "C" fn include(env : Env, file_name : Symbol) {
   let path_symbol = to_symbol(env.st, format!("module::{}", file_name));
-  if env.get(path_symbol).is_none() {
+  if env.values.get(&path_symbol).is_none() {
     let path = format!("{}/{}.gen", LIB_PATH, file_name.as_str());
     let code =
       fs::read_to_string(&path)
       .expect("Something went wrong reading the file");
     interpret::interpret_file(&code, env);
     let u64 = env.c.u64_tag;
-    env.insert(path_symbol, path_symbol.as_u64(), u64);
+    define_global(env, path_symbol.as_str(), path_symbol.as_u64(), u64);
   }
-
 }
 
 pub extern "C" fn load_library(path : Symbol) -> *const Library {
@@ -53,13 +52,13 @@ pub extern "C" fn load_library_symbol(lib : &Library, symbol : Symbol) -> *const
   }
 }
 
-pub fn bind_libs(mut env : Env) {
+pub fn bind_libs(env : Env) {
   let u64 = env.c.u64_tag;
   let void = env.c.void_tag;
-  env.insert_str("include", include as u64,
+  define_global(env, "include", include as u64,
     c_function_type(&[u64], void));
-  env.insert_str("load_library", load_library as u64,
+  define_global(env, "load_library", load_library as u64,
     c_function_type(&[u64], u64));
-  env.insert_str("load_library_symbol", load_library_symbol as u64,
+  define_global(env, "load_library_symbol", load_library_symbol as u64,
     c_function_type(&[u64, u64], u64));
 }

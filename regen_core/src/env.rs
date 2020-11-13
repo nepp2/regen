@@ -21,28 +21,8 @@ pub type Env = Perm<Environment>;
 
 #[derive(Copy, Clone)]
 pub struct EnvEntry {
-  pub value : u64,
+  pub ptr : *mut (),
   pub tag : TypeHandle,
-}
-
-impl Environment {
-  pub fn get(&self, name : Symbol) -> Option<&EnvEntry> {
-    self.values.get(&name)
-  }
-
-  pub fn get_str(&self, name : &str) -> Option<&EnvEntry> {
-    let name = to_symbol(self.st, name);
-    self.get(name)
-  }
-
-  pub fn insert(&mut self, name : Symbol, value : u64, tag : TypeHandle) {
-    self.values.insert(name, EnvEntry {value, tag });
-  }
-
-  pub fn insert_str(&mut self, name : &str, value : u64, tag : TypeHandle) {
-    let name = to_symbol(self.st, name);
-    self.insert(name, value, tag);
-  }
 }
 
 pub extern "C" fn c_add(a : u64, b : u64) -> u64 {
@@ -71,12 +51,18 @@ extern {
   pub fn memcpy(dest : *mut u8, src: *const u8, count : usize) -> *mut u8;
 }
 
-pub extern "C" fn env_insert(mut env : Env, sym : Symbol, value : u64, t : TypeHandle) {
-  env.insert(sym, value, t);
+pub extern "C" fn env_alloc_global(mut env : Env, name : Symbol, tag : TypeHandle) -> *mut () {
+  let layout = std::alloc::Layout::from_size_align(tag.size_of as usize, 8).unwrap();
+  let ptr = unsafe { std::alloc::alloc(layout) } as *mut ();
+  if env.values.contains_key(&name) {
+    panic!("global {} already defined", name);
+  }
+  env.values.insert(name, EnvEntry {ptr, tag });
+  ptr
 }
 
-pub extern "C" fn env_get(env : Env, sym : Symbol) -> u64 {
-  env.get(sym).unwrap().value
+pub extern "C" fn env_get_global_ptr(env : Env, sym : Symbol) -> *mut () {
+  env.values.get(&sym).unwrap().ptr
 }
 
 pub extern "C" fn symbol_display(sym : Symbol) {
@@ -161,12 +147,39 @@ pub extern "C" fn template_quote(n : Node, args_ptr : *const Node, num_args : u6
   template(n, args, &mut 0)
 }
 
+pub extern "C" fn type_sizeof(t : TypeHandle) -> u64 {
+  t.size_of
+}
+
 pub extern "C" fn type_display(t : TypeHandle) {
   println!("{}", t);
 }
 
+pub fn define_global(e : Env, s : &str, v : u64, t : TypeHandle) {
+  let sym = to_symbol(e.st, s);
+  let p = env_alloc_global(e, sym, t);
+  unsafe {
+    *(p as *mut u64) = v;
+  }
+}
+
+pub fn get_global_value<T : Copy>(e : Env, sym : Symbol, t : TypeHandle) -> Option<T> {
+  if let Some(entry) = e.values.get(&sym) {
+    if entry.tag == t {
+      unsafe {
+        return Some(*(entry.ptr as *mut T))
+      }
+    }
+  }
+  None
+}
+
+pub fn get_global_type(e : Env, sym : Symbol) -> Option<TypeHandle> {
+  e.values.get(&sym).map(|entry| entry.tag)
+}
+
 pub fn new_env(st : SymbolTable) -> Env {
-  let mut env = perm(Environment {
+  let env = perm(Environment {
     values: Default::default(),
     st,
     c: core_types(),
@@ -174,73 +187,75 @@ pub fn new_env(st : SymbolTable) -> Env {
   let e = env;
   let c = &e.c;
   for (n, t) in &c.core_types {
-    let e = EnvEntry { value: Perm::to_u64(*t), tag: env.c.type_tag };
-    let n = to_symbol(st, *n);
-    env.values.insert(n, e);
+    define_global(e, n, Perm::to_u64(*t), env.c.type_tag);
   }
 
   let u64 = env.c.u64_tag;
   let void = env.c.void_tag;
+  let void_ptr = types::pointer_type(void);
   let node = env.c.node_tag;
   let type_tag = env.c.type_tag;
 
-  env.insert_str("c_add", c_add as u64,
+  define_global(e, "c_add", c_add as u64,
     c_function_type(&[u64, u64], u64));
 
-  env.insert_str("test_tuple", test_tuple as u64,
+  define_global(e, "test_tuple", test_tuple as u64,
     c_function_type(&[u64], u64));
 
-  env.insert_str("fail", fail as u64,
+  define_global(e, "fail", fail as u64,
     c_function_type(&[u64], u64));
 
-  env.insert_str("malloc", malloc as u64,
-    c_function_type(&[u64], u64));
+  define_global(e, "malloc", malloc as u64,
+    c_function_type(&[u64], void_ptr));
 
-  env.insert_str("free", free as u64,
+  define_global(e, "free", free as u64,
+    c_function_type(&[void_ptr], void));
+
+  define_global(e, "memcpy", memcpy as u64,
+    c_function_type(&[void_ptr, void_ptr, u64], void));  
+
+  define_global(e, "env", Perm::to_u64(e), u64);
+
+  define_global(e, "env_alloc_global", env_alloc_global as u64,
+    c_function_type(&[u64, u64, type_tag], void_ptr));
+
+  define_global(e, "env_get_global_ptr", env_get_global_ptr as u64,
+    c_function_type(&[u64, u64], void_ptr));
+
+  define_global(e, "symbol_display", symbol_display as u64,
     c_function_type(&[u64], void));
 
-  env.insert_str("memcpy", memcpy as u64,
-    c_function_type(&[u64, u64, u64], void));
-
-  env.insert_str("env", Perm::to_ptr(e) as u64, u64);
-
-  env.insert_str("env_insert", env_insert as u64,
-    c_function_type(&[u64, u64, u64, type_tag], void));
-
-  env.insert_str("env_get", env_get as u64, 
-    c_function_type(&[u64, u64], u64));
-
-  env.insert_str("symbol_display", symbol_display as u64,
-    c_function_type(&[u64], void));
-
-  env.insert_str("node_children_c", node_children as u64,
+  define_global(e, "node_children_c", node_children as u64,
     c_function_type(&[u64, u64], void));
 
-  env.insert_str("node_display", node_display as u64,
+  define_global(e, "node_display", node_display as u64,
     c_function_type(&[u64], void));
 
-  env.insert_str("node_from_list", node_from_list as u64,
+  define_global(e, "node_from_list", node_from_list as u64,
     c_function_type(&[u64], u64));
 
-  env.insert_str("node_from_symbol", node_from_symbol as u64,
+  define_global(e, "node_from_symbol", node_from_symbol as u64,
     c_function_type(&[u64], u64));
 
-  env.insert_str("node_from_literal", node_from_literal as u64,
+  define_global(e, "node_from_literal", node_from_literal as u64,
     c_function_type(&[u64], u64));
 
-  env.insert_str("node_as_symbol", node_as_symbol as u64,
+  define_global(e, "node_as_symbol", node_as_symbol as u64,
     c_function_type(&[u64], u64));
 
-  env.insert_str("eval", eval as u64,
+  define_global(e, "eval", eval as u64,
     c_function_type(&[u64, u64], u64));
 
-  env.insert_str("template_quote", template_quote as u64,
+  define_global(e, "template_quote", template_quote as u64,
     c_function_type(&[node, types::pointer_type(node), u64], node));
 
-  env.insert_str("calculate_packed_field_offsets", calculate_packed_field_offsets as u64,
+  define_global(e, "calculate_packed_field_offsets", calculate_packed_field_offsets as u64,
     c_function_type(&[u64, u64], u64));
 
-  env.insert_str("type_display", type_display as u64,
+  define_global(e, "type_sizeof", type_sizeof as u64,
+    c_function_type(&[type_tag], u64));
+
+  define_global(e, "type_display", type_display as u64,
     c_function_type(&[u64], void));
 
   env

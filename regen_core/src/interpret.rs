@@ -90,8 +90,8 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
               frame.set_local(var, &v);
             }
             Expr::Def(sym) => {
-              if let Some(f) = env.get(sym) {
-                frame.set_local(var, &f.value);
+              if let Some(f) = env.values.get(&sym) {
+                frame.set_local(var, &f.ptr);
               }
               else {
                 panic!("Symbol '{}' not present in env", sym);

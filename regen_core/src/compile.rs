@@ -189,6 +189,15 @@ fn push_expr(b : &mut Builder, e : Expr, t : TypeHandle) -> Val {
   return v;
 }
 
+fn pointer_to_locator(v : Val, mutable : bool) -> Var {
+  let inner = types::deref_pointer_type(&v.data_type).expect("expected pointer type");
+  Var {
+    var_type: VarType::Locator(v.id),
+    data_type: inner,
+    mutable,
+  }
+}
+
 fn find_label(b : &mut Builder, label : Symbol) -> &LabelledExpr {
   b.label_stack.iter().rev()
   .find(|l| l.name == label)
@@ -272,9 +281,7 @@ fn compile_function_def(env: Env, args : &[Node], return_tag : Option<Node>, bod
   for &arg in args {
     let (name, t) = {
       if let [name, type_tag] = arg.children() {
-        let t =
-          TypeHandle::from_u64(
-            b.env.get(type_tag.as_symbol()).unwrap().value);
+        let t = node_to_type(&b, *type_tag);
         (name.as_symbol(), t)
       }
       else {
@@ -478,10 +485,8 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       };
       let offset = compile_expr_to_val(b, *index).id;
       let e = Expr::PtrOffset { ptr: ptr.id, offset };
-      let id = new_local(b, None, ptr.data_type, v.mutable);
-      b.bc.instrs.push(Instr::Expr(id, e));
-      let inner = types::deref_pointer_type(&ptr.data_type).unwrap();
-      Some(Var { var_type: VarType::Locator(id), data_type: inner, mutable: v.mutable})
+      let ptr = push_expr(b, e, ptr.data_type);
+      Some(pointer_to_locator(ptr, v.mutable))
     }
     // init
     Command("init", ns) => {
@@ -510,9 +515,8 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       };
       let field_type = info.field_types[i as usize];
       let e = Expr::FieldIndex{ struct_addr, index: i };
-      let id = new_local(b, None, types::pointer_type(field_type), struct_val.mutable);
-      b.bc.instrs.push(Instr::Expr(id, e));
-      Some(Var { var_type: VarType::Locator(id), data_type: field_type, mutable: struct_val.mutable})
+      let v = push_expr(b, e, types::pointer_type(field_type));
+      Some(pointer_to_locator(v, struct_val.mutable))
     }
     // template
     Command("#", [quoted]) => {
@@ -625,11 +629,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     // load
     Command("*", [pointer]) => {
       let ptr = compile_expr_to_val(b, *pointer);
-      let t =
-        types::deref_pointer_type(&ptr.data_type)
-        .expect("expected pointer type");
-      let var = Var{ var_type: VarType::Locator(ptr.id), data_type: t, mutable: true };
-      return Some(var);
+      Some(pointer_to_locator(ptr, true))
     }
     // ref
     Command("ref", [locator]) => {
@@ -668,12 +668,7 @@ fn compile_literal(b : &mut Builder, l : NodeLiteral) -> Val {
 }
 
 fn symbol_to_type(b : &Builder, s : Symbol) -> Option<TypeHandle> {
-  if let Some(entry) = b.env.get(s) {
-    if entry.tag.kind == Kind::Type {
-      return Some(TypeHandle::from_u64(entry.value));
-    }
-  }
-  None
+  env::get_global_value(b.env, s, b.env.c.type_tag)
 }
 
 fn parse_args(b: &Builder, arg_nodes : Node) -> Vec<TypeHandle> {
@@ -763,13 +758,14 @@ fn compile_symbol_reference(b : &mut Builder, node : Node) -> Var {
   let sym = node.as_symbol();
   // Look for local
   if let Some(r) = find_local_in_scope(b, sym) {
+    let aaa = (); // TODO: should this return a locator?
     return r.to_var();
   }
   // Assume global
-  if let Some(entry) = b.env.get(sym) {
+  if let Some(tag) = env::get_global_type(b.env, sym) {
     let e = Expr::Def(sym);
-    let t = entry.tag;
-    return push_expr(b, e, t).to_var();
+    let v = push_expr(b, e, types::pointer_type(tag));
+    return pointer_to_locator(v, true);
   }
   panic!("symbol '{}' not defined ({})", sym, node.loc)
 }
@@ -820,9 +816,9 @@ fn compile_call(b : &mut Builder, n : Node) -> Option<Var> {
   let list = n.children();
   let function = list[0];
   if let parse::NodeContent::Sym(f) = function.content {
-    if let Some(e) = b.env.get(f) {
-      if types::type_as_macro(&e.tag).is_some() {
-        let f = unsafe { &*(e.value as *const Function) };
+    if let Some(tag) = env::get_global_type(b.env, f) {
+      if types::type_as_macro(&tag).is_some() {
+        let f = env::get_global_value(b.env, f, tag).unwrap();
         return compile_macro_call(b, f, n);
       }
     }

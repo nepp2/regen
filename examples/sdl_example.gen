@@ -1,11 +1,11 @@
 
 (def SDL_INIT_VIDEO (32 u32))
-(def SDL_QUIT 256)
-(def SDL_WINDOWPOS_UNDEFINED 536805376)
-(def SDL_WINDOW_SHOWN 4)
-(def SDL_RENDERER_ACCELERATED 2)
+(def SDL_QUIT (256 u32))
+(def SDL_WINDOWPOS_UNDEFINED (536805376 u32))
+(def SDL_WINDOW_SHOWN (4 u32))
+(def SDL_RENDERER_ACCELERATED (2 u32))
 
-(def u64_max 18446744073709551615)
+(def u32_max (4294967295 u32))
 
 (def sdl2
   (load_library (sym SDL2)))
@@ -69,35 +69,33 @@
   (cfun ((renderer sdl_renderer_handle) (rect (ptr sdl_rect))) void)
 ))
 
-(def title "AAA")
-
-(debug (typeof title))
+(def title (array (65 u8) (65 u8) (65 u8) (0 u8)))
 
 (do
   (sdl_init SDL_INIT_VIDEO)
-  ;; (let win
-  ;;   (sdl_create_window
-  ;;     (. title 0)
-  ;;     SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED
-  ;;     800 600
-  ;;     SDL_WINDOW_SHOWN))
-  ;; (let renderer
-  ;;   (sdl_create_renderer win u64_max SDL_RENDERER_ACCELERATED))
-  ;; (let event_ptr (cast (malloc 1000) (ptr sdl_event)))
-  ;; (label loop (do
-  ;;   (if (= 1 (sdl_poll_event event_ptr))
-  ;;     (if (= (* event_ptr) SDL_QUIT)
-  ;;       (break loop)
-  ;;     )
-  ;;   )
-  ;;   (sdl_set_draw_color renderer 0 0 0 0)
-  ;;   (sdl_clear renderer)
-  ;;   (sdl_set_draw_color renderer 255 0 0 255)
+  (let win
+    (sdl_create_window
+      (ref (index title 0))
+      SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED
+      (800 u32) (600 u32)
+      SDL_WINDOW_SHOWN))
+  (let renderer
+    (sdl_create_renderer win u32_max SDL_RENDERER_ACCELERATED))
+  (let event_ptr (cast (malloc 1000) (ptr sdl_event)))
+  (label loop (do
+    (if (= 1 (sdl_poll_event event_ptr))
+      (if (= (* event_ptr) SDL_QUIT)
+        (break loop)
+      )
+    )
+    (sdl_set_draw_color renderer (0 u8) (0 u8) (0 u8) (0 u8))
+    (sdl_clear renderer)
+    (sdl_set_draw_color renderer (255 u8) (0 u8) (0 u8) (255 u8))
 
-  ;;   (let rect (init sdl_rect 50 50 300 200))
-  
-  ;;   (sdl_fill_rect renderer rect)
-  ;;   (sdl_present renderer)
-  ;;   (repeat loop)
-  ;; ))
+    (let rect (init sdl_rect 50 50 300 200))
+
+    (sdl_fill_rect renderer (ref rect))
+    (sdl_present renderer)
+    (repeat loop)
+  ))
 )
