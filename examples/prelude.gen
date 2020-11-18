@@ -1,4 +1,0 @@
-
-(def node_index (fun ((ns node_slice) (i u64)) node (do
-  (index (. ns 0) i)
-)))

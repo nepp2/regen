@@ -54,7 +54,6 @@
   (cfun (sdl_renderer_handle) void)
 ))
 
-;; x y w h
 (def sdl_rect (struct
   (x i32) (y i32) (w i32) (h i32)
 ))
@@ -68,34 +67,3 @@
   (load_library_symbol sdl2 (sym SDL_RenderFillRect))
   (cfun ((renderer sdl_renderer_handle) (rect (ptr sdl_rect))) void)
 ))
-
-(def title (array (65 u8) (65 u8) (65 u8) (0 u8)))
-
-(do
-  (sdl_init SDL_INIT_VIDEO)
-  (let win
-    (sdl_create_window
-      (ref (index title 0))
-      SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED
-      (800 u32) (600 u32)
-      SDL_WINDOW_SHOWN))
-  (let renderer
-    (sdl_create_renderer win u32_max SDL_RENDERER_ACCELERATED))
-  (let event_ptr (cast (malloc 1000) (ptr sdl_event)))
-  (label loop (do
-    (if (= 1 (sdl_poll_event event_ptr))
-      (if (= (* event_ptr) SDL_QUIT)
-        (break loop)
-      )
-    )
-    (sdl_set_draw_color renderer (0 u8) (0 u8) (0 u8) (0 u8))
-    (sdl_clear renderer)
-    (sdl_set_draw_color renderer (255 u8) (0 u8) (0 u8) (255 u8))
-
-    (let rect (init sdl_rect 50 50 300 200))
-
-    (sdl_fill_rect renderer (ref rect))
-    (sdl_present renderer)
-    (repeat loop)
-  ))
-)

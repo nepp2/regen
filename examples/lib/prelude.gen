@@ -1,45 +1,4 @@
 
-;; *{ size : u64, kind : symbol, kind_info : *void }
-(def new_type (fun (size kind kind_info) (
-  ;; allocate type
-  (let p (malloc 24))
-  (store u64 p size)
-  (store u64 (+ p 8) kind)
-  (store u64 (+ p 16) kind_info)
-  p
-)))
-
-(def type_size_of (fun (type) (
-  (load u64 type)
-)))
-
-(def type_kind (fun (type) (
-  (load u64 (+ type 8))
-)))
-
-(def type_kind_info (fun (type) (
-  (load u64 (+ type 16))
-)))
-
-(def tuple_type_field_types (fun (type) (
-  (type_kind_info type)
-)))
-
-(def tuple_type_field_offsets (fun (type) (
-  (let info (type_kind_info type))
-  (+ info 16)
-)))
-
-(def max (fun (a b) (
-  (if (> a b) (a) (b))
-)))
-
-(def min (fun (a b) (
-  (if (< a b) (a) (b))
-)))
-
-(def node_children (fun (node) (
-  (let cs (byte_chunk 16))
-  (node_children_c (ref cs) node)
-  cs
+(def node_index (fun ((ns node_slice) (i u64)) node (do
+  (index (. ns 0) i)
 )))

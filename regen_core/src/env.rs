@@ -25,22 +25,6 @@ pub struct EnvEntry {
   pub tag : TypeHandle,
 }
 
-pub extern "C" fn c_add(a : u64, b : u64) -> u64 {
-  a + b
-}
-
-#[repr(C)]
-pub struct TestRect {
-  x : u32,
-  y : u32,
-  w : u32,
-  h : u32,
-}
-
-pub extern "C" fn test_tuple(r : TestRect) -> bool {
-  r.x == 1 && r.y == 2 && r.w == 3 && r.h == 4
-}
-
 pub extern "C" fn fail(s : Symbol) -> bool {
   panic!("failed with symbol {}", s)
 }
@@ -195,12 +179,6 @@ pub fn new_env(st : SymbolTable) -> Env {
   let void_ptr = types::pointer_type(void);
   let node = env.c.node_tag;
   let type_tag = env.c.type_tag;
-
-  define_global(e, "c_add", c_add as u64,
-    c_function_type(&[u64, u64], u64));
-
-  define_global(e, "test_tuple", test_tuple as u64,
-    c_function_type(&[u64], u64));
 
   define_global(e, "fail", fail as u64,
     c_function_type(&[u64], u64));

@@ -1,6 +1,4 @@
 
-
-
 (def list (macro n
   ;; create type name
   (let name (sym (node_as_string n)))
