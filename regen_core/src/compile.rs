@@ -39,7 +39,7 @@ struct Builder {
   bc : FunctionBytecode,
   
   /// local variables in scope
-  scoped_locals : Vec<NamedLocal>,
+  scoped_vars : Vec<NamedVar>,
   
   /// the instruction sequence currently being built
   current_sequence : Option<SequenceId>,
@@ -64,7 +64,7 @@ impl Builder {
         locals: vec![],
         frame_bytes: 0,
       },
-      scoped_locals: vec![],
+      scoped_vars: vec![],
       seq_completion: vec![],
       current_sequence: None,
       label_stack: vec![],
@@ -74,7 +74,7 @@ impl Builder {
 }
 
 #[derive(Copy, Clone)]
-enum VarType {
+enum RefType {
   /// A locator register contains a pointer to a value.
   /// Must be derefenced into value register to be read from.
   /// Can be written to.
@@ -84,40 +84,43 @@ enum VarType {
   Value(LocalId),
 }
 
+/// A reference can be used to obtain a value or its address. A reference may be:
+///   * a var containing a value
+///   * a var containing the address of a value
 #[derive(Copy, Clone)]
-pub struct Var {
-  var_type : VarType,
+pub struct Ref {
+  ref_type : RefType,
   data_type : TypeHandle,
   mutable : bool,
 }
 
-impl Var {
+impl Ref {
 
-  fn from_val(val : Val) -> Self {
-    Var{ var_type: VarType::Value(val.id), data_type: val.data_type, mutable: val.mutable }
+  fn from_var(local : Var) -> Self {
+    Ref{ ref_type: RefType::Value(local.id), data_type: local.data_type, mutable: local.mutable }
   }
 
-  fn get_address(&self, b : &mut Builder) -> Val {
+  fn get_address(&self, b : &mut Builder) -> Var {
     let t = types::pointer_type(self.data_type);
-    let id = match self.var_type {
-      VarType::Locator(id) => id,
-      VarType::Value(id) => {
+    let id = match self.ref_type {
+      RefType::Locator(id) => id,
+      RefType::Value(id) => {
         let e = Expr::LocalAddr(id);
         let addr_id = new_local(b, None, t, self.mutable);
         b.bc.instrs.push(Instr::Expr(addr_id, e));
         addr_id
       }
     };
-    Val { id, data_type: t, mutable: self.mutable }
+    Var { id, data_type: t, mutable: self.mutable }
   }
   
-  fn to_val(&self, b : &mut Builder) -> Val {
-    match self.var_type {
-      VarType::Locator(r) => {
+  fn to_var(&self, b : &mut Builder) -> Var {
+    match self.ref_type {
+      RefType::Locator(r) => {
         let e = Expr::Load(r);
         push_expr(b, e, self.data_type)
       }
-      VarType::Value(r) => Val {
+      RefType::Value(r) => Var {
         id: r,
         data_type: self.data_type,
         mutable: self.mutable,
@@ -127,29 +130,29 @@ impl Var {
 }
 
 #[derive(Copy, Clone)]
-struct Val {
+struct Var {
   id : LocalId,
   data_type : TypeHandle, // TODO: type name should just be `t`, for consistency
   mutable : bool,
 }
 
-impl Val {
-  fn to_var(&self) -> Var {
-    Var::from_val(*self)
+impl Var {
+  fn to_ref(&self) -> Ref {
+    Ref::from_var(*self)
   }
 }
 
 #[derive(Copy, Clone)]
-struct NamedLocal {
+struct NamedVar {
   name : Symbol,
-  v : Val,
+  v : Var,
 }
 
-fn find_local_in_scope(b : &mut Builder, name : Symbol)
-  -> Option<Val>
+fn find_var_in_scope(b : &mut Builder, name : Symbol)
+  -> Option<Var>
 {
   let result =
-    b.scoped_locals.iter().rev()
+    b.scoped_vars.iter().rev()
     .find(|&l| l.name == name).cloned();
   if let Some(nl) = result {
     return Some(nl.v);
@@ -157,11 +160,10 @@ fn find_local_in_scope(b : &mut Builder, name : Symbol)
   None
 }
 
-fn new_scoped_variable(b : &mut Builder, name : Symbol, t : TypeHandle) -> Val {
+fn new_local_variable(b : &mut Builder, name : Symbol, t : TypeHandle) -> Var {
   let id = new_local(b, Some(name), t, true);
-  let v = Val { id, data_type: t, mutable: true };
-  let tl = NamedLocal{ name, v };
-  b.scoped_locals.push(tl);
+  let v = Var { id, data_type: t, mutable: true };
+  b.scoped_vars.push(NamedVar{ name, v });
   v
 }
 
@@ -178,21 +180,21 @@ fn new_local(b : &mut Builder, name : Option<Symbol>, t : TypeHandle, mutable : 
   id
 }
 
-fn new_val(b : &mut Builder, t : TypeHandle, mutable : bool) -> Val {
+fn new_var(b : &mut Builder, t : TypeHandle, mutable : bool) -> Var {
   let id = new_local(b, None, t, mutable);
-  Val { id, data_type: t, mutable }
+  Var { id, data_type: t, mutable }
 }
 
-fn push_expr(b : &mut Builder, e : Expr, t : TypeHandle) -> Val {
-  let v = new_val(b, t, false);
+fn push_expr(b : &mut Builder, e : Expr, t : TypeHandle) -> Var {
+  let v = new_var(b, t, false);
   b.bc.instrs.push(Instr::Expr(v.id, e));
   return v;
 }
 
-fn pointer_to_locator(v : Val, mutable : bool) -> Var {
+fn pointer_to_locator(v : Var, mutable : bool) -> Ref {
   let inner = types::deref_pointer_type(&v.data_type).expect("expected pointer type");
-  Var {
-    var_type: VarType::Locator(v.id),
+  Ref {
+    ref_type: RefType::Locator(v.id),
     data_type: inner,
     mutable,
   }
@@ -263,15 +265,15 @@ fn compile_macro_def(env: Env, arg : Node, body : Node) -> Function {
   b.bc.args = 1;
   let name = arg.as_symbol();
   let arg_type = env.c.node_slice_tag;
-  new_scoped_variable(&mut b, name, arg_type);
+  new_local_variable(&mut b, name, arg_type);
   compile_function(b, body, &[arg_type], Some(env.c.node_tag))
 }
 
-fn function_to_value(b : &mut Builder, f : Function) -> Val {
-  let function_val = new_val(b, f.t, false);
+fn function_to_var(b : &mut Builder, f : Function) -> Var {
+  let function_var = new_var(b, f.t, false);
   let f_addr = Box::into_raw(Box::new(f)) as u64;
-  b.bc.instrs.push(Instr::Expr(function_val.id, Expr::LiteralU64(f_addr)));
-  function_val
+  b.bc.instrs.push(Instr::Expr(function_var.id, Expr::LiteralU64(f_addr)));
+  function_var
 }
 
 fn compile_function_def(env: Env, args : &[Node], return_tag : Option<Node>, body : Node) -> Function {
@@ -288,7 +290,7 @@ fn compile_function_def(env: Env, args : &[Node], return_tag : Option<Node>, bod
         panic!("expected typed argument")
       }
     };
-    new_scoped_variable(&mut b, name, t);
+    new_local_variable(&mut b, name, t);
     arg_types.push(t);
   }
   let expected_return = return_tag.map(|n| node_to_type(&mut b, n));
@@ -304,9 +306,9 @@ fn compile_function(
   set_current_sequence(&mut b, entry_seq);
 
   let mut return_type = b.env.c.void_tag;
-  let r = compile_expr(&mut b, body);
-  if let Some(var) = r {
-    let v = var.to_val(&mut b);
+  let result = compile_expr(&mut b, body);
+  if let Some(r) = result {
+    let v = r.to_var(&mut b);
     return_type = v.data_type;
     b.bc.instrs.push(Instr::Return(Some(v.id)));
   }
@@ -321,7 +323,7 @@ fn compile_function(
   let t = types::function_type(&arg_types, return_type); // TODO: fix arg types!
   let f = complete_function(b);
   // for n in body { println!("{}", n) }
-  // println!("{}", f);
+  println!("{}", f);
   Function { bc: f, t }
 }
 
@@ -330,34 +332,34 @@ pub fn compile_expr_to_function(env: Env, root : Node) -> Function {
   compile_function(Builder::new(env), root, &[], None)
 }
 
-fn compile_if_else(b : &mut Builder, cond : Node, then_expr : Node, else_expr : Node) -> Option<Var> {
-  let mut result_local = None;
+fn compile_if_else(b : &mut Builder, cond : Node, then_expr : Node, else_expr : Node) -> Option<Ref> {
+  let mut result_var = None;
   let then_seq = create_sequence(b, "then");
   let else_seq = create_sequence(b, "else");
   let exit_seq = create_sequence(b, "exit");
-  let cond = compile_expr_to_val(b, cond).id;
+  let cond = compile_expr_to_var(b, cond).id;
   b.bc.instrs.push(Instr::CJump{ cond, then_seq, else_seq });
   set_current_sequence(b, then_seq);
   let then_result = compile_expr(b, then_expr);
   if let Some(v) = then_result {
-    let l = new_val(b, v.data_type, true).to_var();
-    result_local = Some(l);
-    let v = v.to_val(b);
-    compile_set_local(b, l, v);
+    let nv = new_var(b, v.data_type, true).to_ref();
+    result_var = Some(nv);
+    let v = v.to_var(b);
+    compile_assignment(b, nv, v);
   }
   b.bc.instrs.push(Instr::Jump(exit_seq));
   set_current_sequence(b, else_seq);
   let else_result = compile_expr(b, else_expr);
-  if let Some(l) = result_local {
-    let v = else_result.expect("expected block expression").to_val(b);
-    compile_set_local(b, l, v);
+  if let Some(l) = result_var {
+    let v = else_result.expect("expected block expression").to_var(b);
+    compile_assignment(b, l, v);
   }
   b.bc.instrs.push(Instr::Jump(exit_seq));
   set_current_sequence(b, exit_seq);
-  result_local
+  result_var
 }
 
-fn compile_set_local(b : &mut Builder, dest : Var, value : Val) {
+fn compile_assignment(b : &mut Builder, dest : Ref, value : Var) {
   if dest.data_type.size_of != value.data_type.size_of {
     panic!("types don't match")
   }
@@ -371,21 +373,21 @@ fn compile_set_local(b : &mut Builder, dest : Var, value : Val) {
   });
 }
 
-fn compile_expr_to_var(b : &mut Builder, node : Node) -> Var {
-  if let Some(var) = compile_expr(b, node) {
-    var
+fn compile_expr_to_ref(b : &mut Builder, node : Node) -> Ref {
+  if let Some(r) = compile_expr(b, node) {
+    r
   }
   else {
     panic!("expected value, found none, at node {} ({})", node, node.loc);
   }
 }
 
-fn compile_expr_to_val(b : &mut Builder, node : Node) -> Val {
-  let var = compile_expr_to_var(b, node);
-  var.to_val(b)
+fn compile_expr_to_var(b : &mut Builder, node : Node) -> Var {
+  let r = compile_expr_to_ref(b, node);
+  r.to_var(b)
 }
 
-fn compile_cast(b : &mut Builder, v : Val, t : TypeHandle) -> Val {
+fn compile_cast(b : &mut Builder, v : Var, t : TypeHandle) -> Var {
   fn ptr_or_prim(t : TypeHandle) -> bool {
     t.kind == Kind::Pointer || t.kind == Kind::Primitive
   }
@@ -397,7 +399,7 @@ fn compile_cast(b : &mut Builder, v : Val, t : TypeHandle) -> Val {
   push_expr(b, Expr::Cast(v.id), t)
 }
 
-fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
+fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
   match node_shape(&node) {
     // return
     Atom("return") => {
@@ -419,12 +421,12 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     // true
     Atom("true") => {
       let e = Expr::LiteralU64(1);
-      Some(push_expr(b, e, b.env.c.u64_tag).to_var())
+      Some(push_expr(b, e, b.env.c.u64_tag).to_ref())
     }
     // false
     Atom("false") => {
       let e = Expr::LiteralU64(0);
-      Some(push_expr(b, e, b.env.c.u64_tag).to_var())
+      Some(push_expr(b, e, b.env.c.u64_tag).to_ref())
     }
     // symbol reference (local var or global def)
     Atom(_) => {
@@ -448,28 +450,28 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     }
     // array
     Command("array", elements) => {
-      let e = compile_expr_to_val(b, elements[0]);
+      let e = compile_expr_to_var(b, elements[0]);
       let element_type = e.data_type;
       let mut element_values = vec![e.id];
       for e in &elements[1..] {
-        let v = compile_expr_to_val(b, *e);
+        let v = compile_expr_to_var(b, *e);
         // TODO: check type
         element_values.push(v.id);
       }
       let t = types::array_type(element_type, elements.len() as u64);
       let e = Expr::Array(perm_slice_from_vec(element_values));
-      Some(push_expr(b, e, t).to_var())
+      Some(push_expr(b, e, t).to_ref())
     }
     // array length
     Command("array_len", [e]) => {
-      let v = compile_expr_to_val(b, *e);
+      let v = compile_expr_to_var(b, *e);
       let t = types::type_as_array(&v.data_type).expect("expected array");
       let e = Expr::LiteralU64(t.length);
-      Some(push_expr(b, e, b.env.c.u64_tag).to_var())
+      Some(push_expr(b, e, b.env.c.u64_tag).to_ref())
     }
     // array index
     Command("index", [v, index]) => {
-      let v = compile_expr_to_var(b, *v);
+      let v = compile_expr_to_ref(b, *v);
       let ptr = {
         if let Some(info) = types::type_as_array(&v.data_type) {
           let array_ptr = v.get_address(b);
@@ -477,13 +479,13 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
           compile_cast(b, array_ptr, element_ptr_type)
         }
         else if v.data_type.kind == Kind::Pointer {
-          v.to_val(b)
+          v.to_var(b)
         }
         else {
           panic!("expected pointer or array")
         }
       };
-      let offset = compile_expr_to_val(b, *index).id;
+      let offset = compile_expr_to_var(b, *index).id;
       let e = Expr::PtrOffset { ptr: ptr.id, offset };
       let ptr = push_expr(b, e, ptr.data_type);
       Some(pointer_to_locator(ptr, v.mutable))
@@ -495,16 +497,16 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       let mut field_values = vec![];
       for f in field_nodes {
         // TODO: check types
-        field_values.push(compile_expr_to_val(b, *f).id);
+        field_values.push(compile_expr_to_var(b, *f).id);
       }
       let e = Expr::Init(perm_slice_from_vec(field_values));
-      Some(push_expr(b, e, t).to_var())
+      Some(push_expr(b, e, t).to_ref())
     }
     // field deref
     Command(".", [v, field]) => {
-      let struct_val = compile_expr_to_var(b, *v);
-      let struct_addr = struct_val.get_address(b).id;
-      let info = types::type_as_struct(&struct_val.data_type).expect("expected struct");
+      let struct_ref = compile_expr_to_ref(b, *v);
+      let struct_addr = struct_ref.get_address(b).id;
+      let info = types::type_as_struct(&struct_ref.data_type).expect("expected struct");
       let i = match field.content {
         NodeContent::Sym(name) => {
           info.field_names.as_slice().iter().position(|n| *n == name)
@@ -516,15 +518,15 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
       let field_type = info.field_types[i as usize];
       let e = Expr::FieldIndex{ struct_addr, index: i };
       let v = push_expr(b, e, types::pointer_type(field_type));
-      Some(pointer_to_locator(v, struct_val.mutable))
+      Some(pointer_to_locator(v, struct_ref.mutable))
     }
     // template
     Command("#", [quoted]) => {
-      Some(compile_template(b, *quoted).to_var())
+      Some(compile_template(b, *quoted).to_ref())
     }
     // quotation
     Command("quote", [quoted]) => {
-      Some(compile_quote(b, *quoted).to_var())
+      Some(compile_quote(b, *quoted).to_ref())
     }
     // def
     Command("def", [def_name, value]) => {
@@ -535,45 +537,45 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     // fun
     Command("fun", [arg_nodes, body]) => {
       let f = compile_function_def(b.env, arg_nodes.children(), None, *body);
-      let v = function_to_value(b, f);
-      Some(v.to_var())
+      let v = function_to_var(b, f);
+      Some(v.to_ref())
     }
     Command("fun", [arg_nodes, return_tag, body]) => {
       let f = compile_function_def(b.env, arg_nodes.children(), Some(*return_tag), *body);
-      let v = function_to_value(b, f);
-      Some(v.to_var())
+      let v = function_to_var(b, f);
+      Some(v.to_ref())
     }
     // macro
     Command("macro", [arg, body]) => {
       let f = compile_macro_def(b.env, *arg, *body);
-      let v = function_to_value(b, f);
+      let v = function_to_var(b, f);
       let mv = compile_cast(b, v, types::macro_type(v.data_type));
-      Some(mv.to_var())
+      Some(mv.to_ref())
     }
     // set var
     Command("set", [dest, value]) => {
-      let dest = compile_expr_to_var(b, *dest);
-      let value = compile_expr_to_val(b, *value);
-      compile_set_local(b, dest, value);
+      let dest = compile_expr_to_ref(b, *dest);
+      let value = compile_expr_to_var(b, *value);
+      compile_assignment(b, dest, value);
       None
     }
     // let
     Command("let", [var_name, value]) => {
       // TODO: this generates redundant bytecode. If the value is a
-      // var, it should just generate a load, rather than a load and a store.
+      // locator, it should just generate a load, rather than a load and a store.
       let aaa = ();
       let name = var_name.as_symbol();
       // evaluate the expression
-      let value = compile_expr_to_val(b, *value);
-      let local = new_scoped_variable(b, name, value.data_type);
-      compile_set_local(b, local.to_var(), value);
+      let value = compile_expr_to_var(b, *value);
+      let local_var = new_local_variable(b, name, value.data_type);
+      compile_assignment(b, local_var.to_ref(), value);
       None
     }
     // if then
     Command("if", [cond, then_expr]) => {
       let then_seq = create_sequence(b, "then");
       let exit_seq = create_sequence(b, "exit");
-      let cond = compile_expr_to_val(b, *cond).id;
+      let cond = compile_expr_to_var(b, *cond).id;
       b.bc.instrs.push(Instr::CJump{ cond, then_seq, else_seq: exit_seq });
       set_current_sequence(b, then_seq);
       compile_expr(b, *then_expr);
@@ -603,17 +605,17 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     }
     Command("do", exprs) => {
       let result = compile_block_expr(b, exprs);
-      result.map(|x| x.to_var())
+      result.map(|x| x.to_ref())
     }
   // Debug
     Command("debug", [n]) => {
-      let val = compile_expr_to_val(b, *n);
-      b.bc.instrs.push(Instr::Debug(*n, val.id, val.data_type));
+      let local = compile_expr_to_var(b, *n);
+      b.bc.instrs.push(Instr::Debug(*n, local.id, local.data_type));
       None
     }
     // Return
     Command("return", [n]) => {
-      let r = compile_expr_to_val(b, *n);
+      let r = compile_expr_to_var(b, *n);
       b.bc.instrs.push(Instr::Return(Some(r.id)));
       None
     }
@@ -621,35 +623,35 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     Command("sym", [n]) => {
       let s = n.as_symbol();
       let e = Expr::LiteralU64(s.as_u64());
-      return Some(push_expr(b, e, b.env.c.u64_tag).to_var());
+      return Some(push_expr(b, e, b.env.c.u64_tag).to_ref());
     }
     // typeof
     Command("typeof", [n]) => {
       // TODO: it's weird to codegen the expression when we only need its type
-      let v = compile_expr_to_val(b, *n);
+      let v = compile_expr_to_var(b, *n);
       let e = Expr::LiteralU64(Perm::to_u64(v.data_type));
-      return Some(push_expr(b, e, b.env.c.type_tag).to_var());
+      return Some(push_expr(b, e, b.env.c.type_tag).to_ref());
     }
     // load
     Command("*", [pointer]) => {
-      let ptr = compile_expr_to_val(b, *pointer);
+      let ptr = compile_expr_to_var(b, *pointer);
       Some(pointer_to_locator(ptr, true))
     }
     // ref
     Command("ref", [locator]) => {
-      let val = compile_expr_to_var(b, *locator);
-      return Some(val.get_address(b).to_var())
+      let local = compile_expr_to_ref(b, *locator);
+      return Some(local.get_address(b).to_ref())
     }
     // cast
     Command("cast", [value, type_tag]) => {
       let t = node_to_type(b, *type_tag);
-      let v = compile_expr_to_val(b, *value);
-      Some(compile_cast(b, v, t).to_var())
+      let v = compile_expr_to_var(b, *value);
+      Some(compile_cast(b, v, t).to_ref())
     }
     _ => {
       if let Some(type_tag) = try_node_to_type(b, node) {
         let e = Expr::LiteralU64(Perm::to_u64(type_tag));
-        return Some(push_expr(b, e, b.env.c.type_tag).to_var());
+        return Some(push_expr(b, e, b.env.c.type_tag).to_ref());
       }
       else {
         compile_list_expr(b, node)
@@ -658,11 +660,11 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
   }
 }
 
-fn compile_literal(b : &mut Builder, l : NodeLiteral) -> Var {
+fn compile_literal(b : &mut Builder, l : NodeLiteral) -> Ref {
   match l {
     NodeLiteral::U64(v) => {
       let e = Expr::LiteralU64(v);
-      push_expr(b, e, b.env.c.u64_tag).to_var()
+      push_expr(b, e, b.env.c.u64_tag).to_ref()
     }
     NodeLiteral::String(s) => {
       let t = types::pointer_type(b.env.c.string_tag);
@@ -750,22 +752,21 @@ fn node_to_type(b: &Builder, n : Node) -> TypeHandle {
   else { panic!("{} is not valid type", n) }
 }
 
-fn compile_block_expr(b : &mut Builder, nodes : &[Node]) -> Option<Val> {  
+fn compile_block_expr(b : &mut Builder, nodes : &[Node]) -> Option<Var> {  
   let mut v = None;
-  let num_locals = b.scoped_locals.len();
+  let num_locals = b.scoped_vars.len();
   for &c in nodes {
     v = compile_expr(b, c);
   }
-  b.scoped_locals.drain(num_locals..).for_each(|_| ());
-  v.map(|v| v.to_val(b))
+  b.scoped_vars.drain(num_locals..).for_each(|_| ());
+  v.map(|v| v.to_var(b))
 }
 
-fn compile_symbol_reference(b : &mut Builder, node : Node) -> Var {
+fn compile_symbol_reference(b : &mut Builder, node : Node) -> Ref {
   let sym = node.as_symbol();
-  // Look for local
-  if let Some(r) = find_local_in_scope(b, sym) {
-    let aaa = (); // TODO: should this return a locator?
-    return r.to_var();
+  // Look for variable in local scope
+  if let Some(r) = find_var_in_scope(b, sym) {
+    return r.to_ref();
   }
   // Assume global
   if let Some(tag) = env::get_global_type(b.env, sym) {
@@ -776,10 +777,10 @@ fn compile_symbol_reference(b : &mut Builder, node : Node) -> Var {
   panic!("symbol '{}' not defined ({})", sym, node.loc)
 }
 
-fn compile_function_call(b : &mut Builder, list : &[Node]) -> Val {
+fn compile_function_call(b : &mut Builder, list : &[Node]) -> Var {
   let function = list[0];
   let args = &list[1..];
-  let f = compile_expr_to_val(b, function);
+  let f = compile_expr_to_var(b, function);
   let info = if let Some(i) = types::type_as_function(&f.data_type) {
     i
   }
@@ -791,7 +792,7 @@ fn compile_function_call(b : &mut Builder, list : &[Node]) -> Val {
   for i in 0..args.len() {
     let arg = args[i];
     // TODO: check types
-    let v = compile_expr_to_val(b, arg);
+    let v = compile_expr_to_var(b, arg);
     if info.args[i] != v.data_type  {
       panic!("expected arg of type {}, found type {}, at ({})", info.args[i], v.data_type, arg.loc);
     }
@@ -812,7 +813,7 @@ fn compile_function_call(b : &mut Builder, list : &[Node]) -> Val {
   return push_expr(b, e, info.returns);
 }
 
-fn compile_macro_call(b : &mut Builder, f : &Function, n : Node) -> Option<Var> {
+fn compile_macro_call(b : &mut Builder, f : &Function, n : Node) -> Option<Ref> {
   let nodes = &n.children()[1..];
   // macros actually take one argument, which is a node slice.
   // node_slice matches the layout of the two u64 args below.
@@ -822,7 +823,7 @@ fn compile_macro_call(b : &mut Builder, f : &Function, n : Node) -> Option<Var> 
   compile_expr(b, new_node)
 }
 
-fn compile_call(b : &mut Builder, n : Node) -> Option<Var> {
+fn compile_call(b : &mut Builder, n : Node) -> Option<Ref> {
   let list = n.children();
   let function = list[0];
   if let parse::NodeContent::Sym(f) = function.content {
@@ -833,7 +834,7 @@ fn compile_call(b : &mut Builder, n : Node) -> Option<Var> {
       }
     }
   }
-  Some(compile_function_call(b, list).to_var())
+  Some(compile_function_call(b, list).to_ref())
 }
 
 fn str_to_operator(s : &str) -> Option<Operator> {
@@ -867,11 +868,11 @@ fn op_result_type(c : &CoreTypes, op : Operator) -> TypeHandle {
 /// compiles a literal with an explicit type tag. For example:
 ///   (50 u32)
 ///   (30 i64)
-fn compile_typed_literal(b : &mut Builder, node : Node) -> Option<Val> {
+fn compile_typed_literal(b : &mut Builder, node : Node) -> Option<Var> {
   if let [lit, tag] = node.children() {
     if let NodeContent::Literal(l) = lit.content {
       if let Some(t) = try_node_to_type(b, *tag) {
-        let v = compile_literal(b, l).to_val(b);
+        let v = compile_literal(b, l).to_var(b);
         return Some(compile_cast(b, v, t))
       }
     }
@@ -879,27 +880,27 @@ fn compile_typed_literal(b : &mut Builder, node : Node) -> Option<Val> {
   None
 }
 
-fn compile_list_expr(b : &mut Builder, node : Node) -> Option<Var> {
+fn compile_list_expr(b : &mut Builder, node : Node) -> Option<Ref> {
   if node.children().len() == 0 {
     return None;
   }
   if let Some(v) = compile_typed_literal(b, node) {
-    return Some(v.to_var());
+    return Some(v.to_ref());
   }
   match node_shape(&node) {
     Command(head, tail) => {
       if let Some(op) = str_to_operator(head) {
         let t = op_result_type(&b.env.c, op);
         if let [v1, v2] = tail {
-          let v1 = compile_expr_to_val(b, *v1);
-          let v2 = compile_expr_to_val(b, *v2);
+          let v1 = compile_expr_to_var(b, *v1);
+          let v2 = compile_expr_to_var(b, *v2);
           let e = Expr::BinaryOp(op, v1.id, v2.id);
-          return Some(push_expr(b, e, t).to_var());
+          return Some(push_expr(b, e, t).to_ref());
         }
         if let [v1] = tail {
-          let v1 = compile_expr_to_val(b, *v1);
+          let v1 = compile_expr_to_var(b, *v1);
           let e = Expr::UnaryOp(op, v1.id);
-          return Some(push_expr(b, e, t).to_var());
+          return Some(push_expr(b, e, t).to_ref());
         }
       }
     }
@@ -908,7 +909,7 @@ fn compile_list_expr(b : &mut Builder, node : Node) -> Option<Var> {
   compile_call(b, node)
 }
 
-fn compile_template(b : &mut Builder, quoted : Node) -> Val {
+fn compile_template(b : &mut Builder, quoted : Node) -> Var {
   
   fn find_template_arguments(n : Node, args : &mut Vec<Node>) {
     match node_shape(&n) {
@@ -927,14 +928,14 @@ fn compile_template(b : &mut Builder, quoted : Node) -> Val {
   if template_args.len() > 0 {
     let nb = NodeBuilder { loc: quoted.loc, st: b.env.st };
     let n = template_macro(&nb, quoted, template_args.as_slice());
-    compile_expr_to_val(b, n)
+    compile_expr_to_var(b, n)
   }
   else {
     compile_quote(b, quoted)
   }
 }
 
-fn compile_quote(b : &mut Builder, quoted : Node) -> Val {
+fn compile_quote(b : &mut Builder, quoted : Node) -> Var {
   let e = Expr::LiteralU64(Perm::to_ptr(quoted) as u64);
   let node_tag = b.env.c.node_tag;
   push_expr(b, e, node_tag)
