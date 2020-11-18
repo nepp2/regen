@@ -134,6 +134,7 @@ pub fn type_as_array(t : &TypeInfo) -> Option<&ArrayInfo> {
 }
 
 pub fn deref_pointer_type(t : &TypeInfo) -> Option<TypeHandle> {
+  let aaa = (); // TODO: type signature doesn't need to be reference
   if let Kind::Pointer = t.kind {
     return Some(TypeHandle::from_u64(t.info))
   }

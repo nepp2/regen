@@ -129,7 +129,7 @@ impl Var {
 #[derive(Copy, Clone)]
 struct Val {
   id : LocalId,
-  data_type : TypeHandle,
+  data_type : TypeHandle, // TODO: type name should just be `t`, for consistency
   mutable : bool,
 }
 
@@ -157,7 +157,7 @@ fn find_local_in_scope(b : &mut Builder, name : Symbol)
   None
 }
 
-fn new_scoped_var(b : &mut Builder, name : Symbol, t : TypeHandle) -> Val {
+fn new_scoped_variable(b : &mut Builder, name : Symbol, t : TypeHandle) -> Val {
   let id = new_local(b, Some(name), t, true);
   let v = Val { id, data_type: t, mutable: true };
   let tl = NamedLocal{ name, v };
@@ -263,7 +263,7 @@ fn compile_macro_def(env: Env, arg : Node, body : Node) -> Function {
   b.bc.args = 1;
   let name = arg.as_symbol();
   let arg_type = env.c.node_slice_tag;
-  new_scoped_var(&mut b, name, arg_type);
+  new_scoped_variable(&mut b, name, arg_type);
   compile_function(b, body, &[arg_type], Some(env.c.node_tag))
 }
 
@@ -288,7 +288,7 @@ fn compile_function_def(env: Env, args : &[Node], return_tag : Option<Node>, bod
         panic!("expected typed argument")
       }
     };
-    new_scoped_var(&mut b, name, t);
+    new_scoped_variable(&mut b, name, t);
     arg_types.push(t);
   }
   let expected_return = return_tag.map(|n| node_to_type(&mut b, n));
@@ -432,7 +432,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     }
     // literal
     Literal(l) => {
-      Some(compile_literal(b, l).to_var())
+      Some(compile_literal(b, l))
     }
     // break to label
     Command("break", [label]) => {
@@ -559,10 +559,13 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     }
     // let
     Command("let", [var_name, value]) => {
+      // TODO: this generates redundant bytecode. If the value is a
+      // var, it should just generate a load, rather than a load and a store.
+      let aaa = ();
       let name = var_name.as_symbol();
       // evaluate the expression
       let value = compile_expr_to_val(b, *value);
-      let local = new_scoped_var(b, name, value.data_type);
+      let local = new_scoped_variable(b, name, value.data_type);
       compile_set_local(b, local.to_var(), value);
       None
     }
@@ -622,6 +625,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
     }
     // typeof
     Command("typeof", [n]) => {
+      // TODO: it's weird to codegen the expression when we only need its type
       let v = compile_expr_to_val(b, *n);
       let e = Expr::LiteralU64(Perm::to_u64(v.data_type));
       return Some(push_expr(b, e, b.env.c.type_tag).to_var());
@@ -654,15 +658,17 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Var> {
   }
 }
 
-fn compile_literal(b : &mut Builder, l : NodeLiteral) -> Val {
+fn compile_literal(b : &mut Builder, l : NodeLiteral) -> Var {
   match l {
     NodeLiteral::U64(v) => {
       let e = Expr::LiteralU64(v);
-      push_expr(b, e, b.env.c.u64_tag)
+      push_expr(b, e, b.env.c.u64_tag).to_var()
     }
     NodeLiteral::String(s) => {
-      let e = Expr::Literal(b.env.c.string_tag, s.ptr as *const ());
-      push_expr(b, e, b.env.c.string_tag)
+      let t = types::pointer_type(b.env.c.string_tag);
+      let e = Expr::Literal(t, Perm::to_ptr(s) as *const ());
+      let v = push_expr(b, e, t);
+      pointer_to_locator(v, false)
     }
   }
 }
@@ -789,6 +795,10 @@ fn compile_function_call(b : &mut Builder, list : &[Node]) -> Val {
     if info.args[i] != v.data_type  {
       panic!("expected arg of type {}, found type {}, at ({})", info.args[i], v.data_type, arg.loc);
     }
+    if info.c_function && v.data_type.size_of > 8 {
+      panic!("types passed to a C function must be 64 bits wide or less; found type {} of width {} as ({})",
+        v.data_type, v.data_type.size_of, arg.loc);
+    }
     arg_values.push(v.id);
   }
   let e = {
@@ -854,11 +864,14 @@ fn op_result_type(c : &CoreTypes, op : Operator) -> TypeHandle {
   }
 }
 
+/// compiles a literal with an explicit type tag. For example:
+///   (50 u32)
+///   (30 i64)
 fn compile_typed_literal(b : &mut Builder, node : Node) -> Option<Val> {
   if let [lit, tag] = node.children() {
     if let NodeContent::Literal(l) = lit.content {
       if let Some(t) = try_node_to_type(b, *tag) {
-        let v = compile_literal(b, l);
+        let v = compile_literal(b, l).to_val(b);
         return Some(compile_cast(b, v, t))
       }
     }

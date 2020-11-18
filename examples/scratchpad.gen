@@ -94,16 +94,18 @@
   (debug v) ;; 11
 )
 
-;; old macros
+;; quotes
 
 (do
   (let n (node_from_literal 300))
   (debug (# (+ 500 ($ n))))
 )
 
-(def node_index (fun ((ns node_slice) (i u64)) node (do
-  (index (. ns 0) i)
-)))
+;; include
+
+(include env (ref "examples/prelude.gen"))
+
+;; macros
 
 (def while (macro ns (do
   (let condition (node_index ns 0))

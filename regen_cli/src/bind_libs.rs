@@ -2,6 +2,8 @@
 use regen_core::{
   env::{Env, define_global},
   symbols::{Symbol, to_symbol},
+  interop::RegenString,
+  types,
   types::c_function_type,
   interpret,
 };
@@ -11,14 +13,15 @@ use std::ffi::CString;
 use libloading::{Library, Symbol as LibSymbol};
 
 #[cfg(not(test))]
-const LIB_PATH : &'static str = "examples/lib";
+const LIB_PATH : &'static str = ".";
 #[cfg(test)]
-const LIB_PATH : &'static str = "../examples/lib";
+const LIB_PATH : &'static str = "..";
 
-pub extern "C" fn include(env : Env, file_name : Symbol) {
+pub extern "C" fn include(env : Env, file_name : &RegenString) {
+  let file_name = file_name.as_str();
   let path_symbol = to_symbol(env.st, format!("module::{}", file_name));
   if env.values.get(&path_symbol).is_none() {
-    let path = format!("{}/{}.gen", LIB_PATH, file_name.as_str());
+    let path = format!("{}/{}", LIB_PATH, file_name);
     let code =
       fs::read_to_string(&path)
       .expect("Something went wrong reading the file");
@@ -55,8 +58,9 @@ pub extern "C" fn load_library_symbol(lib : &Library, symbol : Symbol) -> *const
 pub fn bind_libs(env : Env) {
   let u64 = env.c.u64_tag;
   let void = env.c.void_tag;
+  let string_ptr = types::pointer_type(env.c.string_tag);
   define_global(env, "include", include as u64,
-    c_function_type(&[u64], void));
+    c_function_type(&[u64, string_ptr], void));
   define_global(env, "load_library", load_library as u64,
     c_function_type(&[u64], u64));
   define_global(env, "load_library_symbol", load_library_symbol as u64,

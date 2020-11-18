@@ -1,7 +1,9 @@
 
 use std::fmt;
-use crate::types::{
-  TypeHandle, Kind, type_as_primitive, Primitive
+use crate::types;
+
+use types::{
+  TypeHandle, Kind, Primitive
 };
 
 pub struct DebugDisplay { p : *const (), t : TypeHandle }
@@ -14,7 +16,7 @@ impl fmt::Display for DebugDisplay {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self.t.kind {
       Kind::Primitive => {
-        match type_as_primitive(&self.t).unwrap() {
+        match types::type_as_primitive(&self.t).unwrap() {
           Primitive::U64 =>
             write!(f, "{}", unsafe { *(self.p as *const u64) }),
           Primitive::U32 =>
