@@ -90,18 +90,18 @@ enum RefType {
 #[derive(Copy, Clone)]
 pub struct Ref {
   ref_type : RefType,
-  data_type : TypeHandle,
+  t : TypeHandle,
   mutable : bool,
 }
 
 impl Ref {
 
   fn from_var(local : Var) -> Self {
-    Ref{ ref_type: RefType::Value(local.id), data_type: local.data_type, mutable: local.mutable }
+    Ref{ ref_type: RefType::Value(local.id), t: local.t, mutable: local.mutable }
   }
 
   fn get_address(&self, b : &mut Builder) -> Var {
-    let t = types::pointer_type(self.data_type);
+    let t = types::pointer_type(self.t);
     let id = match self.ref_type {
       RefType::Locator(id) => id,
       RefType::Value(id) => {
@@ -111,18 +111,18 @@ impl Ref {
         addr_id
       }
     };
-    Var { id, data_type: t, mutable: self.mutable }
+    Var { id, t: t, mutable: self.mutable }
   }
   
   fn to_var(&self, b : &mut Builder) -> Var {
     match self.ref_type {
       RefType::Locator(r) => {
         let e = Expr::Load(r);
-        push_expr(b, e, self.data_type)
+        push_expr(b, e, self.t)
       }
       RefType::Value(r) => Var {
         id: r,
-        data_type: self.data_type,
+        t: self.t,
         mutable: self.mutable,
       },
     }
@@ -132,7 +132,7 @@ impl Ref {
 #[derive(Copy, Clone)]
 struct Var {
   id : LocalId,
-  data_type : TypeHandle, // TODO: type name should just be `t`, for consistency
+  t : TypeHandle,
   mutable : bool,
 }
 
@@ -162,7 +162,7 @@ fn find_var_in_scope(b : &mut Builder, name : Symbol)
 
 fn new_local_variable(b : &mut Builder, name : Symbol, t : TypeHandle) -> Var {
   let id = new_local(b, Some(name), t, true);
-  let v = Var { id, data_type: t, mutable: true };
+  let v = Var { id, t: t, mutable: true };
   b.scoped_vars.push(NamedVar{ name, v });
   v
 }
@@ -182,7 +182,7 @@ fn new_local(b : &mut Builder, name : Option<Symbol>, t : TypeHandle, mutable : 
 
 fn new_var(b : &mut Builder, t : TypeHandle, mutable : bool) -> Var {
   let id = new_local(b, None, t, mutable);
-  Var { id, data_type: t, mutable }
+  Var { id, t: t, mutable }
 }
 
 fn push_expr(b : &mut Builder, e : Expr, t : TypeHandle) -> Var {
@@ -192,10 +192,10 @@ fn push_expr(b : &mut Builder, e : Expr, t : TypeHandle) -> Var {
 }
 
 fn pointer_to_locator(v : Var, mutable : bool) -> Ref {
-  let inner = types::deref_pointer_type(&v.data_type).expect("expected pointer type");
+  let inner = types::deref_pointer_type(v.t).expect("expected pointer type");
   Ref {
     ref_type: RefType::Locator(v.id),
-    data_type: inner,
+    t: inner,
     mutable,
   }
 }
@@ -309,7 +309,7 @@ fn compile_function(
   let result = compile_expr(&mut b, body);
   if let Some(r) = result {
     let v = r.to_var(&mut b);
-    return_type = v.data_type;
+    return_type = v.t;
     b.bc.instrs.push(Instr::Return(Some(v.id)));
   }
   else {
@@ -320,10 +320,10 @@ fn compile_function(
       panic!("expected return type {}, found {}", et, return_type);
     }
   }
-  let t = types::function_type(&arg_types, return_type); // TODO: fix arg types!
+  let t = types::function_type(&arg_types, return_type);
   let f = complete_function(b);
   // for n in body { println!("{}", n) }
-  println!("{}", f);
+  // println!("{}", f);
   Function { bc: f, t }
 }
 
@@ -342,7 +342,7 @@ fn compile_if_else(b : &mut Builder, cond : Node, then_expr : Node, else_expr : 
   set_current_sequence(b, then_seq);
   let then_result = compile_expr(b, then_expr);
   if let Some(v) = then_result {
-    let nv = new_var(b, v.data_type, true).to_ref();
+    let nv = new_var(b, v.t, true).to_ref();
     result_var = Some(nv);
     let v = v.to_var(b);
     compile_assignment(b, nv, v);
@@ -360,7 +360,7 @@ fn compile_if_else(b : &mut Builder, cond : Node, then_expr : Node, else_expr : 
 }
 
 fn compile_assignment(b : &mut Builder, dest : Ref, value : Var) {
-  if dest.data_type.size_of != value.data_type.size_of {
+  if dest.t.size_of != value.t.size_of {
     panic!("types don't match")
   }
   if !dest.mutable {
@@ -391,9 +391,9 @@ fn compile_cast(b : &mut Builder, v : Var, t : TypeHandle) -> Var {
   fn ptr_or_prim(t : TypeHandle) -> bool {
     t.kind == Kind::Pointer || t.kind == Kind::Primitive
   }
-  if t.size_of != v.data_type.size_of {
-    if !(ptr_or_prim(t) && ptr_or_prim(v.data_type)) {
-      panic!("cannot cast from {} to {}", v.data_type, t);
+  if t.size_of != v.t.size_of {
+    if !(ptr_or_prim(t) && ptr_or_prim(v.t)) {
+      panic!("cannot cast from {} to {}", v.t, t);
     }
   }
   push_expr(b, Expr::Cast(v.id), t)
@@ -451,11 +451,14 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
     // array
     Command("array", elements) => {
       let e = compile_expr_to_var(b, elements[0]);
-      let element_type = e.data_type;
+      let element_type = e.t;
       let mut element_values = vec![e.id];
       for e in &elements[1..] {
         let v = compile_expr_to_var(b, *e);
-        // TODO: check type
+        if v.t != element_type {
+          panic!("expected element of type {} and found type {}, at {}",
+            element_type, v.t, e.loc);
+        }
         element_values.push(v.id);
       }
       let t = types::array_type(element_type, elements.len() as u64);
@@ -465,7 +468,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
     // array length
     Command("array_len", [e]) => {
       let v = compile_expr_to_var(b, *e);
-      let t = types::type_as_array(&v.data_type).expect("expected array");
+      let t = types::type_as_array(&v.t).expect("expected array");
       let e = Expr::LiteralU64(t.length);
       Some(push_expr(b, e, b.env.c.u64_tag).to_ref())
     }
@@ -473,12 +476,12 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
     Command("index", [v, index]) => {
       let v = compile_expr_to_ref(b, *v);
       let ptr = {
-        if let Some(info) = types::type_as_array(&v.data_type) {
+        if let Some(info) = types::type_as_array(&v.t) {
           let array_ptr = v.get_address(b);
           let element_ptr_type = types::pointer_type(info.inner);
           compile_cast(b, array_ptr, element_ptr_type)
         }
-        else if v.data_type.kind == Kind::Pointer {
+        else if v.t.kind == Kind::Pointer {
           v.to_var(b)
         }
         else {
@@ -487,7 +490,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
       };
       let offset = compile_expr_to_var(b, *index).id;
       let e = Expr::PtrOffset { ptr: ptr.id, offset };
-      let ptr = push_expr(b, e, ptr.data_type);
+      let ptr = push_expr(b, e, ptr.t);
       Some(pointer_to_locator(ptr, v.mutable))
     }
     // init
@@ -506,7 +509,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
     Command(".", [v, field]) => {
       let struct_ref = compile_expr_to_ref(b, *v);
       let struct_addr = struct_ref.get_address(b).id;
-      let info = types::type_as_struct(&struct_ref.data_type).expect("expected struct");
+      let info = types::type_as_struct(&struct_ref.t).expect("expected struct");
       let i = match field.content {
         NodeContent::Sym(name) => {
           info.field_names.as_slice().iter().position(|n| *n == name)
@@ -549,7 +552,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
     Command("macro", [arg, body]) => {
       let f = compile_macro_def(b.env, *arg, *body);
       let v = function_to_var(b, f);
-      let mv = compile_cast(b, v, types::macro_type(v.data_type));
+      let mv = compile_cast(b, v, types::macro_type(v.t));
       Some(mv.to_ref())
     }
     // set var
@@ -563,11 +566,10 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
     Command("let", [var_name, value]) => {
       // TODO: this generates redundant bytecode. If the value is a
       // locator, it should just generate a load, rather than a load and a store.
-      let aaa = ();
       let name = var_name.as_symbol();
       // evaluate the expression
       let value = compile_expr_to_var(b, *value);
-      let local_var = new_local_variable(b, name, value.data_type);
+      let local_var = new_local_variable(b, name, value.t);
       compile_assignment(b, local_var.to_ref(), value);
       None
     }
@@ -610,7 +612,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
   // Debug
     Command("debug", [n]) => {
       let local = compile_expr_to_var(b, *n);
-      b.bc.instrs.push(Instr::Debug(*n, local.id, local.data_type));
+      b.bc.instrs.push(Instr::Debug(*n, local.id, local.t));
       None
     }
     // Return
@@ -629,7 +631,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
     Command("typeof", [n]) => {
       // TODO: it's weird to codegen the expression when we only need its type
       let v = compile_expr_to_var(b, *n);
-      let e = Expr::LiteralU64(Perm::to_u64(v.data_type));
+      let e = Expr::LiteralU64(Perm::to_u64(v.t));
       return Some(push_expr(b, e, b.env.c.type_tag).to_ref());
     }
     // load
@@ -781,24 +783,23 @@ fn compile_function_call(b : &mut Builder, list : &[Node]) -> Var {
   let function = list[0];
   let args = &list[1..];
   let f = compile_expr_to_var(b, function);
-  let info = if let Some(i) = types::type_as_function(&f.data_type) {
+  let info = if let Some(i) = types::type_as_function(&f.t) {
     i
   }
   else {
     panic!("expected function, found {} expression '{}' at ({})",
-      f.data_type, function, function.loc);
+      f.t, function, function.loc);
   };
   let mut arg_values = vec![];
   for i in 0..args.len() {
     let arg = args[i];
-    // TODO: check types
     let v = compile_expr_to_var(b, arg);
-    if info.args[i] != v.data_type  {
-      panic!("expected arg of type {}, found type {}, at ({})", info.args[i], v.data_type, arg.loc);
+    if info.args[i] != v.t  {
+      panic!("expected arg of type {}, found type {}, at ({})", info.args[i], v.t, arg.loc);
     }
-    if info.c_function && v.data_type.size_of > 8 {
+    if info.c_function && v.t.size_of > 8 {
       panic!("types passed to a C function must be 64 bits wide or less; found type {} of width {} as ({})",
-        v.data_type, v.data_type.size_of, arg.loc);
+        v.t, v.t.size_of, arg.loc);
     }
     arg_values.push(v.id);
   }

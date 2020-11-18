@@ -47,7 +47,8 @@ impl PartialEq for TypeInfo {
         Kind::Macro | Kind::Type | Kind::Node => true,
         Kind::Array => type_as_array(self) == type_as_array(rhs),
         Kind::Function => type_as_function(self) == type_as_function(rhs),
-        Kind::Pointer => deref_pointer_type(self) == deref_pointer_type(rhs),
+        Kind::Pointer =>
+          TypeHandle::from_u64(self.info) == TypeHandle::from_u64(rhs.info),
         Kind::Struct => type_as_struct(self) == type_as_struct(rhs),
       }
     }
@@ -133,8 +134,7 @@ pub fn type_as_array(t : &TypeInfo) -> Option<&ArrayInfo> {
   None
 }
 
-pub fn deref_pointer_type(t : &TypeInfo) -> Option<TypeHandle> {
-  let aaa = (); // TODO: type signature doesn't need to be reference
+pub fn deref_pointer_type(t : TypeHandle) -> Option<TypeHandle> {
   if let Kind::Pointer = t.kind {
     return Some(TypeHandle::from_u64(t.info))
   }

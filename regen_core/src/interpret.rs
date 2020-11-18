@@ -109,7 +109,7 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
             }
             Expr::FieldIndex { struct_addr, index } => {
               let ptr_type = frame.local_type(struct_addr);
-              let t = types::deref_pointer_type(&ptr_type).unwrap();
+              let t = types::deref_pointer_type(ptr_type).unwrap();
               let info = types::type_as_struct(&t).expect("expected struct");
               let field_offset = info.field_offsets[index as usize];
               let tuple_ptr : *const u8 = frame.get_local(struct_addr);
