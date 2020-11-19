@@ -1,18 +1,17 @@
 
-;; typed macros? const expressions?
+;; next feature is dataflow graphs?
 
-;; can't make typed macros until type inference is separated from code generation
-;; what do i actually need macros for in order to create a demo?
+(def g (graph
+  
+  (def point (struct (x i64) (y i64)))
 
-;; alternative path: hack macros into the compiler until patterns start to emerge
-;; and a pattern becomes obvious. then design as a language feature.
+  (def v 2)
 
-;; (def + (macro ((t type) (args ((slice node)))) (
-;;   (if (= t (struct u64 u64))
-;;     (return (# (add_u64 ($ (index args 0)) ($ (index args 1)))))
-;;   )
-;;   (if (= t (struct i64 i64))
-;;     (return (# (add_i64 ($ (index args 0)) ($ (index args 1)))))
-;;   )
-;; )))
+  (def p (init point v 5))
 
+  (def foo (fun ((p point))
+    (+ (. p x) (. p y))
+  ))
+))
+
+(execute g)
