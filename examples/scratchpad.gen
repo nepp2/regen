@@ -97,7 +97,7 @@
 
 (def tile_size 30)
 
-(def draw_tetronimo (fun ((xpos u64) (ypos u64) (s shape)) (do
+(def draw_tetronimo (fun ((x_offset u64) (y_offset u64) (s shape)) (do
   (let data (. s data))
   (let len (. s len))
   (let c (. s c))
@@ -108,8 +108,8 @@
       (if v (do
         (sdl_set_draw_color renderer (. c r) (. c g) (. c b) (255 u8))
         (let r (init sdl_rect
-          (* (+ xpos x) ts)
-          (* (+ ypos y) ts)
+          (+ (* x ts) x_offset)
+          (+ (* y ts) y_offset)
           ts ts)
         )
         (sdl_fill_rect renderer (ref r))
@@ -129,7 +129,7 @@
   (sdl_clear renderer)
   
   (for i 0 (array_len shapes) (do
-    (draw_tetronimo (+ 1 (* i 4)) 2 (index shapes i))
+    (draw_tetronimo (* i 110) 30 (index shapes i))
   ))
 
   (sdl_present renderer)
