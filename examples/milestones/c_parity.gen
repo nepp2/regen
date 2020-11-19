@@ -106,17 +106,6 @@
 
 ;; macros
 
-(def while (macro ns (do
-  (let condition (node_index ns 0))
-  (let body (node_index ns 1))
-  (# (label while_loop (do
-    (if ($ condition) (do
-      ($ body)
-      repeat
-    ))
-  )))
-)))
-
 (debug (do
   (let i 0)
   (while (< i 10) (set i (+ i 1)))

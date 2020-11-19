@@ -2,10 +2,11 @@
 (def SDL_INIT_VIDEO (32 u32))
 (def SDL_WINDOWPOS_UNDEFINED (536805376 u32))
 (def SDL_WINDOW_SHOWN (4 u32))
+(def SDL_WINDOW_ALWAYS_ON_TOP (32768 u32))
 (def SDL_RENDERER_ACCELERATED (2 u32))
 
-
 (def u32_max (4294967295 u32))
+(def SDL_DEFAULT_RENDER_INDEX u32_max)
 
 (def sdl2
   (load_library (sym SDL2)))
@@ -62,6 +63,16 @@
 (def sdl_destroy_window (cast
   (load_library_symbol sdl2 (sym SDL_DestroyWindow))
   (cfun (sdl_window_handle) void)
+))
+
+(def sdl_set_window_position (cast
+  (load_library_symbol sdl2 (sym SDL_SetWindowPosition))
+  (cfun ((window sdl_window_handle) (x i32) (y i32)) void)
+))
+
+(def sdl_raise_window (cast
+  (load_library_symbol sdl2 (sym SDL_RaiseWindow))
+  (cfun ((window sdl_window_handle)) void)
 ))
 
 (def sdl_poll_event (cast

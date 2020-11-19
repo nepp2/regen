@@ -794,7 +794,8 @@ fn compile_symbol_reference(b : &mut Builder, node : Node) -> Ref {
   panic!("symbol '{}' not defined ({})", sym, node.loc)
 }
 
-fn compile_function_call(b : &mut Builder, list : &[Node]) -> Var {
+fn compile_function_call(b : &mut Builder, n : Node) -> Var {
+  let list = n.children();
   let function = list[0];
   let args = &list[1..];
   let f = compile_expr_to_var(b, function);
@@ -805,6 +806,10 @@ fn compile_function_call(b : &mut Builder, list : &[Node]) -> Var {
     panic!("expected function, found {} expression '{}' at ({})",
       f.t, function, function.loc);
   };
+  if args.len() != info.args.len() {
+    panic!("expected {} args, found {}, at ({})",
+      info.args.len(), args.len(), n.loc);
+  }
   let mut arg_values = vec![];
   for i in 0..args.len() {
     let arg = args[i];
@@ -850,7 +855,7 @@ fn compile_call(b : &mut Builder, n : Node) -> Option<Ref> {
       }
     }
   }
-  Some(compile_function_call(b, list).to_ref())
+  Some(compile_function_call(b, n).to_ref())
 }
 
 fn str_to_operator(s : &str) -> Option<Operator> {

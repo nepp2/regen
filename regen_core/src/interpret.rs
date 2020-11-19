@@ -190,7 +190,9 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
               unsafe { store(p as *mut (), vaddr, bytes) }
             }
             Expr::PtrOffset{ ptr, offset } => {
-              let sizeof = frame.local_sizeof(var);
+              let sizeof =
+                types::deref_pointer_type(frame.local_type(var))
+                .unwrap().size_of;
               let offset : u64 = frame.get_local(offset);
               let p : u64 = frame.get_local(ptr);
               frame.set_local(var, &(p + (sizeof * offset)));
