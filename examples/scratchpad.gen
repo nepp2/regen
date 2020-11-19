@@ -22,13 +22,17 @@
   (b u8)
 ))
 
-(def red (init color (255 u8) (0 u8) (50 u8)))
-(def green (init color (0 u8) (255 u8) (0 u8)))
-(def blue (init color (50 u8) (100 u8) (255 u8)))
-(def sky_blue (init color (50 u8) (200 u8) (255 u8)))
-(def orange (init color (255 u8) (150 u8) (50 u8)))
-(def yellow (init color (255 u8) (200 u8) (0 u8)))
-(def magenta (init color (255 u8) (80 u8) (255 u8)))
+(def to_color (fun ((r u64) (g u64) (b u64))
+  (init color (cast r u8) (cast g u8) (cast b u8))
+))
+
+(def red (to_color 255 0 50))
+(def green (to_color 0 255 0))
+(def blue (to_color 50 100 255))
+(def sky_blue (to_color 50 200 255))
+(def orange (to_color 255 150 50))
+(def yellow (to_color 255 200 0))
+(def magenta (to_color 255 80 255))
 
 (def shape (struct
   (data (ptr u64))
