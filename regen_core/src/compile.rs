@@ -504,6 +504,11 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
       Some(pointer_to_locator(ptr, v.mutable))
     }
     // init
+    Command("zero_init", [type_node]) => {
+      let t = node_to_type(b, *type_node);
+      Some(push_expr(b, Expr::ZeroInit, t).to_ref())
+    }
+    // init
     Command("init", ns) => {
       let t = node_to_type(b, ns[0]);
       let field_nodes = &ns[1..];

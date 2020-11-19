@@ -107,6 +107,12 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
               let info = types::type_as_struct(&t).expect("expected struct");
               frame.initialise_struct(var, info.field_offsets, field_vals)
             }
+            Expr::ZeroInit => {
+              let t = frame.local_type(var);
+              unsafe {
+                std::ptr::write_bytes(frame.local_addr(var), 0, t.size_of as usize);
+              }
+            }
             Expr::FieldIndex { struct_addr, index } => {
               let ptr_type = frame.local_type(struct_addr);
               let t = types::deref_pointer_type(ptr_type).unwrap();

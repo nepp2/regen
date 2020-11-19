@@ -38,6 +38,7 @@ pub enum Expr {
   Def(Symbol),
   LocalAddr(LocalId),
   Init(PermSlice<LocalId>),
+  ZeroInit,
   Array(PermSlice<LocalId>),
   FieldIndex { struct_addr : LocalId, index : u64 },
   LiteralU64(u64),

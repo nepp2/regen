@@ -33,6 +33,7 @@ extern {
   pub fn malloc(size: usize) -> *mut u8;
   pub fn free(ptr: *mut u8);
   pub fn memcpy(dest : *mut u8, src: *const u8, count : usize) -> *mut u8;
+  pub fn memset(dest : *mut u8, val: i32, count : usize) -> *mut u8;
 }
 
 pub extern "C" fn env_alloc_global(mut env : Env, name : Symbol, tag : TypeHandle) -> *mut () {
@@ -175,6 +176,7 @@ pub fn new_env(st : SymbolTable) -> Env {
   }
 
   let u64 = env.c.u64_tag;
+  let u32 = env.c.u32_tag;
   let void = env.c.void_tag;
   let void_ptr = types::pointer_type(void);
   let node = env.c.node_tag;
@@ -190,7 +192,10 @@ pub fn new_env(st : SymbolTable) -> Env {
     c_function_type(&[void_ptr], void));
 
   define_global(e, "memcpy", memcpy as u64,
-    c_function_type(&[void_ptr, void_ptr, u64], void));  
+    c_function_type(&[void_ptr, void_ptr, u64], void_ptr));
+
+  define_global(e, "memset", memset as u64,
+    c_function_type(&[void_ptr, u32, u64], void_ptr));
 
   define_global(e, "env", Perm::to_u64(e), u64);
 

@@ -138,6 +138,7 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, (TypeHandle, Expr)> {
         }
         write!(f, ")")
       }
+      Expr::ZeroInit => write!(f, "zero_init"),
       Expr::FieldIndex{ struct_addr, index } =>
         write!(f, "(. {} {})", bc.d(struct_addr), index),
       Expr::BinaryOp(op, a, b) =>
