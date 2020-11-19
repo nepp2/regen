@@ -28,7 +28,7 @@ pub struct LocalId {
   pub id : usize,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Operator {
   Add, Sub, Mul, Div, Rem, Eq, LT, GT, LTE, GTE, Not,
 }

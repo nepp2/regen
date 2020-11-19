@@ -102,7 +102,7 @@ impl fmt::Display for Operator {
       Mul => write!(f, "*"),
       Div => write!(f, "/"),
       Rem => write!(f, "%"),
-      Eq => write!(f, "="),
+      Eq => write!(f, "=="),
       LT => write!(f, "<"),
       GT => write!(f, ">"),
       LTE => write!(f, "<="),

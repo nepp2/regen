@@ -8,7 +8,7 @@ use std::fmt;
 
 pub type TypeHandle = Perm<TypeInfo>;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 #[repr(u64)]
 pub enum Primitive {
   U64 = 0,
@@ -16,6 +16,7 @@ pub enum Primitive {
   U16 = 2,
   U8 = 3,
   Void = 4,
+  Bool = 5,
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -99,11 +100,27 @@ pub struct CoreTypes {
   pub u16_tag : TypeHandle,
   pub u8_tag : TypeHandle,
   pub void_tag : TypeHandle,
+  pub bool_tag : TypeHandle,
   pub string_tag : TypeHandle,
   pub node_tag : TypeHandle,
   pub node_slice_tag : TypeHandle,
 
   pub core_types : Vec<(&'static str, TypeHandle)>,
+}
+
+pub fn is_number(t : TypeHandle) -> bool {
+  use Primitive::*;
+  if let Some(p) = type_as_primitive(&t) {
+    match p {
+      U64 | U32 | U16 | U8 => return true,
+      _ => (),
+    }
+  }
+  false
+}
+
+pub fn is_bool(t : TypeHandle) -> bool {
+  type_as_primitive(&t) == Some(Primitive::Bool)
 }
 
 pub fn type_as_primitive(t : &TypeInfo) -> Option<Primitive> {
@@ -228,6 +245,7 @@ pub fn core_types() -> CoreTypes {
   let u16_tag = new_type(Kind::Primitive, 2, Primitive::U16 as u64);
   let u8_tag = new_type(Kind::Primitive, 1, Primitive::U8 as u64);
   let void_tag = new_type(Kind::Primitive, 0, Primitive::Void as u64);
+  let bool_tag = new_type(Kind::Primitive, 1, Primitive::Bool as u64);
 
   let node_tag = new_type(Kind::Node, 8, 0);
   let node_slice_tag = tuple_type(perm_slice(&[
@@ -249,7 +267,7 @@ pub fn core_types() -> CoreTypes {
 
   CoreTypes {
     type_tag, u64_tag, u32_tag, u16_tag,
-    u8_tag, void_tag, string_tag,
+    u8_tag, void_tag, bool_tag, string_tag,
     node_tag, node_slice_tag,
 
     core_types:
@@ -264,6 +282,7 @@ pub fn core_types() -> CoreTypes {
         ("i16", u16_tag), // TODO: fix
         ("i8", u8_tag), // TODO: fix
         ("void", void_tag),
+        ("bool", bool_tag),
         ("node", node_tag),
         ("node_slice", node_slice_tag),
         ("string", string_tag),
@@ -281,6 +300,7 @@ impl fmt::Display for TypeInfo {
           Primitive::U16 => "u16",
           Primitive::U8 => "u8",
           Primitive::Void => "void",
+          Primitive::Bool => "bool",
         };
         write!(f, "{}", s)?;
       }

@@ -1,17 +1,41 @@
 
-;; next feature is dataflow graphs?
+(include env (ref "examples/lib/sdl2.gen"))
 
-(def g (graph
-  
-  (def point (struct (x i64) (y i64)))
+(def title (array (65 u8) (65 u8) (65 u8) (0 u8)))
 
-  (def v 2)
+(sdl_init SDL_INIT_VIDEO)
 
-  (def p (init point v 5))
+(def win
+  (sdl_create_window
+    (ref (index title 0))
+    SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED
+    (800 u32) (600 u32)
+    SDL_WINDOW_SHOWN))
 
-  (def foo (fun ((p point))
-    (+ (. p x) (. p y))
-  ))
+(def renderer
+  (sdl_create_renderer win u32_max SDL_RENDERER_ACCELERATED))
+
+(debug (type_sizeof sdl_event))
+
+;; remove needless malloc
+(def event_ptr (do
+  (let bytes (type_sizeof sdl_event))
+  (cast (malloc bytes) (ptr sdl_event))
 ))
 
-(execute g)
+(label loop (do
+  (if (== (1 u32) (sdl_poll_event event_ptr))
+    (if (== (. event_ptr event_type) SDL_QUIT)
+      (break loop)
+    )
+  )
+  (sdl_set_draw_color renderer (0 u8) (0 u8) (0 u8) (0 u8))
+  (sdl_clear renderer)
+  (sdl_set_draw_color renderer (255 u8) (0 u8) (0 u8) (255 u8))
+
+  (let rect (init sdl_rect 50 50 300 200))
+
+  (sdl_fill_rect renderer (ref rect))
+  (sdl_present renderer)
+  (repeat loop)
+))

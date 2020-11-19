@@ -25,6 +25,8 @@ impl fmt::Display for DebugDisplay {
             write!(f, "{}", unsafe { *(self.p as *const u16) }),
           Primitive::U8 =>
             write!(f, "{}", unsafe { *(self.p as *const u8) }),
+          Primitive::Bool =>
+            write!(f, "{}", unsafe { *(self.p as *const u8) } != 0),
           Primitive::Void =>
             write!(f, "void"),
         }

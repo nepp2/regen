@@ -373,6 +373,16 @@ fn compile_assignment(b : &mut Builder, dest : Ref, value : Var) {
   });
 }
 
+/// dereferences any pointer types encountered
+fn compile_and_fully_deref(b : &mut Builder, node : Node) -> Ref {
+  let mut r = compile_expr_to_ref(b, node);
+  while r.t.kind == Kind::Pointer {
+    let v = r.to_var(b);
+    r = pointer_to_locator(v, r.mutable);
+  }
+  r
+}
+
 fn compile_expr_to_ref(b : &mut Builder, node : Node) -> Ref {
   if let Some(r) = compile_expr(b, node) {
     r
@@ -507,7 +517,7 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
     }
     // field deref
     Command(".", [v, field]) => {
-      let struct_ref = compile_expr_to_ref(b, *v);
+      let struct_ref = compile_and_fully_deref(b, *v);
       let struct_addr = struct_ref.get_address(b).id;
       let info = types::type_as_struct(&struct_ref.t).expect("expected struct");
       let i = match field.content {
@@ -846,7 +856,7 @@ fn str_to_operator(s : &str) -> Option<Operator> {
     "*" => Mul,
     "/" => Div,
     "%" => Rem,
-    "=" => Eq,
+    "==" => Eq,
     "<" => LT,
     ">" => GT,
     "<=" => LTE,
@@ -857,13 +867,37 @@ fn str_to_operator(s : &str) -> Option<Operator> {
   Some(op)
 }
 
-fn op_result_type(c : &CoreTypes, op : Operator) -> TypeHandle {
+fn binary_op_type(c : &CoreTypes, op : Operator, a : TypeHandle, b : TypeHandle) -> Option<TypeHandle> {
   use Operator::*;
-  match op {
-    Add | Sub | Mul | Div | Rem |
-    Eq | LT | GT | LTE | GTE |
-    Not => c.u64_tag,
+  if a == b {
+    match op {
+      Add | Sub | Mul | Div | Rem => {
+        if types::is_number(a) {
+          return Some(a);
+        }
+      }
+      Eq | LT | GT | LTE | GTE => {
+        if types::is_number(a) || types::is_bool(a) {
+          return Some(c.bool_tag);
+        }
+      }
+      Not => (),
+    }
   }
+  None
+}
+
+fn unary_op_type(c : &CoreTypes, op : Operator, t : TypeHandle) -> Option<TypeHandle> {
+  use Operator::*;
+  if op == Not && t == c.bool_tag {
+    return Some(c.bool_tag);
+  }
+  if op == Sub {
+    if t == c.u64_tag {
+      return Some(t);
+    }
+  }
+  None
 }
 
 /// compiles a literal with an explicit type tag. For example:
@@ -891,18 +925,26 @@ fn compile_list_expr(b : &mut Builder, node : Node) -> Option<Ref> {
   match node_shape(&node) {
     Command(head, tail) => {
       if let Some(op) = str_to_operator(head) {
-        let t = op_result_type(&b.env.c, op);
         if let [v1, v2] = tail {
           let v1 = compile_expr_to_var(b, *v1);
           let v2 = compile_expr_to_var(b, *v2);
-          let e = Expr::BinaryOp(op, v1.id, v2.id);
-          return Some(push_expr(b, e, t).to_ref());
+          if let Some(t) = binary_op_type(&b.env.c, op, v1.t, v2.t) {
+            let e = Expr::BinaryOp(op, v1.id, v2.id);
+            return Some(push_expr(b, e, t).to_ref());
+          }
+          panic!("no binary op {} for types {} and {} at ({})",
+            op, v1.t, v2.t, node.loc)
         }
         if let [v1] = tail {
           let v1 = compile_expr_to_var(b, *v1);
-          let e = Expr::UnaryOp(op, v1.id);
-          return Some(push_expr(b, e, t).to_ref());
+          if let Some(t) = unary_op_type(&b.env.c, op, v1.t) {
+            let e = Expr::UnaryOp(op, v1.id);
+            return Some(push_expr(b, e, t).to_ref());
+          }
+          panic!("no unary op {} for type {} at ({})",
+            op, v1.t, node.loc)
         }
+        panic!("incorrect number of args to operator {} at ({})", op, node.loc)
       }
     }
     _ => (),
