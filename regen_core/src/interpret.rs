@@ -181,6 +181,10 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
                 std::slice::from_raw_parts(data, args.len)
               };
               let val = unsafe { ffi::call_c_function(fptr, args) };
+              // TODO: the line below is incorrect for void types, and probably also
+              // for any types that isn't exactly 64 bits wide. The arguments passed are
+              // also suspect; args smaller than 64 bits may be passed incorrectly.
+              let aaa = ();
               frame.set_local(var, &val);
             }
             Expr::Load(ptr) => {
@@ -336,11 +340,16 @@ impl Frame {
 
   fn set_local<T>(&self, dest : LocalId, val : &T) {
     let src = val as *const T;
+    let dest_size = self.local_sizeof(dest) as usize;
+    let val_size = std::mem::size_of::<T>();
+    if dest_size != val_size {
+      panic!("can't assign {} byte value to {} byte location", val_size, dest_size)
+    }
     unsafe {
       store(
         src as *const (),
         self.local_addr(dest),
-        self.local_sizeof(dest) as usize);
+        dest_size);
     }
   }
 

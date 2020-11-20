@@ -16,11 +16,7 @@
 (def renderer
   (sdl_create_renderer win u32_max SDL_RENDERER_ACCELERATED))
 
-(def color (struct
-  (r u8)
-  (g u8)
-  (b u8)
-))
+(def color (struct (r u8) (g u8) (b u8)))
 
 (def to_color (fun ((r u64) (g u64) (b u64))
   (init color (cast r u8) (cast g u8) (cast b u8))
@@ -102,14 +98,13 @@
 (def tile_size 30)
 
 (def draw_tetronimo (fun ((x_offset u64) (y_offset u64) (s shape)) (do
-  (let data (. s data))
   (let len (. s len))
-  (let c (. s c))
   (let ts tile_size)
   (for y 0 len (do
     (for x 0 len (do
-      (let v (index data (+ x (* y len))))
+      (let v (index (. s data) (+ x (* y len))))
       (if v (do
+        (let c (. s c))
         (sdl_set_draw_color renderer (. c r) (. c g) (. c b) (255 u8))
         (let r (init sdl_rect
           (+ (* x ts) x_offset)
@@ -122,13 +117,26 @@
   ))
 )))
 
+(def update (fun ((e (ptr sdl_event))) (do
+  (if (== (. e event_type) SDL_KEYDOWN) (do
+    (debug (. e event_type))
+    (let ke (to_keyboard_event e))
+    (debug (. (. ke keysym) sym))
+  ))
+)))
+
 (label loop (do
   (let e (zero_init sdl_event))
-  (if (== (1 u32) (sdl_poll_event (ref e)))
+
+  ;; handle events
+  (if (== (1 u32) (sdl_poll_event (ref e))) (do
     (if (== (. e event_type) SDL_QUIT)
       (break loop)
     )
-  )
+    (update (ref e))
+  ))
+
+  ;; render
   (sdl_set_draw_color renderer (0 u8) (0 u8) (0 u8) (0 u8))
   (sdl_clear renderer)
   
