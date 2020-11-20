@@ -740,7 +740,7 @@ fn try_node_to_type(b: &Builder, n : Node) -> Option<TypeHandle> {
     // array type
     Command("sized_array", [element, size]) => {
       let element = node_to_type(b, *element);
-      let size = size.as_literal_u64();
+      let size = eval_literal_u64(b.env, *size);
       Some(types::array_type(element, size))
     }
     // tuple type
@@ -770,6 +770,14 @@ fn try_node_to_type(b: &Builder, n : Node) -> Option<TypeHandle> {
     }
     _ => None,
   }
+}
+
+fn eval_literal_u64(env : Env, n : Node) -> u64 {
+  if let NodeContent::Literal(NodeLiteral::U64(v)) = n.content {
+    return v;
+  }
+  env::get_global_value(env, n.as_symbol(), env.c.u64_tag)
+    .expect("expected u64 value")
 }
 
 fn node_to_type(b: &Builder, n : Node) -> TypeHandle {

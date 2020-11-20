@@ -97,15 +97,44 @@
 
 (def tile_size 30)
 
-(def draw_tetronimo (fun ((x_offset u64) (y_offset u64) (s shape)) (do
+(def cell (struct
+  (c color)
+  (filled bool)
+))
+
+(def grid_width 10)
+(def grid_height 24)
+(def grid_size (* grid_width grid_height))
+
+(def grid (sized_array cell grid_size))
+
+(def blit (fun ((g (ptr grid)) (s (ptr shape)) (off_x u64) (off_y u64)) (do
   (let len (. s len))
-  (let ts tile_size)
+  (let c (. s c))
   (for y 0 len (do
     (for x 0 len (do
       (let v (index (. s data) (+ x (* y len))))
       (if (== v 1) (do
-        (let c (. s c))
-        (sdl_set_draw_color renderer (. c r) (. c g) (. c b) (255 u8))
+        (let xpos (+ x off_x))
+        (let ypos (+ y off_y))
+        (let i (+ xpos (* ypos grid_width)))
+        (set (index (* g) i) (init cell c true))
+      ))
+    ))
+  ))
+)))
+
+(def set_draw_color (fun ((c color)) (do
+  (sdl_set_draw_color renderer (. c r) (. c g) (. c b) (255 u8))
+)))
+
+(def draw_grid (fun ((x_offset u64) (y_offset u64) (g (ptr grid))) (do
+  (let ts tile_size)
+  (for y 0 grid_height (do
+    (for x 0 grid_width (do
+      (let cell (index (* g) (+ x (* y grid_width))))
+      (if (. cell filled) (do
+        (set_draw_color (. cell c))
         (let r (init sdl_rect
           (+ (* x ts) x_offset)
           (+ (* y ts) y_offset)
@@ -117,6 +146,33 @@
   ))
 )))
 
+(def draw_tetronimo (fun ((x_offset u64) (y_offset u64) (s shape)) (do
+  (let len (. s len))
+  (let ts tile_size)
+  (for y 0 len (do
+    (for x 0 len (do
+      (let v (index (. s data) (+ x (* y len))))
+      (if (== v 1) (do
+        (set_draw_color (. s c))
+        (let r (init sdl_rect
+          (+ (* x ts) x_offset)
+          (+ (* y ts) y_offset)
+          ts ts
+        ))
+        (sdl_fill_rect renderer (ref r))
+      ))
+    ))
+  ))
+)))
+
+(def state (struct
+  (g grid)
+))
+
+(def initial_state (fun () (do 
+  (init state (zero_init grid))
+)))
+
 (def update (fun ((e (ptr sdl_event))) (do
   (if (== (. e event_type) SDL_KEYDOWN) (do
     (debug (. e event_type))
@@ -125,25 +181,33 @@
   ))
 )))
 
-(label loop (do
-  (let e (zero_init sdl_event))
+(do
+  (let s (initial_state))
 
-  ;; handle events
-  (if (== (1 u32) (sdl_poll_event (ref e))) (do
-    (if (== (. e event_type) SDL_QUIT)
-      (break loop)
-    )
-    (update (ref e))
+  (blit (ref (. s g)) (ref (index shapes 4)) 4 5)
+
+  (label loop (do
+    (let e (zero_init sdl_event))
+
+    ;; handle events
+    (if (== (1 u32) (sdl_poll_event (ref e))) (do
+      (if (== (. e event_type) SDL_QUIT)
+        (break loop)
+      )
+      (update (ref e))
+    ))
+
+    ;; render
+    (sdl_set_draw_color renderer (0 u8) (0 u8) (0 u8) (0 u8))
+    (sdl_clear renderer)
+    
+    (for i 0 (array_len shapes) (do
+      (draw_tetronimo (* i 110) 30 (index shapes i))
+    ))
+
+    (draw_grid 30 30 (ref (. s g)))
+
+    (sdl_present renderer)
+    (repeat loop)
   ))
-
-  ;; render
-  (sdl_set_draw_color renderer (0 u8) (0 u8) (0 u8) (0 u8))
-  (sdl_clear renderer)
-  
-  (for i 0 (array_len shapes) (do
-    (draw_tetronimo (* i 110) 30 (index shapes i))
-  ))
-
-  (sdl_present renderer)
-  (repeat loop)
-))
+)
