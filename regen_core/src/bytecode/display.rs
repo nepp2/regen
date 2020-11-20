@@ -12,19 +12,19 @@ impl fmt::Display for FunctionBytecode {
     write!(f, ";; Frame vars:")?;
     for v in self.locals.as_slice() {
       writeln!(f)?;
-      write!(f, "  {}: {}", self.d(&v.id), v.t)?;
+      write!(f, "  {}: {}", v, v.t)?;
     }
     writeln!(f)?;
     write!(f, "(fun (")?;
     for v in &self.locals.as_slice()[..self.args] {
-      write!(f, " ({} {})", v.t, self.d(&v.id))?;
+      write!(f, " ({} {})", v, v.t)?;
     }
     writeln!(f, ") (")?;
     for b in self.sequence_info.iter() {
       writeln!(f, "  (seq {} (", b.name)?;
       let end = b.start_instruction + b.num_instructions;
       for instr in self.instrs[b.start_instruction..end].iter() {
-        write!(f, "    {}", self.d(instr))?;
+        write!(f, "    {}", instr)?;
         writeln!(f)?;
       }
       writeln!(f, "  ))")?;
@@ -34,58 +34,42 @@ impl fmt::Display for FunctionBytecode {
   }
 }
 
-struct BytecodeDisplay<'l, X> {
-   bc : &'l FunctionBytecode,
-   x : &'l X,
-}
+struct DisplayExpr(TypeHandle, Expr);
 
-
-impl FunctionBytecode {
-  fn d<'l, X>(&'l self, x : &'l X) -> BytecodeDisplay<'l, X> {
-     BytecodeDisplay { bc: self, x }
-  }
-}
-
-impl <'l> fmt::Display for BytecodeDisplay<'l, LocalId> {
+impl fmt::Display for LocalInfo {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    if let Some(n) = self.bc.locals[self.x.id].name {
+    if let Some(n) = self.name {
       write!(f, "${}", n)
     }
     else {
-      write!(f, "${}", self.x.id)
+      write!(f, "${}", self.index)
     }
   }
 }
 
-impl <'l> fmt::Display for BytecodeDisplay<'l, SequenceId> {
+impl fmt::Display for SequenceHandle {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "{}", self.bc.sequence_info[self.x.0].name)
+    write!(f, "{}", self.name)
   }
 }
 
-impl <'l> fmt::Display for BytecodeDisplay<'l, Instr> {
+impl <'l> fmt::Display for Instr {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    let bc = self.bc;
-    match self.x {
+    match self {
       Instr::Expr(reg, expr) => {
-        let t = bc.locals[reg.id].t;
-        write!(f, "(let {} {})",
-          bc.d(reg),
-          bc.d(&(t, *expr)))?
+        let t = reg.t;
+        write!(f, "(let {} {})", reg, DisplayExpr(t, *expr))?
       }
       Instr::Store{ pointer, value } =>
-        write!(f, "(store {} {})",
-          bc.d(pointer),
-          bc.d(value))?,
+        write!(f, "(store {} {})", pointer, value)?,
       Instr::CJump{ cond, then_seq, else_seq } =>
-        write!(f, "(cjump {} {} {})",
-          bc.d(cond), bc.d(then_seq), bc.d(else_seq))?,
+        write!(f, "(cjump {} {} {})", cond, then_seq, else_seq)?,
       Instr::Debug(sym, reg, _) =>
-        write!(f, "(debug {} {})", sym, bc.d(reg))?,
+        write!(f, "(debug {} {})", sym, reg)?,
       Instr::Jump(seq) =>
-        write!(f, "(jump {})", bc.d(seq))?,
+        write!(f, "(jump {})", seq)?,
       Instr::Return(Some(v)) =>
-        write!(f, "(return ({} {}))", bc.locals[v.id].t, bc.d(v))?,
+        write!(f, "(return ({} {}))", v.t, v)?,
       Instr::Return(None) =>
         write!(f, "return")?,
     }
@@ -112,10 +96,9 @@ impl fmt::Display for Operator {
   }
 }
 
-impl <'l> fmt::Display for BytecodeDisplay<'l, (TypeHandle, Expr)> {
+impl fmt::Display for DisplayExpr {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    let bc = self.bc;
-    match &self.x.1 {
+    match &self.1 {
       Expr::LiteralU64(v) =>
         write!(f, "{}", v),
       Expr::Literal(t, _v) =>
@@ -123,51 +106,49 @@ impl <'l> fmt::Display for BytecodeDisplay<'l, (TypeHandle, Expr)> {
       Expr::Def(sym) =>
         write!(f, "{}", sym),
       Expr::LocalAddr(local) =>
-        write!(f, "(ref {})", bc.d(local)),
+        write!(f, "(ref {})", local),
       Expr::Array(elements) => {
-        write!(f, "(array {} ", self.x.0)?;
+        write!(f, "(array {} ", self.0)?;
         for ev in elements.as_slice() {
-          write!(f, "{} ", bc.d(ev))?;
+          write!(f, "{} ", ev)?;
         }
         write!(f, ")")
       }
       Expr::Init(fields) => {
-        write!(f, "(init {} ", self.x.0)?;
+        write!(f, "(init {} ", self.0)?;
         for fv in fields.as_slice() {
-          write!(f, "{} ", bc.d(fv))?;
+          write!(f, "{} ", fv)?;
         }
         write!(f, ")")
       }
       Expr::ZeroInit => write!(f, "zero_init"),
       Expr::FieldIndex{ struct_addr, index } =>
-        write!(f, "(. {} {})", bc.d(struct_addr), index),
+        write!(f, "(. {} {})", struct_addr, index),
       Expr::BinaryOp(op, a, b) =>
-        write!(f, "({} {} {})", op, bc.d(a), bc.d(b)),
+        write!(f, "({} {} {})", op, a, b),
       Expr::UnaryOp(op, a) =>
-        write!(f, "({} {})", op, bc.d(a)),
+        write!(f, "({} {})", op, a),
       Expr::Invoke(reg, args) => {
-        write!(f, "(call {} ", bc.d(reg))?;
+        write!(f, "(call {} ", reg)?;
         for arg in args.as_slice() {
-          write!(f, "{} ", bc.d(arg))?;
+          write!(f, "{} ", arg)?;
         }
         write!(f, ")")
       }
       Expr::InvokeC(reg, args) => {
-        write!(f, "(ccall {} ", bc.d(reg))?;
+        write!(f, "(ccall {} ", reg)?;
         for arg in args.as_slice() {
-          write!(f, "{} ", bc.d(arg))?;
+          write!(f, "{} ", arg)?;
         }
         write!(f, ")")
       }
       Expr::Load(ptr) =>
-        write!(f, "(load {} {})",
-          bc.locals[ptr.id].t,
-          bc.d(ptr)),
+        write!(f, "(load {} {})", ptr.t, ptr),
       Expr::PtrOffset {ptr, offset } => {
-        write!(f, "(ptr_offset {} {})", bc.d(ptr), bc.d(offset))
+        write!(f, "(ptr_offset {} {})", ptr, offset)
       }
       Expr::Cast(v) =>
-        write!(f, "(cast {})", bc.d(v)),
+        write!(f, "(cast {})", v),
     }
   }
 }

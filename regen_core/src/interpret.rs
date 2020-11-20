@@ -8,7 +8,7 @@ use crate::{parse, bytecode, env, ffi, compile, types, debug, perm_alloc};
 use env::Env;
 use parse::Node;
 use bytecode::{
-  Instr, Expr, Operator, LocalId,
+  Instr, Expr, Operator, LocalHandle,
 };
 use compile::Function;
 use perm_alloc::PermSlice;
@@ -74,19 +74,40 @@ struct Frame {
   return_addr : *mut (),
 }
 
+macro_rules! binop {
+  ($frame:ident, $var:ident, $op:ident, $a:expr, $b:expr, $t:ty) => {{
+    let var = $var;
+    let a : $t = $frame.get_local($a);
+    let b : $t = $frame.get_local($b);
+    match $op {
+      Add => $frame.set_local(var, &(a + b)),
+      Sub => $frame.set_local(var, &(a - b)),
+      Mul => $frame.set_local(var, &(a * b)),
+      Div => $frame.set_local(var, &(a / b)),
+      Rem => $frame.set_local(var, &(a % b)),
+      Eq => $frame.set_local(var, &(a == b)),
+      LT => $frame.set_local(var, &(a < b)),
+      GT => $frame.set_local(var, &(a > b)),
+      LTE => $frame.set_local(var, &(a <= b)),
+      GTE => $frame.set_local(var, &(a >= b)),
+      _ => panic!("op not binary"),
+    };
+  }};
+}
+
 fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
   let mut frame = shadow_stack.pop().unwrap();
   'outer: loop {
     let fun = unsafe { &*frame.f };
     loop {
       let instr = fun.bc.instrs[frame.pc];
+      // println!("   {}", instr);
       match instr {
         Instr::Expr(var, e) => {
           use Operator::*;
           match e {
             Expr::LocalAddr(l) => {
-              let local_offset = frame.local_byte_offset(l);
-              let v = frame.sbp.to_raw_ptr(local_offset) as u64;
+              let v = frame.local_addr(l) as u64;
               frame.set_local(var, &v);
             }
             Expr::Def(sym) => {
@@ -98,23 +119,20 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
               }
             }
             Expr::Array(element_vals) => {
-              let t = frame.local_type(var);
-              let info = types::type_as_array(&t).expect("expected array");
+              let info = types::type_as_array(&var.t).expect("expected array");
               frame.initialise_array(var, info.inner, element_vals)
             }
             Expr::Init(field_vals) => {
-              let t = frame.local_type(var);
-              let info = types::type_as_struct(&t).expect("expected struct");
+              let info = types::type_as_struct(&var.t).expect("expected struct");
               frame.initialise_struct(var, info.field_offsets, field_vals)
             }
             Expr::ZeroInit => {
-              let t = frame.local_type(var);
               unsafe {
-                std::ptr::write_bytes(frame.local_addr(var), 0, t.size_of as usize);
+                std::ptr::write_bytes(frame.local_addr(var), 0, var.t.size_of as usize);
               }
             }
             Expr::FieldIndex { struct_addr, index } => {
-              let ptr_type = frame.local_type(struct_addr);
+              let ptr_type = struct_addr.t;
               let t = types::deref_pointer_type(ptr_type).unwrap();
               let info = types::type_as_struct(&t).expect("expected struct");
               let field_offset = info.field_offsets[index as usize];
@@ -129,22 +147,16 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
               frame.set_local(var, &p);
             }
             Expr::BinaryOp(op, a, b) => {
-              let a : u64 = frame.get_local(a);
-              let b : u64  = frame.get_local(b);
-              let val = match op {
-                Add => a + b,
-                Sub => a - b,
-                Mul => a * b,
-                Div => a / b,
-                Rem => a % b,
-                Eq => (a == b) as u64,
-                LT => (a < b) as u64,
-                GT => (a > b) as u64,
-                LTE => (a <= b) as u64,
-                GTE => (a >= b) as u64,
-                _ => panic!("op not binary"),
-              };
-              frame.set_local(var, &val);
+              use Primitive::*;
+              let t = types::type_as_primitive(&a.t).unwrap();
+              match t {
+                U64 => binop!(frame, var, op, a, b, u64),
+                U32 => binop!(frame, var, op, a, b, u32),
+                U16 => binop!(frame, var, op, a, b, u16),
+                U8 => binop!(frame, var, op, a, b, u8),
+                _ => panic!("binary op {} not supported for operands of type {}", op, a.t),
+              }
+              
             }
             Expr::UnaryOp(op, a) => {
               let a : u64 = frame.get_local(a);
@@ -184,18 +196,19 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
               // TODO: the line below is incorrect for void types, and probably also
               // for any types that isn't exactly 64 bits wide. The arguments passed are
               // also suspect; args smaller than 64 bits may be passed incorrectly.
-              let aaa = ();
-              frame.set_local(var, &val);
+              unsafe {
+                let v = (&val as *const u64) as *const ();
+                cast_and_store(v, frame.local_addr(var), env.c.u64_tag, var.t);
+              }
             }
             Expr::Load(ptr) => {
               let p : *mut () = frame.get_local(ptr);
               let vaddr = frame.local_addr(var);
-              let bytes = frame.local_sizeof(var) as usize;
-              unsafe { store(p as *mut (), vaddr, bytes) }
+              unsafe { store(p as *mut (), vaddr, var.t.size_of) }
             }
             Expr::PtrOffset{ ptr, offset } => {
               let sizeof =
-                types::deref_pointer_type(frame.local_type(var))
+                types::deref_pointer_type(var.t)
                 .unwrap().size_of;
               let offset : u64 = frame.get_local(offset);
               let p : u64 = frame.get_local(ptr);
@@ -208,22 +221,22 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
         }
         Instr::Store{ pointer, value } => {
           let dest : *mut () = frame.get_local(pointer);
-          let src_localister = frame.local_addr(value);
-          let byte_width = frame.local_sizeof(value) as usize;
-          unsafe { store(src_localister, dest, byte_width) }
+          let value_addr = frame.local_addr(value);
+          let byte_width = value.t.size_of;
+          unsafe { store(value_addr, dest, byte_width) }
         }
         Instr::CJump{ cond, then_seq, else_seq } => {
-          let v : u64 = frame.get_local(cond);
-          if v != 0 {
-            frame.pc = fun.bc.sequence_info[then_seq.0].start_instruction;
+          let v : bool = frame.get_local(cond);
+          if v {
+            frame.pc = then_seq.start_instruction;
           }
           else {
-            frame.pc = fun.bc.sequence_info[else_seq.0].start_instruction;
+            frame.pc = else_seq.start_instruction;
           }
           continue;
         }
         Instr::Jump(seq) => {
-          frame.pc = fun.bc.sequence_info[seq.0].start_instruction;
+          frame.pc = seq.start_instruction;
           continue;
         }
         Instr::Debug(sym, l, t) => {
@@ -233,9 +246,8 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
         Instr::Return(val) => {
           if let Some(val) = val {
             let src_addr = frame.local_addr(val);
-            let byte_width = frame.local_sizeof(val) as usize;
             unsafe {
-              store(src_addr, frame.return_addr as *mut (), byte_width);
+              store(src_addr, frame.return_addr as *mut (), val.t.size_of);
             }
           }
           if let Some(prev_frame) = shadow_stack.pop() {
@@ -280,39 +292,40 @@ impl StackPtr {
 
 impl Frame {
 
-  fn initialise_array(&self, l : LocalId, element_type : TypeHandle, element_vals : PermSlice<LocalId>) {
+  fn initialise_array(&self, l : LocalHandle, element_type : TypeHandle, element_vals : PermSlice<LocalHandle>) {
     let addr = self.local_addr(l) as *mut u8;
-    let byte_width = element_type.size_of as usize;
+    let byte_width = element_type.size_of;
     for i in 0..element_vals.len() {
-      let val_addr = self.local_addr(element_vals[i]);
+      let e = element_vals[i];
+      let val_addr = self.local_addr(e);
       unsafe {
-        let dest = addr.add(byte_width * i);
-        store(val_addr, dest as *mut (), byte_width as usize);
+        let dest = addr.add((byte_width as usize) * i);
+        store(val_addr, dest as *mut (), byte_width);
       }
     }
   }
 
-  fn initialise_struct(&self, l : LocalId, field_offsets : PermSlice<u64>, field_vals : PermSlice<LocalId>) {
+  fn initialise_struct(&self, l : LocalHandle, field_offsets : PermSlice<u64>, field_vals : PermSlice<LocalHandle>) {
     let addr = self.local_addr(l) as *mut u8;
     for i in 0..field_vals.len() {
       let offset = field_offsets[i];
-      let val_addr = self.local_addr(field_vals[i]);
-      let byte_width = self.local_sizeof(l);
+      let fv = field_vals[i];
+      let val_addr = self.local_addr(fv);
       unsafe {
         let dest = addr.add(offset as usize);
-        store(val_addr, dest as *mut (), byte_width as usize);
+        store(val_addr, dest as *mut (), fv.t.size_of);
       }
     }
   }
 
-  fn push_args(&self, args : PermSlice<LocalId>) {
+  fn push_args(&self, args : PermSlice<LocalHandle>) {
     let args_ptr =
         self.sbp.advance_bytes(self.fun().bc.frame_bytes);
     let mut byte_offset = 0;
     for &a in args {
       let arg_ptr = args_ptr.to_raw_ptr(byte_offset);
-      let byte_width = types::round_up_multiple(self.local_sizeof(a), 8);
-      unsafe { store(self.local_addr(a), arg_ptr, byte_width as usize) };
+      let byte_width = types::round_up_multiple(a.t.size_of, 8);
+      unsafe { store(self.local_addr(a), arg_ptr, byte_width) };
       byte_offset += byte_width;
     }
   }
@@ -321,27 +334,14 @@ impl Frame {
     unsafe { &*self.f }
   }
 
-  fn local_byte_offset(&self, l : LocalId) -> u64 {
-    self.fun().bc.locals[l.id].byte_offset as u64
+  fn local_addr(&self, l : LocalHandle) -> *mut () {
+    self.sbp.to_raw_ptr(l.byte_offset) as *mut ()
   }
 
-  fn local_type(&self, l : LocalId) -> TypeHandle {
-    self.fun().bc.locals[l.id].t
-  }
-
-  fn local_sizeof(&self, l : LocalId) -> u64 {
-    self.fun().bc.locals[l.id].t.size_of as u64
-  }
-
-  fn local_addr(&self, l : LocalId) -> *mut () {
-    let byte_offset = self.local_byte_offset(l);
-    self.sbp.to_raw_ptr(byte_offset) as *mut ()
-  }
-
-  fn set_local<T>(&self, dest : LocalId, val : &T) {
+  fn set_local<T>(&self, dest : LocalHandle, val : &T) {
     let src = val as *const T;
-    let dest_size = self.local_sizeof(dest) as usize;
-    let val_size = std::mem::size_of::<T>();
+    let dest_size = dest.t.size_of;
+    let val_size = std::mem::size_of::<T>() as u64;
     if dest_size != val_size {
       panic!("can't assign {} byte value to {} byte location", val_size, dest_size)
     }
@@ -353,48 +353,49 @@ impl Frame {
     }
   }
 
-  fn cast(&self, src : LocalId, dest : LocalId) {
-    let src_type = self.local_type(src);
-    let dest_type = self.local_type(dest);
+  fn cast(&self, src : LocalHandle, dest : LocalHandle) {
     let src_addr = self.local_addr(src);
-    if src_type.size_of == dest_type.size_of {
-      unsafe {
-        store(
-          src_addr,
-          self.local_addr(dest),
-          dest_type.size_of as usize);
-      }
-    }
-    else {
-      let dest_addr = self.local_addr(dest);
-      unsafe {
-        cast(src_addr, dest_addr, src_type, dest_type);
-      }
+    let dest_addr = self.local_addr(dest);
+    unsafe {
+      cast_and_store(src_addr, dest_addr, src.t, dest.t);
     }
   }
   
-  fn get_local<T : Copy>(&self, l : LocalId) -> T {
+  fn get_local<T : Copy>(&self, l : LocalHandle) -> T {
+    let val_size = std::mem::size_of::<T>() as u64;
+    if l.t.size_of != val_size {
+      panic!("can't get {} byte value from {} byte location", val_size, l.t.size_of)
+    }
     unsafe { *(self.local_addr(l) as *const T) }
   }
 }
 
-unsafe fn cast(src : *const (), dest : *mut (), src_type : TypeHandle, dest_type : TypeHandle) {
-  use Primitive::*;
-  let src_prim = types::type_as_primitive(&src_type).unwrap();
-  let dest_prim = types::type_as_primitive(&dest_type).unwrap();
-  match (src_prim, dest_prim) {
-    (U64, U32) => *(dest as *mut u64) = (*(src as *mut u32)) as u64,
-    (U64, U16) => *(dest as *mut u64) = (*(src as *mut u16)) as u64,
-    (U64, U8) => *(dest as *mut u64) = (*(src as *mut u8)) as u64,
+unsafe fn cast_and_store(src : *const (), dest : *mut (), src_type : TypeHandle, dest_type : TypeHandle) {
+  if src_type.size_of == dest_type.size_of {
+    store(
+      src,
+      dest,
+      dest_type.size_of);
+  }
+  else {
+    use Primitive::*;
+    let src_prim = types::type_as_primitive(&src_type).unwrap();
+    let dest_prim = types::type_as_primitive(&dest_type).unwrap();
+    match (src_prim, dest_prim) {
+      (U64, U32) => *(dest as *mut u64) = (*(src as *mut u32)) as u64,
+      (U64, U16) => *(dest as *mut u64) = (*(src as *mut u16)) as u64,
+      (U64, U8) => *(dest as *mut u64) = (*(src as *mut u8)) as u64,
+      (U64, Void) => (),
 
-    (U32, U64) => *(dest as *mut u32) = (*(src as *mut u64)) as u32,
-    (U16, U64) => *(dest as *mut u16) = (*(src as *mut u64)) as u16,
-    (U8, U64) => *(dest as *mut u8) = (*(src as *mut u64)) as u8,
-    _ => panic!("unsupported cast between {} and {}", src_type, dest_type)
+      (U32, U64) => *(dest as *mut u32) = (*(src as *mut u64)) as u32,
+      (U16, U64) => *(dest as *mut u16) = (*(src as *mut u64)) as u16,
+      (U8, U64) => *(dest as *mut u8) = (*(src as *mut u64)) as u8,
+      _ => panic!("unsupported cast between {} and {}", src_type, dest_type)
+    }
   }
 }
 
-unsafe fn store(src : *const (), dest : *mut (), byte_width : usize) {
+unsafe fn store(src : *const (), dest : *mut (), byte_width : u64) {
   match byte_width {
     8 => *(dest as *mut u64) = *(src as *const u64),
     4 => *(dest as *mut u32) = *(src as *const u32),

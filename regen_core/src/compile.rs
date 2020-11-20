@@ -6,13 +6,13 @@ use crate::{
 };
 
 use bytecode::{
-  SequenceId, SequenceInfo, Expr, FunctionBytecode,
-  Instr, Operator, LocalId, LocalInfo,
+  SequenceHandle, SequenceInfo, Expr, FunctionBytecode,
+  Instr, Operator, LocalHandle, LocalInfo,
 };
 
 use types::{TypeHandle, CoreTypes, Kind};
 
-use perm_alloc::{Perm, perm_slice_from_vec};
+use perm_alloc::{Perm, perm_slice_from_vec, perm};
 
 use symbols::{to_symbol, Symbol};
 use env::Env;
@@ -25,8 +25,8 @@ use node_macros::{NodeBuilder, def_macro, template_macro};
 
 struct LabelledExpr {
   name : Symbol,
-  entry_seq: SequenceId,
-  exit_seq: SequenceId,
+  entry_seq: SequenceHandle,
+  exit_seq: SequenceHandle,
 }
 
 pub struct Function {
@@ -42,7 +42,7 @@ struct Builder {
   scoped_vars : Vec<NamedVar>,
   
   /// the instruction sequence currently being built
-  current_sequence : Option<SequenceId>,
+  current_sequence : Option<SequenceHandle>,
 
   /// flags indicating which sequences have been finalised
   seq_completion : Vec<bool>,
@@ -78,10 +78,10 @@ enum RefType {
   /// A locator register contains a pointer to a value.
   /// Must be derefenced into value register to be read from.
   /// Can be written to.
-  Locator(LocalId),
+  Locator(LocalHandle),
 
   /// A value register can be read from directly, but can't be written to.
-  Value(LocalId),
+  Value(LocalHandle),
 }
 
 /// A reference can be used to obtain a value or its address. A reference may be:
@@ -131,7 +131,7 @@ impl Ref {
 
 #[derive(Copy, Clone)]
 struct Var {
-  id : LocalId,
+  id : LocalHandle,
   t : TypeHandle,
   mutable : bool,
 }
@@ -167,17 +167,17 @@ fn new_local_variable(b : &mut Builder, name : Symbol, t : TypeHandle) -> Var {
   v
 }
 
-fn new_local(b : &mut Builder, name : Option<Symbol>, t : TypeHandle, mutable : bool) -> LocalId {
-  let id = LocalId { id: b.bc.locals.len() };
+fn new_local(b : &mut Builder, name : Option<Symbol>, t : TypeHandle, mutable : bool) -> LocalHandle {
   let info = LocalInfo {
-    id,
+    index: b.bc.locals.len(),
     name,
     byte_offset: 0,
     t,
     mutable,
   };
-  b.bc.locals.push(info);
-  id
+  let lh = perm(info);
+  b.bc.locals.push(lh);
+  lh
 }
 
 fn new_var(b : &mut Builder, t : TypeHandle, mutable : bool) -> Var {
@@ -206,7 +206,7 @@ fn find_label(b : &mut Builder, label : Symbol) -> &LabelledExpr {
   .expect("label not found")
 }
 
-fn create_sequence(b : &mut Builder, name : &str) -> SequenceId {
+fn create_sequence(b : &mut Builder, name : &str) -> SequenceHandle {
   // Make sure the name is unique
   let mut i = 1;
   let mut name_candidate = symbols::to_symbol(b.env.st, name);
@@ -216,31 +216,31 @@ fn create_sequence(b : &mut Builder, name : &str) -> SequenceId {
     i += 1;
     name_candidate = symbols::to_symbol(b.env.st, &format!("{}_{}", name, i));
   }
-  let seq_id = SequenceId(b.bc.sequence_info.len());
-  b.bc.sequence_info.push(SequenceInfo {
+  let seq = perm(SequenceInfo {
+    index: b.bc.sequence_info.len(),
     name: name_candidate,
     start_instruction: 0, num_instructions: 0,
   });
+  b.bc.sequence_info.push(seq);
   b.seq_completion.push(false);
-  seq_id
+  seq
 }
 
-fn set_current_sequence(b : &mut Builder, sequence : SequenceId) {
+fn set_current_sequence(b : &mut Builder, mut sequence : SequenceHandle) {
   // complete the current sequence (if there is one)
   complete_sequence(b);
   // check that the sequence isn't done yet
-  if b.seq_completion[sequence.0] {
+  if b.seq_completion[sequence.index] {
     panic!("this sequence has already been completed");
   }
   b.current_sequence = Some(sequence);
-  b.bc.sequence_info[sequence.0].start_instruction = b.bc.instrs.len();
+  sequence.start_instruction = b.bc.instrs.len();
 }
 
 fn complete_sequence(b : &mut Builder) {
-  if let Some(i) = b.current_sequence {
-    let seq = &mut b.bc.sequence_info[i.0];
+  if let Some(mut seq) = b.current_sequence {
     seq.num_instructions = b.bc.instrs.len() - seq.start_instruction;
-    b.seq_completion[i.0] = true;
+    b.seq_completion[seq.index] = true;
     b.current_sequence = None;
   }
 }
@@ -332,12 +332,13 @@ pub fn compile_expr_to_function(env: Env, root : Node) -> Function {
   compile_function(Builder::new(env), root, &[], None)
 }
 
-fn compile_if_else(b : &mut Builder, cond : Node, then_expr : Node, else_expr : Node) -> Option<Ref> {
+fn compile_if_else(b : &mut Builder, cond_node : Node, then_expr : Node, else_expr : Node) -> Option<Ref> {
   let mut result_var = None;
   let then_seq = create_sequence(b, "then");
   let else_seq = create_sequence(b, "else");
   let exit_seq = create_sequence(b, "exit");
-  let cond = compile_expr_to_var(b, cond).id;
+  let cond = compile_expr_to_var(b, cond_node).id;
+  assert_type(cond_node, cond.t, b.env.c.bool_tag);
   b.bc.instrs.push(Instr::CJump{ cond, then_seq, else_seq });
   set_current_sequence(b, then_seq);
   let then_result = compile_expr(b, then_expr);
@@ -395,6 +396,12 @@ fn compile_expr_to_ref(b : &mut Builder, node : Node) -> Ref {
 fn compile_expr_to_var(b : &mut Builder, node : Node) -> Var {
   let r = compile_expr_to_ref(b, node);
   r.to_var(b)
+}
+
+fn assert_type(n : Node, t : TypeHandle, expected : TypeHandle) {
+  if t != expected {
+    panic!("expected {}, found {} at ({})", expected, t, n.loc)
+  }
 }
 
 fn compile_cast(b : &mut Builder, v : Var, t : TypeHandle) -> Var {
@@ -589,10 +596,11 @@ fn compile_expr(b : &mut Builder, node : Node) -> Option<Ref> {
       None
     }
     // if then
-    Command("if", [cond, then_expr]) => {
+    Command("if", [cond_node, then_expr]) => {
       let then_seq = create_sequence(b, "then");
       let exit_seq = create_sequence(b, "exit");
-      let cond = compile_expr_to_var(b, *cond).id;
+      let cond = compile_expr_to_var(b, *cond_node).id;
+      assert_type(*cond_node, cond.t, b.env.c.bool_tag);
       b.bc.instrs.push(Instr::CJump{ cond, then_seq, else_seq: exit_seq });
       set_current_sequence(b, then_seq);
       compile_expr(b, *then_expr);
