@@ -42,7 +42,7 @@ pub extern "C" fn env_alloc_global(mut env : Env, name : Symbol, tag : TypeHandl
   if env.values.contains_key(&name) {
     panic!("global {} already defined", name);
   }
-  env.values.insert(name, EnvEntry {ptr, tag });
+  env.values.insert(name, EnvEntry { ptr, tag });
   ptr
 }
 

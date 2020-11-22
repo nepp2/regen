@@ -12,6 +12,7 @@ mod ffi;
 pub mod interop;
 pub mod types;
 pub mod debug;
+pub mod hotload;
 
 pub fn new_env() -> env::Env {
   env::new_env(symbols::symbol_table())
