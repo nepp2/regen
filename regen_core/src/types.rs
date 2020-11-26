@@ -3,7 +3,7 @@
 
 use crate::symbols::Symbol;
 use crate::perm_alloc::{Perm, PermSlice, perm, perm_slice, perm_slice_from_vec};
-use crate::parse::Node;
+use crate::sexp::Node;
 use std::fmt;
 
 pub type TypeHandle = Perm<TypeInfo>;

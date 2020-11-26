@@ -2,7 +2,7 @@
 use crate::{
   perm_alloc::{perm, perm_slice, perm_slice_from_vec},
   symbols::{SymbolTable, to_symbol},
-  parse::{SrcLocation, Node, NodeContent, NodeInfo}
+  sexp::{SrcLocation, Node, NodeContent, NodeInfo}
 };
 
 pub struct NodeBuilder {

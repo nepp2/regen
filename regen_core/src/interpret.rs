@@ -3,10 +3,10 @@
 /// Receives a sexp node tree and compiles/interprets the top level
 /// nodes one at a time.
 
-use crate::{parse, bytecode, env, ffi, compile, types, debug, perm_alloc};
+use crate::{sexp, bytecode, env, ffi, compile, types, debug, perm_alloc};
 
 use env::Env;
-use parse::Node;
+use sexp::Node;
 use bytecode::{
   Instr, Expr, Operator, LocalHandle,
 };
@@ -54,7 +54,7 @@ pub fn interpret_node(n : Node, env : Env) -> u64 {
 }
 
 pub fn interpret_file(code : &str, env : Env) {
-  let n = parse::parse(env.st, &code);
+  let n = sexp::sexp(env.st, &code);
   for &c in n.children() {
     interpret_node(c, env);
   }

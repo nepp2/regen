@@ -2,6 +2,7 @@
 
 mod perm_alloc;
 pub mod symbols;
+mod sexp;
 mod parse;
 mod node_macros;
 pub mod env;

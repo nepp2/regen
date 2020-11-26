@@ -1,7 +1,7 @@
 
 use crate::{
-  parse,
-  parse::{
+  sexp,
+  sexp::{
     Node, NodeShape, NodeContent, NodeLiteral::*,
   },
   symbols::Symbol,
@@ -36,9 +36,9 @@ fn node_content_eq(a : Node, b : Node) -> bool {
 }
 
 pub fn hotload_changes(code : &str, mut env : Env, hs : &mut HotloadState) {
-  let n = parse::parse(env.st, &code);
+  let n = sexp::sexp(env.st, &code);
   for c in n.children() {
-    match parse::node_shape(c) {
+    match sexp::node_shape(c) {
       NodeShape::Command("def", [name, expr]) => {
         let name = name.as_symbol();
         if let Some(prev_expr) = hs.defs.get(&name) {

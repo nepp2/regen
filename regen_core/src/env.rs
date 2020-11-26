@@ -3,9 +3,9 @@
 use crate::symbols::{Symbol, SymbolTable, to_symbol};
 use crate::types;
 use types::{ TypeHandle, CoreTypes, core_types, c_function_type };
-use crate::parse;
+use crate::sexp;
 use crate::interpret;
-use parse::{Node, NodeInfo, NodeContent, NodeLiteral, SrcLocation, node_shape, NodeShape::*};
+use sexp::{Node, NodeInfo, NodeContent, NodeLiteral, SrcLocation, node_shape, NodeShape::*};
 use crate::perm_alloc::{Perm, PermSlice, perm_slice, perm_slice_from_vec, perm};
 use std::collections::HashMap;
 

@@ -1,4 +1,13 @@
 
+# Types, Macros and staged metaprogramming
+
+```
+
+(def foo (fun () (do
+
+)))
+```
+
 # Hotloading TODO
 
 ## Critical

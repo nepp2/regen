@@ -1,7 +1,7 @@
 /// Compiles core language into bytecode
 
 use crate::{
-  bytecode, parse, symbols, env, perm_alloc,
+  bytecode, sexp, symbols, env, perm_alloc,
   types, interpret, node_macros,
 };
 
@@ -16,7 +16,7 @@ use perm_alloc::{Perm, perm_slice_from_vec, perm};
 
 use symbols::{to_symbol, Symbol};
 use env::Env;
-use parse::{
+use sexp::{
   Node, NodeInfo, NodeContent, NodeLiteral,
   node_shape, NodeShape,
 };
@@ -863,7 +863,7 @@ fn compile_macro_call(b : &mut Builder, f : &Function, n : Node) -> Option<Ref> 
 fn compile_call(b : &mut Builder, n : Node) -> Option<Ref> {
   let list = n.children();
   let function = list[0];
-  if let parse::NodeContent::Sym(f) = function.content {
+  if let sexp::NodeContent::Sym(f) = function.content {
     if let Some(tag) = env::get_global_type(b.env, f) {
       if types::type_as_macro(&tag).is_some() {
         let f = env::get_global_value(b.env, f, tag).unwrap();
