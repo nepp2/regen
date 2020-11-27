@@ -4,6 +4,7 @@ mod perm_alloc;
 pub mod symbols;
 mod sexp;
 mod parse;
+mod typecheck;
 mod node_macros;
 pub mod env;
 mod bytecode;

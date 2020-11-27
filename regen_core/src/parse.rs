@@ -1,5 +1,5 @@
 
-use crate::{sexp, symbols, perm_alloc};
+use crate::{sexp, symbols, perm_alloc, interop, typecheck};
 use sexp::{
   Node,
   NodeLiteral,
@@ -7,331 +7,368 @@ use sexp::{
   NodeContent,
 };
 use symbols::Symbol;
-use perm_alloc::Perm;
+use perm_alloc::{Perm, PermSlice, perm, perm_slice_from_vec};
+use interop::RegenString;
+use typecheck::ExprType;
 
-use std::collections::HashMap;
+pub type Expr = Perm<ExprData>;
 
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub enum ExprTag {
-  Def,
-  Let,
-  LocalRef,
-  GlobalRef,
-  StructInit,
-  ZeroInit,
-  ArrayInit,
-  Index,
-  FieldIndex,
-  LiteralU64,
-  LiteralString,
-  LiteralBool,
+#[derive(Copy, Clone)]
+pub struct ExprData {
+  pub content : ExprContent,
+  pub n : Node,
+  pub t : Option<ExprType>,
+}
+
+#[derive(Copy, Clone)]
+pub enum ExprContent {
+  Def(Node, Expr),
+  Let(Node, Expr),
+  LocalRef(Symbol),
+  GlobalRef(Symbol),
+  StructInit(Expr, PermSlice<Expr>),
+  ZeroInit(Expr),
+  ArrayInit(PermSlice<Expr>),
+  Index { array : Expr, offset : Expr },
+  FieldIndex { structure : Expr, field_name : Node },
+  LiteralU64(u64),
+  LiteralString(Perm<RegenString>),
+  LiteralBool(bool),
   LiteralVoid,
-  LiteralType(Type),
-  Call,
+  Call(Expr, PermSlice<Expr>),
   Operator(IntrinsicOperator),
-  Cast,
-  IfElse,
-  Debug,
-  Symbol,
-  Set,
-  Deref,
-  Ref,
-  Return,
-  Break,
-  Repeat,
-  LabelledBlock,
-  Do,
-  Template,
-  Quote,
-  Fun,
-  Macro,
-  ArrayLen,
-  TypeOf,
+  Cast{ value : Expr, to_type : Expr },
+  IfElse { cond : Expr, then_expr : Expr, else_expr : Option<Expr>},
+  Debug(Expr),
+  Sym(Symbol),
+  Set{ dest : Expr, value : Expr },
+  Deref(Expr),
+  Ref(Expr),
+  Return(Option<Expr>),
+  Break(Option<Symbol>),
+  Repeat(Option<Symbol>),
+  LabelledBlock(Symbol, Expr),
+  Do(PermSlice<Expr>),
+  Template(Node),
+  Quote(Node),
+  Fun {
+    args : PermSlice<(Symbol, Expr)>,
+    ret : Option<Expr>,
+    body: Expr,
+  },
+  Macro{ arg : Node, body : Expr },
+  ArrayLen(Expr),
+  TypeOf(Expr),
+  FnType {
+    args : PermSlice<Arg>,
+    ret : Expr,
+  },
+  CFunType {
+    args : PermSlice<Arg>,
+    ret : Expr,
+  },
+  StructType(PermSlice<Arg>),
+  PtrType(Expr),
+  SizedArrayType{ element_type: Expr, length: Expr },
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub enum Type {
-  Fn, CFun, Struct, Ptr, SizedArray,
+#[derive(Copy, Clone)]
+pub struct Arg {
+  pub name : Option<Node>,
+  pub tag : Expr,
 }
 
-use ExprTag::*;
+use ExprContent::*;
 
 struct TagState {
-  info : NodeInfo,
   locals : Vec<Symbol>,
 }
 
-pub struct NodeInfo {
-  pub tags : HashMap<u64, ExprTag>
+#[derive(Copy, Clone)]
+pub struct TaggedNode {
+  pub tag : ExprContent,
+  pub n : Node,
 }
 
-pub fn tag_nodes(root : Node) -> NodeInfo {
+pub fn parse_to_expr(root : Node) -> Expr {
   let mut ts = TagState {
-    info: NodeInfo { tags: HashMap::new() },
     locals: vec![],
   };
-  tag_node(&mut ts, root);
-  return ts.info;
+  to_expr(&mut ts, root)
 }
 
-impl TagState {
-  fn tag(&mut self, n : Node, tag : ExprTag) {
-    self.info.tags.insert(Perm::to_u64(n), tag);
-  }
+fn to_expr(ts : &mut TagState, n : Node) -> Expr {
+  let ed = ExprData {
+    content: to_expr_content(ts, n),
+    n,
+    t: None,
+  };
+  perm(ed)
 }
 
-fn tag_node(ts : &mut TagState, n : Node) {
+fn to_expr_content(ts : &mut TagState, n : Node) -> ExprContent {
   match sexp::node_shape(&n) {
     // symbol reference (local var or global def)
     Atom(s) => {
-      let tag = match s {
-        "return" => Return,
-        "break" => Break,
-        "repeat" => Repeat,
-        "true" | "false" => LiteralBool,
+      match s {
+        "return" => Return(None),
+        "break" => Break(None),
+        "repeat" => Repeat(None),
+        "true" => LiteralBool(true),
+        "false" => LiteralBool(false),
         _ => {
+          let sym = n.as_symbol();
           if let Some(i) = str_to_operator(s) {
             Operator(i)
           }
-          else if ts.locals.contains(&n.as_symbol()) {
-            LocalRef
+          else if ts.locals.contains(&sym) {
+            LocalRef(sym)
           }
           else {
-            GlobalRef
+            GlobalRef(sym)
           }
         }
-      };
-      ts.tag(n, tag);
+      }
     }
     // literal
     Literal(l) => {
       match l {
-        NodeLiteral::U64(_) => {
-          ts.tag(n, LiteralU64);
+        NodeLiteral::U64(v) => {
+          LiteralU64(v)
         }
-        NodeLiteral::String(_) => {
-          ts.tag(n, LiteralString);
+        NodeLiteral::String(s) => {
+          LiteralString(s)
         }
       }
     }
     // break to label
-    Command("break", [_label]) => {
-      ts.tag(n, Break);
+    Command("break", [label]) => {
+      Break(Some(label.as_symbol()))
     }
     // repeat to label
-    Command("repeat", [_label]) => {
-      ts.tag(n, Repeat);
+    Command("repeat", [label]) => {
+      Repeat(Some(label.as_symbol()))
     }
     // array
     Command("array", elements) => {
-      ts.tag(n, ArrayInit);
-      tag_node_slice(ts, elements);
+      ArrayInit(to_expr_list(ts, elements))
     }
     // array length
     Command("array_len", [e]) => {
-      ts.tag(n, Call);
-      tag_node(ts, *e);
+      ArrayLen(to_expr(ts, *e))
     }
     // array index
     Command("index", [v, index]) => {
-      ts.tag(n, Index);
-      tag_node(ts, *v);
-      tag_node(ts, *index);
+      Index {
+        array: to_expr(ts, *v),
+        offset: to_expr(ts, *index),
+      }
     }
     // init
     Command("zero_init", [type_node]) => {
-      ts.tag(n, ZeroInit);
-      tag_node(ts, *type_node);
+      ZeroInit(to_expr(ts, *type_node))
     }
     // init
     Command("init", ns) => {
-      ts.tag(n, StructInit);
-      tag_node_slice(ts, ns);
+      StructInit(to_expr(ts, ns[0]), to_expr_list(ts, &ns[1..]))
     }
     // field deref
-    Command(".", [v, _field]) => {
-      ts.tag(n, FieldIndex);
-      tag_node(ts, *v);
+    Command(".", [v, field]) => {
+      FieldIndex{
+        structure: to_expr(ts, *v),
+        field_name: *field,
+      }
     }
     // template
-    Command("#", [_quoted]) => {
-      ts.tag(n, Template);
+    Command("#", [quoted]) => {
+      Template(*quoted)
     }
     // quotation
-    Command("quote", [_quoted]) => {
-      ts.tag(n, Quote);
+    Command("quote", [quoted]) => {
+      Quote(*quoted)
     }
     // def
-    Command("def", [_def_name, value]) => {
-      ts.tag(n, Def);
-      tag_node(ts, *value);
+    Command("def", [def_name, value]) => {
+      Def(*def_name, to_expr(ts, *value))
     }
     // fun
     Command("fun", [arg_nodes, body]) => {
-      ts.tag(n, Fun);
-      for &a in arg_nodes.children() {
-        tag_typed_var(ts, a);
-      }
-      tag_node(ts, *body);
+      let (args, body) = to_args_body(ts, arg_nodes.children(), *body);
+      Fun{ args, ret: None, body }
     }
     Command("fun", [arg_nodes, return_tag, body]) => {
-      ts.tag(n, Fun);
-      for &a in arg_nodes.children() {
-        tag_typed_var(ts, a);
-      }
-      tag_node(ts, *return_tag);
-      tag_node(ts, *body);
+      let (args, body) = to_args_body(ts, arg_nodes.children(), *body);
+      let ret = Some(to_expr(ts, *return_tag));
+      Fun{ args, ret, body }
     }
     // macro
     Command("macro", [arg, body]) => {
-      ts.tag(n, Macro);
-      tag_node(ts, *arg);
-      tag_node(ts, *body);
+      ts.locals.push(arg.as_symbol());
+      let body = to_expr(ts, *body);
+      ts.locals.pop();
+      Macro{ arg: *arg, body }
     }
     // set var
     Command("set", [dest, value]) => {
-      ts.tag(n, Set);
-      tag_node(ts, *dest);
-      tag_node(ts, *value);
+      Set{
+        dest: to_expr(ts, *dest),
+        value: to_expr(ts, *value),
+      }
     }
     // let
     Command("let", [var_name, value]) => {
-      ts.tag(n, Let);
       ts.locals.push(var_name.as_symbol());
-      tag_node(ts, *value);
+      Let(*var_name, to_expr(ts, *value))
     }
     // if then
     Command("if", [cond_node, then_expr]) => {
-      ts.tag(n, IfElse);
-      tag_node(ts, *cond_node);
-      tag_node(ts, *then_expr);
+      IfElse {
+        cond: to_expr(ts, *cond_node),
+        then_expr: to_expr(ts, *then_expr),
+        else_expr: None,
+      }
     }
     // if then else
-    Command("if", [cond, then_expr, else_expr]) => {
-      ts.tag(n, IfElse);
-      tag_node(ts, *cond);
-      tag_node(ts, *then_expr);
-      tag_node(ts, *else_expr);
+    Command("if", [cond_node, then_expr, else_expr]) => {
+      IfElse {
+        cond: to_expr(ts, *cond_node),
+        then_expr: to_expr(ts, *then_expr),
+        else_expr: Some(to_expr(ts, *else_expr)),
+      }
     }
     // label expression
-    Command("label", [_label, body]) => {
-      ts.tag(n, LabelledBlock);
-      tag_node(ts, *body);
+    Command("label", [label, body]) => {
+      LabelledBlock(label.as_symbol(), to_expr(ts, *body))
     }
     Command("do", exprs) => {
-      ts.tag(n, Do);
       let locals = ts.locals.len();
-      tag_node_slice(ts, exprs);
+      let ec = Do(to_expr_list(ts, exprs));
       ts.locals.drain(locals..);
+      ec
     }
   // Debug
     Command("debug", [v]) => {
-      ts.tag(n, Debug);
-      tag_node(ts, *v);
+      Debug(to_expr(ts, *v))
     }
     // Return
     Command("return", [v]) => {
-      ts.tag(n, Return);
-      tag_node(ts, *v);
+      Return(Some(to_expr(ts, *v)))
     }
     // symbol
     Command("sym", [v]) => {
-      ts.tag(n, Symbol);
-      tag_node(ts, *v);
+      Sym(v.as_symbol())
     }
     // typeof
     Command("typeof", [v]) => {
-      ts.tag(n, TypeOf);
-      tag_node(ts, *v);
+      TypeOf(to_expr(ts, *v))
     }
     // load
     Command("*", [pointer]) => {
-      ts.tag(n, Deref);
-      tag_node(ts, *pointer);
+      Deref(to_expr(ts, *pointer))
     }
     // ref
     Command("ref", [locator]) => {
-      ts.tag(n, Ref);
-      tag_node(ts, *locator);
+      Ref(to_expr(ts, *locator))
     }
     // cast
     Command("cast", [value, type_tag]) => {
-      ts.tag(n, Cast);
-      tag_node(ts, *value);
-      tag_node(ts, *type_tag);
+      Cast {
+        value: to_expr(ts, *value),
+        to_type: to_expr(ts, *type_tag),
+      }
     }
     // pointer type
     Command("ptr", [inner_type]) => {
-      ts.tag(n, LiteralType(Type::Ptr));
-      tag_node(ts, *inner_type);
+      PtrType(to_expr(ts, *inner_type))
     }
     // function type
     Command("fn", [arg_nodes, ret]) => {
-      ts.tag(n, LiteralType(Type::Fn));
-      tag_type_args(ts, arg_nodes.children());
-      tag_node(ts, *ret);
+      FnType {
+        args: to_type_args_list(ts, arg_nodes.children()),
+        ret: to_expr(ts, *ret),
+      }
     }
     // c function type
     Command("cfun", [arg_nodes, ret]) => {
-      ts.tag(n, LiteralType(Type::CFun));
-      tag_type_args(ts, arg_nodes.children());
-      tag_node(ts, *ret);
+      CFunType {
+        args: to_type_args_list(ts, arg_nodes.children()),
+        ret: to_expr(ts, *ret),
+      }
     }
     // array type
-    Command("sized_array", [element, size]) => {
-      ts.tag(n, LiteralType(Type::SizedArray));
-      tag_node(ts, *element);
-      tag_node(ts, *size);
+    Command("sized_array", [element, length]) => {
+      SizedArrayType {
+        element_type: to_expr(ts, *element),
+        length: to_expr(ts, *length),
+      }
     }
     // struct type
     Command("struct", fields) => {
-      ts.tag(n, LiteralType(Type::Struct));
-      tag_type_args(ts, fields);
+      StructType(to_type_args_list(ts, fields))
     }
     _ => {
-      tag_list_expr(ts, n);
+      let ns = n.children();
+      if ns.len() == 0 {
+        return LiteralVoid;
+      }
+      if let [lit, tag] = ns {
+        if let NodeContent::Literal(NodeLiteral::U64(_)) = lit.content {
+          return Cast {
+            value: to_expr(ts, *lit),
+            to_type: to_expr(ts, *tag),
+          };
+        }
+      }
+      Call(to_expr(ts, ns[0]), to_expr_list(ts, &ns[1..]))
     }
   }
 }
 
-fn tag_typed_var(ts : &mut TagState, n : Node) {
-  if let [name, type_tag] = n.children() {
-    ts.locals.push(name.as_symbol());
-    tag_node(ts, *type_tag);
+fn to_args_body(ts : &mut TagState, args : &[Node], body : Node) -> (PermSlice<(Symbol, Expr)>, Expr) {
+  let mut v = Vec::with_capacity(args.len());
+  for &a in args {
+    if let [name, type_tag] = a.children() {
+      let name = name.as_symbol();
+      v.push((name, to_expr(ts, *type_tag)));
+    }
+    else {
+      panic!()
+    }
   }
+  let args = perm_slice_from_vec(v);
+  let locals = ts.locals.len();
+  for (name, _) in args { ts.locals.push(*name); }
+  let body = to_expr(ts, body);
+  ts.locals.drain(locals..);
+  (args, body)
 }
 
-fn tag_type_args(ts : &mut TagState, args : &[Node]) {
+fn to_type_args_list(ts : &mut TagState, args : &[Node]) -> PermSlice<Arg> {
+  let mut v = Vec::with_capacity(args.len());
   for a in args {
-    if let [_name, type_tag] = a.children() {
-      tag_node(ts, *type_tag);
-    }
-    else if let [type_tag] = a.children() {
-      tag_node(ts, *type_tag);
-    }
+    let arg = {
+      if let [name, type_tag] = a.children() {
+        name.as_symbol();
+        Arg { name: Some(*name), tag: to_expr(ts, *type_tag) }
+      }
+      else if let [type_tag] = a.children() {
+        Arg { name: None, tag: to_expr(ts, *type_tag) }
+      }
+      else {
+        panic!()
+      }
+    };
+    v.push(arg);
   }
+  perm_slice_from_vec(v)
 }
 
-fn tag_node_slice(ts : &mut TagState, ns : &[Node]) {
-  for &n in ns { tag_node(ts, n); }
-}
-
-fn tag_list_expr(ts : &mut TagState, n : Node) {
-  let ns = n.children();
-  if ns.len() == 0 {
-    ts.tag(n, LiteralVoid);
-    return;
+fn to_expr_list(ts : &mut TagState, ns : &[Node]) -> PermSlice<Expr> {
+  let mut v = Vec::with_capacity(ns.len());
+  for &n in ns {
+    v.push(to_expr(ts, n));
   }
-  if let [lit, tag] = ns {
-    if let NodeContent::Literal(NodeLiteral::U64(_)) = lit.content {
-      ts.tag(n, Cast);
-      tag_node(ts, *lit);
-      tag_node(ts, *tag);
-      return;
-    }
-  }
-  ts.tag(n, Call);
-  tag_node_slice(ts, ns);
+  perm_slice_from_vec(v)
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
