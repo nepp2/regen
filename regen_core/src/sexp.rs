@@ -278,7 +278,7 @@ pub fn code_segment(code : &str, n : Node) -> &str {
   &code[n.loc.start..n.loc.end]
 }
 
-pub fn sexp(st : SymbolTable, code : &str) -> Node {
+pub fn sexp_list(st : SymbolTable, code : &str) -> Node {
   let mut ns = vec!();
   let perm_code = perm(code.to_string());
   let mut ts = TokenStream { code, st, next_start: 0, next_len: 0, perm_code };

@@ -1,4 +1,10 @@
 
+# Slice problem
+
+* I don't have support for array slices yet, which is a problem because array types aren't compatible with other arrays of different length
+* I can't support them as user types because there are no generics yet
+* I can hack them in as special types, but then I'm really adding complexity
+
 # Types, Macros and staged metaprogramming
 
 I have a problem separating out some compilation passes.

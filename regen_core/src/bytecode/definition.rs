@@ -23,11 +23,18 @@ pub type SequenceHandle = Perm<SequenceInfo>;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Operator {
-  Add, Sub, Mul, Div, Rem, Eq, LT, GT, LTE, GTE, Not,
+  // arithmetic
+  Add, Sub, Mul, Div, Rem,
+  // comparison
+  Eq, LT, GT, LTE, GTE,
+  // boolean
+  Not,
+  // bitwise
+  BitwiseNot, BitwiseAnd, BitwiseOr,
 }
 
 #[derive(Copy, Clone)]
-pub enum Expr {
+pub enum InstrExpr {
   Def(Symbol),
   LocalAddr(LocalHandle),
   Init(PermSlice<LocalHandle>),
@@ -47,7 +54,7 @@ pub enum Expr {
 
 #[derive(Copy, Clone)]
 pub enum Instr {
-  Expr(LocalHandle, Expr),
+  Expr(LocalHandle, InstrExpr),
   CJump{ cond: LocalHandle, then_seq: SequenceHandle, else_seq: SequenceHandle },
   Debug(Node, LocalHandle, TypeHandle),
   Jump(SequenceHandle),

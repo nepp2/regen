@@ -1,9 +1,11 @@
 /// Defines the an extensible TypeInfo data structure to be used by the
 /// compiler & interpreter.
 
-use crate::symbols::Symbol;
-use crate::perm_alloc::{Perm, PermSlice, perm, perm_slice, perm_slice_from_vec};
-use crate::sexp::Node;
+use crate::{symbols, perm_alloc, sexp};
+
+use symbols::{Symbol, SymbolTable, to_symbol};
+use perm_alloc::{Perm, PermSlice, perm, perm_slice, perm_slice_from_vec};
+use sexp::Node;
 use std::fmt;
 
 pub type TypeHandle = Perm<TypeInfo>;
@@ -192,10 +194,6 @@ pub fn calculate_packed_field_offsets(field_types : &[TypeHandle]) -> (Vec<u64>,
   (fields, size)
 }
 
-pub fn tuple_type(field_types : PermSlice<TypeHandle>) -> TypeHandle {
-  struct_type(perm_slice(&[]), field_types)
-}
-
 pub fn struct_type(field_names : PermSlice<Symbol>, field_types : PermSlice<TypeHandle>) -> TypeHandle {
   let (offsets, size) = calculate_packed_field_offsets(field_types.as_slice());
   let info =
@@ -207,6 +205,13 @@ pub fn struct_type(field_names : PermSlice<Symbol>, field_types : PermSlice<Type
     ))
     as u64;
   new_type(Kind::Struct, size, info)
+}
+
+pub fn slice_type(c : &CoreTypes, st : SymbolTable, element_type : TypeHandle) -> TypeHandle {
+  struct_type(
+    perm_slice(&[to_symbol(st, "data"), to_symbol(st, "len")]),
+    perm_slice(&[pointer_type(element_type), c.u64_tag]),
+  )
 }
 
 pub fn array_type(inner : TypeHandle, length : u64) -> TypeHandle {
@@ -238,7 +243,7 @@ pub fn c_function_type(args : &[TypeHandle], returns : TypeHandle) -> TypeHandle
   function_type_inner(args, returns, true)
 }
 
-pub fn core_types() -> CoreTypes {
+pub fn core_types(st : SymbolTable) -> CoreTypes {
 
   let u64_tag = new_type(Kind::Primitive, 8, Primitive::U64 as u64);
   let u32_tag = new_type(Kind::Primitive, 4, Primitive::U32 as u64);
@@ -247,18 +252,21 @@ pub fn core_types() -> CoreTypes {
   let void_tag = new_type(Kind::Primitive, 0, Primitive::Void as u64);
   let bool_tag = new_type(Kind::Primitive, 1, Primitive::Bool as u64);
 
+  let data_sym = to_symbol(st, "data");
+  let len_sym = to_symbol(st, "len");
+
   let node_tag = new_type(Kind::Node, 8, 0);
-  let node_slice_tag = tuple_type(perm_slice(&[
-    pointer_type(node_tag),
-    u64_tag,
-  ]));
+  let node_slice_tag = struct_type(
+    perm_slice(&[data_sym, len_sym]),
+    perm_slice(&[pointer_type(node_tag), u64_tag]),
+  );
 
   let type_tag = new_type(Kind::Type, 8, 0);
 
-  let string_tag = tuple_type(perm_slice(&[
-    pointer_type(u8_tag),
-    u64_tag,
-  ]));
+  let string_tag = struct_type(
+    perm_slice(&[data_sym, len_sym]),
+    perm_slice(&[pointer_type(u8_tag), u64_tag]),
+  );
 
   let mut array_types = vec![];
   for i in 2..20 {
@@ -308,13 +316,7 @@ impl fmt::Display for TypeInfo {
         write!(f, "(struct ")?;
         let info = unsafe { &*(self.info as *const StructInfo) };
         for i in 0..info.field_types.len() {
-          if let Some(name) = info.field_names.as_slice().get(i) {
-            write!(f, "({} {}) ", name, info.field_types[i])?;
-          }
-          else {
-            write!(f, "{} ", info.field_types[i])?;
-          }
-          
+          write!(f, "({} {}) ", info.field_names[i], info.field_types[i])?;
         }
         write!(f, ")")?;
       }
@@ -350,12 +352,13 @@ impl fmt::Display for TypeInfo {
 
 #[test]
 fn test_types() {
-  let c = core_types();
-  let a =
-    tuple_type(perm_slice(&[c.u16_tag, c.u32_tag, c.u16_tag, c.u64_tag]));
-  let b =
-    tuple_type(perm_slice(&[c.u16_tag, c.u16_tag, c.u32_tag, c.u64_tag]));
-
-  if a.size_of != 24 { panic!("tuple A alignment incorrect") }
-  if b.size_of != 16 { panic!("tuple B alignment incorrect") }
+  let c = core_types(symbols::symbol_table());
+  let (_, a_size) = calculate_packed_field_offsets(
+    &[c.u16_tag, c.u32_tag, c.u16_tag, c.u64_tag]
+  );
+  let (_, b_size) = calculate_packed_field_offsets(
+    &[c.u16_tag, c.u16_tag, c.u32_tag, c.u64_tag]
+  );
+  if a_size != 24 { panic!("tuple A alignment incorrect") }
+  if b_size != 16 { panic!("tuple B alignment incorrect") }
 }

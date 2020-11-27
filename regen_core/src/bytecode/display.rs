@@ -34,7 +34,7 @@ impl fmt::Display for FunctionBytecode {
   }
 }
 
-struct DisplayExpr(TypeHandle, Expr);
+struct DisplayExpr(TypeHandle, InstrExpr);
 
 impl fmt::Display for LocalInfo {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -92,6 +92,9 @@ impl fmt::Display for Operator {
       LTE => write!(f, "<="),
       GTE => write!(f, ">="),
       Not => write!(f, "!"),
+      BitwiseNot => write!(f, "~"),
+      BitwiseAnd => write!(f, "&"),
+      BitwiseOr => write!(f, "|"),
     }
   }
 }
@@ -99,55 +102,55 @@ impl fmt::Display for Operator {
 impl fmt::Display for DisplayExpr {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match &self.1 {
-      Expr::LiteralU64(v) =>
+      InstrExpr::LiteralU64(v) =>
         write!(f, "{}", v),
-      Expr::Literal(t, _v) =>
+      InstrExpr::Literal(t, _v) =>
         write!(f, "(literal {})", t),
-      Expr::Def(sym) =>
+      InstrExpr::Def(sym) =>
         write!(f, "{}", sym),
-      Expr::LocalAddr(local) =>
+      InstrExpr::LocalAddr(local) =>
         write!(f, "(ref {})", local),
-      Expr::Array(elements) => {
+      InstrExpr::Array(elements) => {
         write!(f, "(array {} ", self.0)?;
         for ev in elements.as_slice() {
           write!(f, "{} ", ev)?;
         }
         write!(f, ")")
       }
-      Expr::Init(fields) => {
+      InstrExpr::Init(fields) => {
         write!(f, "(init {} ", self.0)?;
         for fv in fields.as_slice() {
           write!(f, "{} ", fv)?;
         }
         write!(f, ")")
       }
-      Expr::ZeroInit => write!(f, "zero_init"),
-      Expr::FieldIndex{ struct_addr, index } =>
+      InstrExpr::ZeroInit => write!(f, "zero_init"),
+      InstrExpr::FieldIndex{ struct_addr, index } =>
         write!(f, "(. {} {})", struct_addr, index),
-      Expr::BinaryOp(op, a, b) =>
+      InstrExpr::BinaryOp(op, a, b) =>
         write!(f, "({} {} {})", op, a, b),
-      Expr::UnaryOp(op, a) =>
+      InstrExpr::UnaryOp(op, a) =>
         write!(f, "({} {})", op, a),
-      Expr::Invoke(reg, args) => {
+      InstrExpr::Invoke(reg, args) => {
         write!(f, "(call {} ", reg)?;
         for arg in args.as_slice() {
           write!(f, "{} ", arg)?;
         }
         write!(f, ")")
       }
-      Expr::InvokeC(reg, args) => {
+      InstrExpr::InvokeC(reg, args) => {
         write!(f, "(ccall {} ", reg)?;
         for arg in args.as_slice() {
           write!(f, "{} ", arg)?;
         }
         write!(f, ")")
       }
-      Expr::Load(ptr) =>
+      InstrExpr::Load(ptr) =>
         write!(f, "(load {} {})", ptr.t, ptr),
-      Expr::PtrOffset {ptr, offset } => {
+      InstrExpr::PtrOffset {ptr, offset } => {
         write!(f, "(ptr_offset {} {})", ptr, offset)
       }
-      Expr::Cast(v) =>
+      InstrExpr::Cast(v) =>
         write!(f, "(cast {})", v),
     }
   }

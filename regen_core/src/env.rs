@@ -4,8 +4,9 @@ use crate::symbols::{Symbol, SymbolTable, to_symbol};
 use crate::types;
 use types::{ TypeHandle, CoreTypes, core_types, c_function_type };
 use crate::sexp;
+use crate::node_macros::template;
 use crate::interpret;
-use sexp::{Node, NodeInfo, NodeContent, NodeLiteral, SrcLocation, node_shape, NodeShape::*};
+use sexp::{Node, NodeInfo, NodeContent, NodeLiteral, SrcLocation};
 use crate::perm_alloc::{Perm, PermSlice, perm_slice, perm_slice_from_vec, perm};
 use std::collections::HashMap;
 
@@ -109,27 +110,8 @@ pub extern "C" fn calculate_packed_field_offsets(
 }
 
 pub extern "C" fn template_quote(n : Node, args_ptr : *const Node, num_args : u64) -> Node {
-  fn template(n : Node, args : &[Node], next_arg : &mut usize) -> Node {
-    match node_shape(&n) {
-      Atom(_) | Literal(_) => n,
-      Command("$", [_]) => {
-        let new_e = args[*next_arg];
-        *next_arg += 1;
-        new_e
-      }
-      _ => {
-        let mut children = vec![];
-        for &c in n.children() {
-          children.push(template(c, args, next_arg));
-        }
-        let loc = n.loc;
-        let content = NodeContent::List(perm_slice_from_vec(children));
-        perm(NodeInfo { loc, content })
-      },
-    }
-  }
   let args = unsafe { std::slice::from_raw_parts(args_ptr, num_args as usize) };
-  template(n, args, &mut 0)
+  template(n, args)
 }
 
 pub extern "C" fn type_sizeof(t : TypeHandle) -> u64 {
@@ -167,7 +149,7 @@ pub fn new_env(st : SymbolTable) -> Env {
   let env = perm(Environment {
     values: Default::default(),
     st,
-    c: core_types(),
+    c: core_types(st),
   });
   let e = env;
   let c = &e.c;

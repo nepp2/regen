@@ -1,70 +1,71 @@
 
-use crate::{sexp, symbols, perm_alloc, interop, types};
+use crate::{sexp, symbols, node_macros, perm_alloc, interop, bytecode};
 use sexp::{
   Node,
   NodeLiteral,
   NodeShape::*,
   NodeContent,
 };
-use symbols::Symbol;
+use node_macros::{NodeBuilder, def_macro, template_macro};
+use symbols::{Symbol, SymbolTable};
 use perm_alloc::{Perm, PermSlice, perm, perm_slice_from_vec};
 use interop::RegenString;
-use types::TypeHandle;
+use bytecode::Operator;
 
 pub type Expr = Perm<ExprData>;
 
-#[derive(Copy, Clone)]
-pub struct ExprType {
-  t : TypeHandle,
-  const_expr : bool,
-  is_locator : bool,
-  mutable : bool,
-}
+/// TODO: unused
+// #[derive(Copy, Clone)]
+// pub struct ExprType {
+//   t : TypeHandle,
+//   const_expr : bool,
+//   is_locator : bool,
+//   mutable : bool,
+// }
 
 #[derive(Copy, Clone)]
 pub struct ExprData {
   pub content : ExprContent,
   pub n : Node,
-  pub t : Option<ExprType>,
 }
 
 #[derive(Copy, Clone)]
 pub enum ExprContent {
-  Def(Node, Expr),
   Let(Node, Expr),
+  DefMarker { name: Node, initialiser : Expr },
   LocalRef(Symbol),
   GlobalRef(Symbol),
   StructInit(Expr, PermSlice<Expr>),
   ZeroInit(Expr),
   ArrayInit(PermSlice<Expr>),
-  Index { array : Expr, offset : Expr },
+  ArrayIndex { array : Expr, index : Expr },
+  ArrayAsSlice(Expr),
+  PtrIndex { ptr : Expr, index : Expr },
   FieldIndex { structure : Expr, field_name : Node },
   LiteralU64(u64),
   LiteralString(Perm<RegenString>),
   LiteralBool(bool),
   LiteralVoid,
   Call(Expr, PermSlice<Expr>),
-  Operator(IntrinsicOperator),
+  InstrinicOp(Operator, PermSlice<Expr>),
   Cast{ value : Expr, to_type : Expr },
   IfElse { cond : Expr, then_expr : Expr, else_expr : Option<Expr>},
   Debug(Expr),
   Sym(Symbol),
   Set{ dest : Expr, value : Expr },
   Deref(Expr),
-  Ref(Expr),
+  GetAddress(Expr),
   Return(Option<Expr>),
   Break(Option<Symbol>),
   Repeat(Option<Symbol>),
   LabelledBlock(Symbol, Expr),
   Do(PermSlice<Expr>),
-  Template(Node),
   Quote(Node),
   Fun {
     args : PermSlice<(Symbol, Expr)>,
     ret : Option<Expr>,
     body: Expr,
   },
-  Macro{ arg : Node, body : Expr },
   ArrayLen(Expr),
   TypeOf(Expr),
   FnType {
@@ -90,6 +91,7 @@ use ExprContent::*;
 
 struct TagState {
   locals : Vec<Symbol>,
+  st : SymbolTable,
 }
 
 #[derive(Copy, Clone)]
@@ -98,9 +100,10 @@ pub struct TaggedNode {
   pub n : Node,
 }
 
-pub fn parse_to_expr(root : Node) -> Expr {
+pub fn parse_to_expr(st : SymbolTable, root : Node) -> Expr {
   let mut ts = TagState {
     locals: vec![],
+    st,
   };
   to_expr(&mut ts, root)
 }
@@ -109,7 +112,6 @@ fn to_expr(ts : &mut TagState, n : Node) -> Expr {
   let ed = ExprData {
     content: to_expr_content(ts, n),
     n,
-    t: None,
   };
   perm(ed)
 }
@@ -126,10 +128,7 @@ fn to_expr_content(ts : &mut TagState, n : Node) -> ExprContent {
         "false" => LiteralBool(false),
         _ => {
           let sym = n.as_symbol();
-          if let Some(i) = str_to_operator(s) {
-            Operator(i)
-          }
-          else if ts.locals.contains(&sym) {
+          if ts.locals.contains(&sym) {
             LocalRef(sym)
           }
           else {
@@ -165,12 +164,29 @@ fn to_expr_content(ts : &mut TagState, n : Node) -> ExprContent {
     Command("array_len", [e]) => {
       ArrayLen(to_expr(ts, *e))
     }
+    // array to slice
+    Command("as_slice", [e]) => {
+      ArrayAsSlice(to_expr(ts, *e))
+    }
     // array index
     Command("index", [v, index]) => {
-      Index {
+      ArrayIndex {
         array: to_expr(ts, *v),
-        offset: to_expr(ts, *index),
+        index: to_expr(ts, *index),
       }
+    }
+    // ptr index
+    Command("ptr_index", [v, index]) => {
+      PtrIndex {
+        ptr: to_expr(ts, *v),
+        index: to_expr(ts, *index),
+      }
+    }
+    // slice type
+    Command("slice_index", [v, index]) => {
+      let nb = NodeBuilder { loc: n.loc, st: ts.st };
+      let slice_node = node_macros::slice_index_macro(&nb, *v, *index);
+      to_expr_content(ts, slice_node)
     }
     // init
     Command("zero_init", [type_node]) => {
@@ -189,7 +205,19 @@ fn to_expr_content(ts : &mut TagState, n : Node) -> ExprContent {
     }
     // template
     Command("#", [quoted]) => {
-      Template(*quoted)
+      to_template_expr(ts, *quoted)
+    }
+    // for
+    Command("for", [loop_var, start, end, body]) => {
+      let nb = NodeBuilder { loc: n.loc, st: ts.st };
+      let for_node = node_macros::for_macro(&nb, *loop_var, *start, *end, *body);
+      to_expr_content(ts, for_node)
+    }
+    // while
+    Command("while", [cond, body]) => {
+      let nb = NodeBuilder { loc: n.loc, st: ts.st };
+      let while_node = node_macros::while_macro(&nb, *cond, *body);
+      to_expr_content(ts, while_node)
     }
     // quotation
     Command("quote", [quoted]) => {
@@ -197,7 +225,9 @@ fn to_expr_content(ts : &mut TagState, n : Node) -> ExprContent {
     }
     // def
     Command("def", [def_name, value]) => {
-      Def(*def_name, to_expr(ts, *value))
+      let nb = NodeBuilder { loc: n.loc, st: ts.st };
+      let def_node = def_macro(&nb, *def_name, *value);
+      DefMarker{ name: *def_name, initialiser: to_expr(ts, def_node) }
     }
     // fun
     Command("fun", [arg_nodes, body]) => {
@@ -208,13 +238,6 @@ fn to_expr_content(ts : &mut TagState, n : Node) -> ExprContent {
       let (args, body) = to_args_body(ts, arg_nodes.children(), *body);
       let ret = Some(to_expr(ts, *return_tag));
       Fun{ args, ret, body }
-    }
-    // macro
-    Command("macro", [arg, body]) => {
-      ts.locals.push(arg.as_symbol());
-      let body = to_expr(ts, *body);
-      ts.locals.pop();
-      Macro{ arg: *arg, body }
     }
     // set var
     Command("set", [dest, value]) => {
@@ -276,7 +299,7 @@ fn to_expr_content(ts : &mut TagState, n : Node) -> ExprContent {
     }
     // ref
     Command("ref", [locator]) => {
-      Ref(to_expr(ts, *locator))
+      GetAddress(to_expr(ts, *locator))
     }
     // cast
     Command("cast", [value, type_tag]) => {
@@ -314,6 +337,12 @@ fn to_expr_content(ts : &mut TagState, n : Node) -> ExprContent {
     Command("struct", fields) => {
       StructType(to_type_args_list(ts, fields))
     }
+    // slice type
+    Command("slice", [element_type]) => {
+      let nb = NodeBuilder { loc: n.loc, st: ts.st };
+      let slice_node = node_macros::slice_type_macro(&nb, *element_type);
+      to_expr_content(ts, slice_node)
+    }
     _ => {
       let ns = n.children();
       if ns.len() == 0 {
@@ -325,6 +354,11 @@ fn to_expr_content(ts : &mut TagState, n : Node) -> ExprContent {
             value: to_expr(ts, *lit),
             to_type: to_expr(ts, *tag),
           };
+        }
+      }
+      if let NodeContent::Sym(sym) = ns[0].content {
+        if let Some(op) = str_to_operator(sym.as_str()) {
+          return InstrinicOp(op, to_expr_list(ts, &ns[1..]));
         }
       }
       Call(to_expr(ts, ns[0]), to_expr_list(ts, &ns[1..]))
@@ -363,7 +397,7 @@ fn to_type_args_list(ts : &mut TagState, args : &[Node]) -> PermSlice<Arg> {
         Arg { name: None, tag: to_expr(ts, *type_tag) }
       }
       else {
-        panic!()
+        panic!("expected arg at ({})", a.loc)
       }
     };
     v.push(arg);
@@ -379,21 +413,8 @@ fn to_expr_list(ts : &mut TagState, ns : &[Node]) -> PermSlice<Expr> {
   perm_slice_from_vec(v)
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub enum IntrinsicOperator {
-  // arithmetic
-  Add, Sub, Mul, Div, Rem,
-  // comparison
-  Eq, LT, GT, LTE, GTE,
-  // boolean
-  Not, And, Or,
-  // bitwise
-  BitwiseNot, BitwiseAnd, BitwiseOr,
-}
-
-
-fn str_to_operator(s : &str) -> Option<IntrinsicOperator> {
-  use IntrinsicOperator::*;
+fn str_to_operator(s : &str) -> Option<Operator> {
+  use Operator::*;
   let op = match s {
     "+" => Add,
     "-" => Sub,
@@ -406,9 +427,33 @@ fn str_to_operator(s : &str) -> Option<IntrinsicOperator> {
     "<=" => LTE,
     ">=" => GTE,
     "!" => Not,
-    "&&" => And,
-    "||" => Or,
     _ => return None,
   };
   Some(op)
+}
+
+fn to_template_expr(ts : &mut TagState, quoted : Node) -> ExprContent {
+  
+  fn find_template_arguments(n : Node, args : &mut Vec<Node>) {
+    match sexp::node_shape(&n) {
+      Command("$", [e]) => {
+        args.push(*e);
+      }
+      _ => (),
+    }
+    for &c in n.children() {
+      find_template_arguments(c, args);
+    }
+  }
+
+  let mut template_args = vec![];
+  find_template_arguments(quoted, &mut template_args);
+  if template_args.len() > 0 {
+    let nb = NodeBuilder { loc: quoted.loc, st: ts.st };
+    let n = template_macro(&nb, quoted, template_args.as_slice());
+    to_expr_content(ts, n)
+  }
+  else {
+    Quote(quoted)
+  }
 }

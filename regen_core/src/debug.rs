@@ -1,10 +1,11 @@
 
 use std::fmt;
-use crate::types;
+use crate::{types, sexp};
 
 use types::{
   TypeHandle, Kind, Primitive
 };
+use sexp::Node;
 
 pub struct DebugDisplay { p : *const (), t : TypeHandle }
 
@@ -51,7 +52,7 @@ impl fmt::Display for DebugDisplay {
         write!(f, "{}", v)
       }
       Kind::Node => {
-        write!(f, "node")
+        write!(f, "{}", unsafe { *(self.p as *const Node) })
       }
     }
   }

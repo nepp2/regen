@@ -3,12 +3,12 @@
 /// Receives a sexp node tree and compiles/interprets the top level
 /// nodes one at a time.
 
-use crate::{sexp, bytecode, env, ffi, compile, types, debug, perm_alloc};
+use crate::{sexp, parse, bytecode, env, ffi, compile, types, debug, perm_alloc};
 
 use env::Env;
 use sexp::Node;
 use bytecode::{
-  Instr, Expr, Operator, LocalHandle,
+  Instr, InstrExpr, Operator, LocalHandle,
 };
 use compile::Function;
 use perm_alloc::PermSlice;
@@ -49,12 +49,13 @@ pub fn interpret_function(f : *const Function, args : &[u64], env : Env) -> u64 
 }
 
 pub fn interpret_node(n : Node, env : Env) -> u64 {
-  let f = compile::compile_expr_to_function(env, n);
+  let e = parse::parse_to_expr(env.st, n);
+  let f = compile::compile_expr_to_function(env, e);
   interpret_function(&f, &[], env)
 }
 
 pub fn interpret_file(code : &str, env : Env) {
-  let n = sexp::sexp(env.st, &code);
+  let n = sexp::sexp_list(env.st, &code);
   for &c in n.children() {
     interpret_node(c, env);
   }
@@ -105,12 +106,13 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
       match instr {
         Instr::Expr(var, e) => {
           use Operator::*;
+          use InstrExpr::*;
           match e {
-            Expr::LocalAddr(l) => {
+            LocalAddr(l) => {
               let v = frame.local_addr(l) as u64;
               frame.set_local(var, &v);
             }
-            Expr::Def(sym) => {
+            Def(sym) => {
               if let Some(f) = env.values.get(&sym) {
                 frame.set_local(var, &f.ptr);
               }
@@ -118,20 +120,20 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
                 panic!("Symbol '{}' not present in env", sym);
               }
             }
-            Expr::Array(element_vals) => {
+            Array(element_vals) => {
               let info = types::type_as_array(&var.t).expect("expected array");
               frame.initialise_array(var, info.inner, element_vals)
             }
-            Expr::Init(field_vals) => {
+            Init(field_vals) => {
               let info = types::type_as_struct(&var.t).expect("expected struct");
               frame.initialise_struct(var, info.field_offsets, field_vals)
             }
-            Expr::ZeroInit => {
+            ZeroInit => {
               unsafe {
                 std::ptr::write_bytes(frame.local_addr(var), 0, var.t.size_of as usize);
               }
             }
-            Expr::FieldIndex { struct_addr, index } => {
+            FieldIndex { struct_addr, index } => {
               let ptr_type = struct_addr.t;
               let t = types::deref_pointer_type(ptr_type).unwrap();
               let info = types::type_as_struct(&t).expect("expected struct");
@@ -140,13 +142,13 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
               let field_ptr = unsafe { tuple_ptr.add(field_offset as usize) };
               frame.set_local(var, &field_ptr);
             }
-            Expr::LiteralU64(val) => {
+            LiteralU64(val) => {
               frame.set_local(var, &val);
             }
-            Expr::Literal(_t, p) => {
+            Literal(_t, p) => {
               frame.set_local(var, &p);
             }
-            Expr::BinaryOp(op, a, b) => {
+            BinaryOp(op, a, b) => {
               use Primitive::*;
               let t = types::type_as_primitive(&a.t).unwrap();
               match t {
@@ -158,7 +160,7 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
               }
               
             }
-            Expr::UnaryOp(op, a) => {
+            UnaryOp(op, a) => {
               let a : u64 = frame.get_local(a);
               let val = match op {
                 Sub => panic!("signed types not yet supported"),
@@ -167,7 +169,7 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
               };
               frame.set_local(var, &val);
             }
-            Expr::Invoke(f, args) => {
+            Invoke(f, args) => {
               frame.push_args(args);
               let fun_address : *const Function = frame.get_local(f);
               let f = unsafe { &*fun_address };
@@ -185,7 +187,7 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
               };
               break;
             }
-            Expr::InvokeC(f, args) => {
+            InvokeC(f, args) => {
               let fptr : *const () = frame.get_local(f);
               frame.push_args(args);
               let args = unsafe {
@@ -201,12 +203,12 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
                 cast_and_store(v, frame.local_addr(var), env.c.u64_tag, var.t);
               }
             }
-            Expr::Load(ptr) => {
+            Load(ptr) => {
               let p : *mut () = frame.get_local(ptr);
               let vaddr = frame.local_addr(var);
               unsafe { store(p as *mut (), vaddr, var.t.size_of) }
             }
-            Expr::PtrOffset{ ptr, offset } => {
+            PtrOffset{ ptr, offset } => {
               let sizeof =
                 types::deref_pointer_type(var.t)
                 .unwrap().size_of;
@@ -214,7 +216,7 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
               let p : u64 = frame.get_local(ptr);
               frame.set_local(var, &(p + (sizeof * offset)));
             }
-            Expr::Cast(v) => {
+            Cast(v) => {
               frame.cast(v, var);
             }
           };
@@ -385,6 +387,7 @@ unsafe fn cast_and_store(src : *const (), dest : *mut (), src_type : TypeHandle,
       (U64, U32) => *(dest as *mut u64) = (*(src as *mut u32)) as u64,
       (U64, U16) => *(dest as *mut u64) = (*(src as *mut u16)) as u64,
       (U64, U8) => *(dest as *mut u64) = (*(src as *mut u8)) as u64,
+      (U64, Bool) => *(dest as *mut u64) = (*(src as *mut u8)) as u64,
       (U64, Void) => (),
 
       (U32, U64) => *(dest as *mut u32) = (*(src as *mut u64)) as u32,

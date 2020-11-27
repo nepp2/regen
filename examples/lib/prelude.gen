@@ -1,33 +1,4 @@
 
 (def node_index (fun ((ns node_slice) (i u64)) node (do
-  (index (. ns 0) i)
-)))
-
-(def for (macro ns (do
-  (let loop_var (node_index ns 0))
-  (let start (node_index ns 1))
-  (let end (node_index ns 2))
-  (let body (node_index ns 3))
-  (# (do
-    (let ($ loop_var) ($ start))
-    (let _end ($ end))
-    (label for_loop (do
-      (if (< ($ loop_var) _end) (do
-        ($ body)
-        (set ($ loop_var) (+ ($ loop_var) 1))
-        repeat
-      ))
-    ))
-  ))
-)))
-
-(def while (macro ns (do
-  (let condition (node_index ns 0))
-  (let body (node_index ns 1))
-  (# (label while_loop (do
-    (if ($ condition) (do
-      ($ body)
-      repeat
-    ))
-  )))
+  (ptr_index (. ns data) i)
 )))

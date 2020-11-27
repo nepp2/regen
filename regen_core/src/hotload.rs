@@ -36,7 +36,7 @@ fn node_content_eq(a : Node, b : Node) -> bool {
 }
 
 pub fn hotload_changes(code : &str, mut env : Env, hs : &mut HotloadState) {
-  let n = sexp::sexp(env.st, &code);
+  let n = sexp::sexp_list(env.st, &code);
   for c in n.children() {
     match sexp::node_shape(c) {
       NodeShape::Command("def", [name, expr]) => {

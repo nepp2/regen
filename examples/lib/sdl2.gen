@@ -13,7 +13,7 @@
 
 (def sdl_init (cast
   (load_library_symbol sdl2 (sym SDL_Init))
-  (cfun (u32) i32)
+  (cfun ((u32)) i32)
 ))
 
 (def sdl_window_handle u64)
@@ -62,7 +62,7 @@
 
 (def sdl_destroy_window (cast
   (load_library_symbol sdl2 (sym SDL_DestroyWindow))
-  (cfun (sdl_window_handle) void)
+  (cfun ((sdl_window_handle)) void)
 ))
 
 (def sdl_set_window_position (cast
@@ -87,7 +87,7 @@
 
 (def sdl_clear (cast
   (load_library_symbol sdl2 (sym SDL_RenderClear))
-  (cfun (sdl_renderer_handle) i32)
+  (cfun ((sdl_renderer_handle)) i32)
 ))
 
 (def sdl_set_draw_color (cast
@@ -97,7 +97,7 @@
 
 (def sdl_present (cast
   (load_library_symbol sdl2 (sym SDL_RenderPresent))
-  (cfun (sdl_renderer_handle) void)
+  (cfun ((sdl_renderer_handle)) void)
 ))
 
 (def sdl_rect (struct

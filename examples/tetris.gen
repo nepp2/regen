@@ -36,11 +36,8 @@
   (c color)
 ))
 
-(def to_shape (macro ns (do
-  (let s (node_index ns 0))
-  (let len (node_index ns 1))
-  (let c (node_index ns 2))
-  (# (init shape (ref (index ($ s) 0)) ($ len) ($ c)))
+(def to_shape (fun ((s (slice u64)) (len u64) (c color)) (do
+  (init shape (ref (slice_index s 0)) len c)
 )))
 
 (def shape_l1 (array
@@ -86,13 +83,13 @@
 ))
 
 (def shapes (array
-  (to_shape shape_l1 3 orange)
-  (to_shape shape_l2 3 blue)
-  (to_shape shape_bar 4 sky_blue)
-  (to_shape shape_z 3 red)
-  (to_shape shape_s 3 green)
-  (to_shape shape_square 2 yellow)
-  (to_shape shape_t 3 magenta)
+  (to_shape (as_slice shape_l1) 3 orange)
+  (to_shape (as_slice shape_l2) 3 blue)
+  (to_shape (as_slice shape_bar) 4 sky_blue)
+  (to_shape (as_slice shape_z) 3 red)
+  (to_shape (as_slice shape_s) 3 green)
+  (to_shape (as_slice shape_square) 2 yellow)
+  (to_shape (as_slice shape_t) 3 magenta)
 ))
 
 (def tile_size 30)
@@ -113,7 +110,7 @@
   (let c (. s c))
   (for y 0 len (do
     (for x 0 len (do
-      (let v (index (. s data) (+ x (* y len))))
+      (let v (ptr_index (. s data) (+ x (* y len))))
       (if (== v 1) (do
         (let xpos (+ x off_x))
         (let ypos (+ y off_y))
@@ -151,7 +148,7 @@
   (let ts tile_size)
   (for y 0 len (do
     (for x 0 len (do
-      (let v (index (. s data) (+ x (* y len))))
+      (let v (ptr_index (. s data) (+ x (* y len))))
       (if (== v 1) (do
         (set_draw_color (. s c))
         (let r (init sdl_rect
