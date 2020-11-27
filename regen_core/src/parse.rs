@@ -1,5 +1,5 @@
 
-use crate::{sexp, symbols, perm_alloc, interop, typecheck};
+use crate::{sexp, symbols, perm_alloc, interop, types};
 use sexp::{
   Node,
   NodeLiteral,
@@ -9,9 +9,17 @@ use sexp::{
 use symbols::Symbol;
 use perm_alloc::{Perm, PermSlice, perm, perm_slice_from_vec};
 use interop::RegenString;
-use typecheck::ExprType;
+use types::TypeHandle;
 
 pub type Expr = Perm<ExprData>;
+
+#[derive(Copy, Clone)]
+pub struct ExprType {
+  t : TypeHandle,
+  const_expr : bool,
+  is_locator : bool,
+  mutable : bool,
+}
 
 #[derive(Copy, Clone)]
 pub struct ExprData {

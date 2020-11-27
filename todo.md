@@ -1,12 +1,31 @@
 
 # Types, Macros and staged metaprogramming
 
-```
+I have a problem separating out some compilation passes.
 
-(def foo (fun () (do
+* Need to find the dependency graph before attempting to typecheck
+  * this means spotting all the def reference nodes
+  * otherwise global def types won't be available
 
-)))
-```
+How could it work without macros?
+
+* Find structure (and therefore the def nodes)
+* Find types and codegen
+
+Simple, fast solution:
+
+* Remove macros from the language
+  * Are they important?
+  * Probably, but not yet.
+* Turn a few key macros into compiler built-ins (e.g. loops)
+* Expand the built-in macros during the structure parse phase
+
+Should I keep this structure parsing stuff?
+  * Can separate type checking from codegen, but do I need to?
+  * Not yet. But now I have to throw away code. Will I need that code?
+  * I still need to do a lot of structure parsing just to expand macros and find the def references, so maybe I should just keep it...
+  * It doesn't mean that I need to split up the type checking
+
 
 # Hotloading TODO
 
