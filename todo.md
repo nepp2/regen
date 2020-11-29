@@ -3,11 +3,21 @@
 
 ## Critical
 
-* Build symbol dependency graph
-  * Find all of the symbols referenced in an expression!
-  * Can't spot globals without parsing properly
-* Update all nodes affected by a change
-* Remove deleted nodes
+* ~~receive file change event~~
+* ~~parse file's code to node tree~~
+* mark nodes as either modified, new or deleted
+  * new defs
+  * removed defs
+  * how should non-defs be handled?
+* make list of nodes to recalculate
+  * all modified nodes
+  * any node that depends on a modified node, recursively
+    * find dependencies of the modified nodes
+      * turn node tree into structured expression tree
+      * find all of the global references
+      * check graph has no cycles with tarjan's algorithm
+* unload deleted nodes and modified nodes
+* evaluate new nodes and and modified nodes
 
 ## Secondary
 
