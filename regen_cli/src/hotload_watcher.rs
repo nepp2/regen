@@ -16,6 +16,7 @@ use std::fs;
 use std::path::Path;
 
 fn hotload_file(env : Env, hs : &mut HotloadState, path : impl AsRef<Path>) {
+  println!("Hotloading file '{}'", path.as_ref().display());
   let code =
     fs::read_to_string(path)
     .expect("Something went wrong reading the file");

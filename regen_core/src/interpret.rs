@@ -7,6 +7,7 @@ use crate::{sexp, parse, bytecode, env, ffi, compile, types, debug, perm_alloc};
 
 use env::Env;
 use sexp::Node;
+use parse::Expr;
 use bytecode::{
   Instr, InstrExpr, Operator, LocalHandle,
 };
@@ -48,10 +49,14 @@ pub fn interpret_function(f : *const Function, args : &[u64], env : Env) -> u64 
   }
 }
 
-pub fn interpret_node(n : Node, env : Env) -> u64 {
-  let e = parse::parse_to_expr(env.st, n);
+pub fn interpret_expr(e : Expr, env : Env) -> u64 {
   let f = compile::compile_expr_to_function(env, e);
   interpret_function(&f, &[], env)
+}
+
+pub fn interpret_node(n : Node, env : Env) -> u64 {
+  let e = parse::parse_to_expr(env.st, n);
+  interpret_expr(e, env)
 }
 
 pub fn interpret_file(code : &str, env : Env) {

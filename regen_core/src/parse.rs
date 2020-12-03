@@ -12,6 +12,8 @@ use perm_alloc::{Perm, PermSlice, perm, perm_slice_from_vec};
 use interop::RegenString;
 use bytecode::Operator;
 
+use std::collections::HashSet;
+
 pub type Expr = Perm<ExprData>;
 
 /// TODO: unused
@@ -92,6 +94,7 @@ use ExprContent::*;
 struct TagState {
   locals : Vec<Symbol>,
   st : SymbolTable,
+  globals_referenced : HashSet<Symbol>,
 }
 
 #[derive(Copy, Clone)]
@@ -101,11 +104,17 @@ pub struct TaggedNode {
 }
 
 pub fn parse_to_expr(st : SymbolTable, root : Node) -> Expr {
+  parse_to_expr_with_global_references(st, root).0
+}
+
+pub fn parse_to_expr_with_global_references(st : SymbolTable, root : Node) -> (Expr, HashSet<Symbol>) {
   let mut ts = TagState {
     locals: vec![],
     st,
+    globals_referenced: HashSet::new(),
   };
-  to_expr(&mut ts, root)
+  let e = to_expr(&mut ts, root);
+  (e, ts.globals_referenced)
 }
 
 fn to_expr(ts : &mut TagState, n : Node) -> Expr {
@@ -132,6 +141,7 @@ fn to_expr_content(ts : &mut TagState, n : Node) -> ExprContent {
             LocalRef(sym)
           }
           else {
+            ts.globals_referenced.insert(sym);
             GlobalRef(sym)
           }
         }

@@ -1,13 +1,8 @@
 
 (def a 5)
 
-(def b 4)
+(def b 6)
 
 (def pos (struct (x u64) (y u64)))
 
 (def ab (init pos a b))
-
-(debug a)
-(debug b)
-(debug pos)
-(debug ab)
