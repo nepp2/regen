@@ -6,26 +6,26 @@ use crate::{
     Node, NodeShape, NodeContent, NodeLiteral::*,
   },
   parse,
-  symbols::Symbol,
+  symbols::{Symbol, to_symbol},
   interpret,
-  graph,
 };
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
+use std::fmt::Write;
 use crc32fast;
 
 type SymbolGraph = HashMap<Symbol, HashSet<Symbol>>;
 
 pub struct HotloadState {
-  defs : HashMap<Symbol, Def>,
+  defs : Vec<(Symbol, Def)>,
   graph : SymbolGraph,
 }
 
 impl HotloadState {
   pub fn new() -> Self {
     HotloadState {
-      defs: HashMap::new(),
+      defs: vec![],
       graph: HashMap::new(),
     }
   }
@@ -100,93 +100,103 @@ fn node_content_eq(a : Node, b : Node) -> bool {
   }
 }
 
-fn find_dependent_defs(hs : &HotloadState, name : Symbol, dependents : &mut HashSet<Symbol>) {
-  for (&def, dependencies) in &hs.graph {
-    if def != name && dependencies.contains(&name) {
-      if !dependents.contains(&def) {
-        dependents.insert(def);
-        find_dependent_defs(hs, def, dependents);
+fn mark_dirty_defs(hs : &HotloadState, clean_defs : &mut HashSet<Symbol>, dirty_name : Symbol) {
+  for (&name, dependencies) in &hs.graph {
+    if name != dirty_name && dependencies.contains(&dirty_name) {
+      if clean_defs.remove(&name) {
+        mark_dirty_defs(hs, clean_defs, name);
       }
     }
+  }
+}
+
+pub fn clear_state(mut env : Env, hs : &mut HotloadState) {
+  hs.graph.clear();
+  for (name, _) in hs.defs.drain(..) {
+    env.values.remove(&name); // TODO: leaks memory
   }
 }
 
 pub fn hotload_changes(code : &str, mut env : Env, hs : &mut HotloadState) {
   let n = sexp::sexp_list(env.st, &code);
-  let mut new_defs = HashMap::new();
-  let mut all_defs = HashSet::new();
-  let mut modified_defs = vec![];
+  let old_defs : HashMap<_, _> =
+    hs.defs.iter().enumerate()
+    .map(|(i, (name, _))| (*name, i))
+    .collect();
+  let mut loaded_defs = vec![];
+  let mut new_names = vec![];
+  let mut unmodified_defs = HashSet::new();
+
+  let mut symbol_buffer = "".to_string();
+  let mut loaded_names = HashSet::new();
+
   // Find new and unchanged defs
   for c in n.children() {
     match sexp::node_shape(c) {
       NodeShape::Command("def", [name, expr]) => {
         let name = name.as_symbol();
-        all_defs.insert(name);
         let expr = ComparableNode::new(*expr);
-        if let Some(old_def) = hs.defs.get(&name) {
-          if expr == old_def.value_expr {
-            // unmodified def; do nothing
-          }
-          else {
-            // modified def
-            modified_defs.push((name, def(*c, expr)));
-          }
-        }
-        else {
-          // new def
-          new_defs.insert(name, def(*c, expr));
-        }
+        loaded_defs.push((name, def(*c, expr)));
+        loaded_names.insert(name);
       }
-      _ => (),
-    }
-  }
-  // find deleted defs
-  let mut deleted_defs = HashSet::new();
-  for name in hs.defs.keys() {
-    if !all_defs.contains(name) {
-      deleted_defs.insert(*name);
-    }
-  }
-  // dirty list contains deleted and modified defs, and their dependents
-  let mut dirty_defs = HashSet::new();
-  for name in &deleted_defs {
-    dirty_defs.insert(*name);
-    find_dependent_defs(&hs, *name, &mut dirty_defs);
-  }
-  for (name, _) in &modified_defs {
-    dirty_defs.insert(*name);
-    find_dependent_defs(&hs, *name, &mut dirty_defs);
-  }
-  for (name, _) in &new_defs {
-    find_dependent_defs(&hs, *name, &mut dirty_defs);
-  }
-  // Find all defs that need to be loaded
-  let mut build_set = HashMap::new();
-  build_set.extend(new_defs.into_iter());
-  build_set.extend(modified_defs);
-  for name in &dirty_defs {
-    if !build_set.contains_key(name) {
-      if !deleted_defs.contains(name) {
-        build_set.insert(*name, hs.defs[name]);
+      _ => {
+        let expr = ComparableNode::new(*c);
+        let mut i = 0;
+        loop {
+          symbol_buffer.clear();
+          write!(symbol_buffer, "__toplevel__{}_{}", expr.checksum, i).unwrap();
+          let name = to_symbol(env.st, &symbol_buffer);
+          if !loaded_names.contains(&name) {
+            // Do stuff
+            loaded_defs.push((name, def(*c, expr)));
+            loaded_names.insert(name);
+            break;
+          }
+          i += 1;
+        }
       }
     }
   }
-  // unload dirty defs
-  for name in &dirty_defs {
-    println!("unload def '{}'", name);
-    hs.defs.remove(name);
-    hs.graph.remove(&name);
-    env.values.remove(name); // TODO: leaks memory
+  for (name, def) in &loaded_defs {
+    if let Some(&index) = old_defs.get(name) {
+      let old_def = &hs.defs[index].1;
+      if def.value_expr == old_def.value_expr {
+        unmodified_defs.insert(*name);
+      }
+    }
+    else {
+      new_names.push(*name);
+    }
+  }
+
+  // recursively mark modified defs
+  for (name, _) in &hs.defs {
+    if !unmodified_defs.contains(name) {
+      mark_dirty_defs(hs, &mut unmodified_defs, *name);
+    }
+  }
+  for name in new_names {
+    // might have introduced a symbol that an existing symbol tries to reference
+    mark_dirty_defs(hs, &mut unmodified_defs, name);
+  }
+  // remove any modified def (changed or deleted)
+  for (name, _) in &hs.defs {
+    if !unmodified_defs.contains(name) {
+      // println!("unload def '{}'", name);
+      hs.graph.remove(&name);
+      env.values.remove(name); // TODO: leaks memory
+    }
   }
   // load defs
-  for (&name, &def) in &build_set {
-    println!("loading def '{}'", name);
-    hs.defs.insert(name, def);
-    let (expr, global_references) =
+  for (name, def) in &loaded_defs {
+    if !unmodified_defs.contains(name) {
+      // println!("loading def '{}'", name);
+      let (expr, global_references) =
       parse::parse_to_expr_with_global_references(env.st, def.def_node);
-    hs.graph.insert(name, global_references);
-
-    // TODO: this happens in the wrong order!
-    // interpret::interpret_expr(expr, env);
+      hs.graph.insert(*name, global_references);
+      interpret::interpret_expr(expr, env);
+    }
   }
+  hs.defs = loaded_defs;
 }
+

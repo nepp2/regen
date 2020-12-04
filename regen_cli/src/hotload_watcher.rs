@@ -35,7 +35,7 @@ pub fn watch_file(path : impl AsRef<Path>) {
   let mut watcher = watcher(tx, Duration::from_millis(500)).unwrap();
   watcher.watch(path.as_ref(), RecursiveMode::Recursive).unwrap();
   loop {
-    // Read watch events, to restart the process
+    // Read watch events, to trigger hotloading
     match rx.try_recv() {
       Ok(event) => {
         match event {
