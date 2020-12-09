@@ -194,8 +194,9 @@ fn parse_string(ts : &mut TokenStream) -> NodeContent {
     if t.0 == Normal && t.1 == "\"" { break }
     end = ts.next_start;
   }
-  let s = interop::from_string(ts.perm_code[start..end].to_string());
-  NodeContent::Literal(NodeLiteral::String(perm(s)))
+  let s = ts.perm_code[start..end].to_string();
+  let str_ptr = perm(interop::from_string(s));
+  NodeContent::Literal(NodeLiteral::String(str_ptr))
 }
 
 /// parse sexp list

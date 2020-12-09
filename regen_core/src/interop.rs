@@ -15,8 +15,10 @@ impl RegenString {
 }
 
 pub fn from_string(s : String) -> RegenString {
-  let ptr = s.as_ptr();
   let len = s.len() as u64;
-  std::mem::forget(s);
+  let mut bytes = s.into_bytes();
+  bytes.push(0);
+  let ptr = bytes.as_ptr();
+  std::mem::forget(bytes);
   RegenString { ptr, len }
 }

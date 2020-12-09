@@ -2,13 +2,13 @@
 (include env (ref "examples/lib/prelude.gen"))
 (include env (ref "examples/lib/sdl2.gen"))
 
-(def title (array (65 u8) (65 u8) (65 u8) (0 u8)))
+(def title "SDL Example")
 
 (sdl_init SDL_INIT_VIDEO)
 
 (def win
   (sdl_create_window
-    (ref (index title 0))
+    (. title data)
     SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED
     (800 u32) (600 u32)
     SDL_WINDOW_SHOWN))
