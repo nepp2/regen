@@ -1,4 +1,14 @@
 
+# Expressing a simple game
+
+Key questions to answer:
+
+* How do we express that changing the render logic does not require any recalculation of game state?
+* How do we define a self-caching stream?
+* How are state reducers modeled? Is there actually a glitching issue?
+* How is any of this shit going to get me to the Bret Victor demo?
+* Is there actually a coherent design somewhere in this mess?
+
 # Glitches and responsiveness
 
 ```c#
