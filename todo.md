@@ -1,6 +1,8 @@
 
 # Immediate TODO
 
+* Fix the sdl example (imports don't work with new hotloader)
+
 * Fix the code/value dependency issue
   * `(def val 5)`
   * `(def f (fun () (val)))`
