@@ -4,5 +4,14 @@ version = "0.1.0"
 authors = ["Andy M <0andrewmartin0@gmail.com>"]
 edition = "2018"
 
+# Unwind is used as a short-term hack to stop
+# the hotloader from crashing when the compiler
+# panics, because it doesn't do proper error
+# handling yet.
+[profile.dev]
+panic = "unwind"
+[profile.release]
+panic = "unwind"
+
 [dependencies]
 crc32fast = "1.2.1"

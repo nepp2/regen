@@ -1,4 +1,12 @@
 
+# Immediate TODO
+
+* Fix the code/value dependency issue
+  * `(def val 5)`
+  * `(def f (fun () (val)))`
+  * change `val` def: `(def val 6)`
+  * causes `f` to be recompiled
+
 # Expressing a simple game
 
 Key questions to answer:

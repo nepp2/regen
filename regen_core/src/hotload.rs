@@ -18,15 +18,17 @@ use crc32fast;
 type SymbolGraph = HashMap<Symbol, HashSet<Symbol>>;
 
 pub struct HotloadState {
-  defs : Vec<(Symbol, Def)>,
-  graph : SymbolGraph,
+  defs : HashMap<Symbol, Def>,
+  dependencies : SymbolGraph,
+  permanent_defs : HashSet<Symbol>,
 }
 
 impl HotloadState {
-  pub fn new() -> Self {
+  pub fn new(env : Env) -> Self {
     HotloadState {
-      defs: vec![],
-      graph: HashMap::new(),
+      defs: HashMap::new(),
+      dependencies: HashMap::new(),
+      permanent_defs: env.values.keys().cloned().collect(),
     }
   }
 }
@@ -35,6 +37,11 @@ impl HotloadState {
 struct Def {
   def_node : Node,
   value_expr : ComparableNode,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum DefState {
+  Changed, Unchanged, Broken,
 }
 
 fn def(def_node : Node, value_expr : ComparableNode) -> Def {
@@ -100,56 +107,122 @@ fn node_content_eq(a : Node, b : Node) -> bool {
   }
 }
 
-fn mark_dirty_defs(hs : &HotloadState, clean_defs : &mut HashSet<Symbol>, dirty_name : Symbol) {
-  for (&name, dependencies) in &hs.graph {
-    if name != dirty_name && dependencies.contains(&dirty_name) {
-      if clean_defs.remove(&name) {
-        mark_dirty_defs(hs, clean_defs, name);
-      }
-    }
-  }
-}
-
 pub fn clear_state(mut env : Env, hs : &mut HotloadState) {
-  hs.graph.clear();
-  for (name, _) in hs.defs.drain(..) {
+  hs.dependencies.clear();
+  for (name, _) in hs.defs.drain() {
     env.values.remove(&name); // TODO: leaks memory
   }
 }
 
-pub fn hotload_changes(code : &str, mut env : Env, hs : &mut HotloadState) {
-  let n = sexp::sexp_list(env.st, &code);
-  let old_defs : HashMap<_, _> =
-    hs.defs.iter().enumerate()
-    .map(|(i, (name, _))| (*name, i))
-    .collect();
-  let mut loaded_defs = vec![];
-  let mut new_names = vec![];
-  let mut unmodified_defs = HashSet::new();
+fn unload_def(hs : &mut HotloadState, mut env : Env, name : Symbol){
+  // println!("unload def '{}'", name);
+  hs.dependencies.remove(&name);
+  hs.defs.remove(&name);
+  env.values.remove(&name); // TODO: leaks memory
+}
 
+fn load_def(
+  hs : &mut HotloadState,
+  env : Env,
+  new_defs : &HashMap<Symbol, DefState>,
+  def_node : Node,
+  value_expr : ComparableNode,
+  name : Symbol
+) -> Result<(), ()>
+{
+  // println!("loading def '{}'", name);
+  // TODO: using catch unwind is very ugly. Replace with proper error handling.
+  let aaa = ();
+  let global_references = std::panic::catch_unwind(|| {
+    let (expr, global_references) =
+      parse::parse_to_expr_with_global_references(env.st, def_node);
+    // check dependencies are available
+    for n in global_references.iter() {
+      match new_defs.get(n) {
+        None | Some(DefState::Broken) => {
+          panic!("Definition `{}` is missing dependency `{}`", name, n);
+        }
+        _ => (),
+      }
+    }
+    interpret::interpret_expr(expr, env);
+    global_references
+  }).map_err(|_| ())?;
+  hs.defs.insert(name, def(def_node, value_expr));
+  hs.dependencies.insert(name, global_references);
+  Ok(())
+}
+
+fn hotload_def(
+  hs : &mut HotloadState,
+  env : Env,
+  name : Symbol,
+  def_node : Node,
+  value_expr : ComparableNode,
+  new_defs : &mut HashMap<Symbol, DefState>,
+)
+{
+  let mut new_def_state : DefState = (|| {
+    // if already defined
+    if let Some(def) = hs.defs.iter().find(|d| *d.0 == name) {
+      // check if expression has changed
+      let mut changed = def.1.value_expr != value_expr;
+      // check dependencies
+      for n in hs.dependencies[&name].iter() {
+        match new_defs.get(n) {
+          Some(DefState::Unchanged) => (),
+          _ => {
+            changed = true
+          }
+        }
+      }
+      if changed {
+        unload_def(hs, env, name);
+        DefState::Changed
+      }
+      else {
+        DefState::Unchanged
+      }
+    }
+    else {
+      DefState::Changed
+    }
+  }) ();
+  if new_def_state == DefState::Changed {
+    let r = load_def(hs, env, new_defs, def_node, value_expr, name);
+    if r.is_err() {
+      new_def_state = DefState::Broken;
+    }
+  }
+  new_defs.insert(name, new_def_state);
+}
+
+pub fn hotload_changes(code : &str, env : Env, hs : &mut HotloadState) {
+  let n = sexp::sexp_list(env.st, &code);
+  
   let mut symbol_buffer = "".to_string();
-  let mut loaded_names = HashSet::new();
+  let mut new_defs = HashMap::new();
+  for &name in hs.permanent_defs.iter() {
+    new_defs.insert(name, DefState::Unchanged);
+  }
 
   // Find new and unchanged defs
-  for c in n.children() {
-    match sexp::node_shape(c) {
+  for node in n.children() {
+    match sexp::node_shape(node) {
       NodeShape::Command("def", [name, expr]) => {
         let name = name.as_symbol();
-        let expr = ComparableNode::new(*expr);
-        loaded_defs.push((name, def(*c, expr)));
-        loaded_names.insert(name);
+        let value_expr = ComparableNode::new(*expr);
+        hotload_def(hs, env, name, *node, value_expr, &mut new_defs);
       }
       _ => {
-        let expr = ComparableNode::new(*c);
+        let value_expr = ComparableNode::new(*node);
         let mut i = 0;
         loop {
           symbol_buffer.clear();
-          write!(symbol_buffer, "__toplevel__{}_{}", expr.checksum, i).unwrap();
+          write!(symbol_buffer, "__toplevel__{}_{}", value_expr.checksum, i).unwrap();
           let name = to_symbol(env.st, &symbol_buffer);
-          if !loaded_names.contains(&name) {
-            // Do stuff
-            loaded_defs.push((name, def(*c, expr)));
-            loaded_names.insert(name);
+          if !new_defs.contains_key(&name) {
+            hotload_def(hs, env, name, *node, value_expr, &mut new_defs);
             break;
           }
           i += 1;
@@ -157,46 +230,15 @@ pub fn hotload_changes(code : &str, mut env : Env, hs : &mut HotloadState) {
       }
     }
   }
-  for (name, def) in &loaded_defs {
-    if let Some(&index) = old_defs.get(name) {
-      let old_def = &hs.defs[index].1;
-      if def.value_expr == old_def.value_expr {
-        unmodified_defs.insert(*name);
-      }
-    }
-    else {
-      new_names.push(*name);
-    }
-  }
 
-  // recursively mark modified defs
-  for (name, _) in &hs.defs {
-    if !unmodified_defs.contains(name) {
-      mark_dirty_defs(hs, &mut unmodified_defs, *name);
-    }
+  // unload any defs that were deleted or broken
+  let deletion_list : Vec<_> =
+    hs.defs.keys().filter(|def| match new_defs.get(def) {
+      None | Some(DefState::Broken) => true,
+      _ => false,
+    })
+    .cloned().collect();
+  for def in deletion_list {
+    unload_def(hs, env, def)
   }
-  for name in new_names {
-    // might have introduced a symbol that an existing symbol tries to reference
-    mark_dirty_defs(hs, &mut unmodified_defs, name);
-  }
-  // remove any modified def (changed or deleted)
-  for (name, _) in &hs.defs {
-    if !unmodified_defs.contains(name) {
-      // println!("unload def '{}'", name);
-      hs.graph.remove(&name);
-      env.values.remove(name); // TODO: leaks memory
-    }
-  }
-  // load defs
-  for (name, def) in &loaded_defs {
-    if !unmodified_defs.contains(name) {
-      // println!("loading def '{}'", name);
-      let (expr, global_references) =
-      parse::parse_to_expr_with_global_references(env.st, def.def_node);
-      hs.graph.insert(*name, global_references);
-      interpret::interpret_expr(expr, env);
-    }
-  }
-  hs.defs = loaded_defs;
 }
-
