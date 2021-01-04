@@ -284,6 +284,18 @@ pub fn sexp_list(st : SymbolTable, code : &str) -> Node {
   let perm_code = perm(code.to_string());
   let mut ts = TokenStream { code, st, next_start: 0, next_len: 0, perm_code };
   parse_list(&mut ns, &mut ts);
+  loop {
+    let t = peek(&mut ts);
+    match t.0 {
+      Empty => break,
+      Comment | Whitespace => {
+        skip(&mut ts);
+      }
+      Normal => {
+        panic!("unexpected token `{}`", t.1);
+      }
+    }
+  }
   // display(code, 0, ns[0], &mut false);
   // println!();
   ns.pop().unwrap()

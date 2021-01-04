@@ -1,6 +1,6 @@
 
 
-(def a 3)
+(def a 4)
 (def b (+ a 2))
 
 (debug a)

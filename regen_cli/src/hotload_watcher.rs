@@ -26,8 +26,8 @@ fn hotload_file(env : Env, hs : &mut HotloadState, path : impl AsRef<Path>) {
 pub fn watch_file(path : impl AsRef<Path>) {
   let env = new_env();
   bind_libs::bind_libs(env);
-  let mut hs = HotloadState::new(env);
 
+  let mut hs = HotloadState::new();
   hotload_file(env, &mut hs, path.as_ref());
 
   // Create a channel to receive the events.

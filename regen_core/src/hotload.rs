@@ -20,15 +20,13 @@ type SymbolGraph = HashMap<Symbol, HashSet<Symbol>>;
 pub struct HotloadState {
   defs : HashMap<Symbol, Def>,
   dependencies : SymbolGraph,
-  permanent_defs : HashSet<Symbol>,
 }
 
 impl HotloadState {
-  pub fn new(env : Env) -> Self {
+  pub fn new() -> Self {
     HotloadState {
       defs: HashMap::new(),
       dependencies: HashMap::new(),
-      permanent_defs: env.values.keys().cloned().collect(),
     }
   }
 }
@@ -139,8 +137,13 @@ fn load_def(
     // check dependencies are available
     for n in global_references.iter() {
       match new_defs.get(n) {
-        None | Some(DefState::Broken) => {
-          panic!("Definition `{}` is missing dependency `{}`", name, n);
+        Some(DefState::Broken) => {
+          panic!("Def `{}` depends on broken def `{}`", name, n);
+        }
+        None => {
+          if hs.defs.contains_key(n) {
+            panic!("Def `{}` is missing dependency `{}`", name, n);
+          }
         }
         _ => (),
       }
@@ -194,19 +197,25 @@ fn hotload_def(
       new_def_state = DefState::Broken;
     }
   }
+  if new_def_state == DefState::Unchanged {
+    // Update nodes so that their text locations are correct
+    hs.defs.insert(name, def(def_node, value_expr));
+  }
   new_defs.insert(name, new_def_state);
 }
 
 pub fn hotload_changes(code : &str, env : Env, hs : &mut HotloadState) {
-  let n = sexp::sexp_list(env.st, &code);
-  
-  let mut symbol_buffer = "".to_string();
-  let mut new_defs = HashMap::new();
-  for &name in hs.permanent_defs.iter() {
-    new_defs.insert(name, DefState::Unchanged);
-  }
+  // Parse file
+  let n = {
+    let r = std::panic::catch_unwind(|| {
+      sexp::sexp_list(env.st, &code)
+    });
+    if let Ok(n) = r { n } else { return }
+  };
 
   // Find new and unchanged defs
+  let mut symbol_buffer = "".to_string();
+  let mut new_defs = HashMap::new();
   for node in n.children() {
     match sexp::node_shape(node) {
       NodeShape::Command("def", [name, expr]) => {
