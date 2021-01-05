@@ -1,11 +1,15 @@
 
 # Immediate TODO
 
+* Integrate event streams
+
 * Fix the code/value dependency issue
   * `(def val 5)`
   * `(def f (fun () (val)))`
   * change `val` def: `(def val 6)`
   * causes `f` to be recompiled
+  * Is this actually a blocker?
+    * It is incredibly slow and stupid behaviour, but not actually wrong
 
 # Issues
 
