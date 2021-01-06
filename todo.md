@@ -35,18 +35,40 @@
 
 ## Implementing event streams
 
-Can't really do live rendering/game examples without either hacking a limited example together (like a processing-style environment), or without building in support for event streams.
+I created a stream-based SDL example in `scratchpad.gen`.
 
-I don't know how the event streams are supposed to work yet. This is really the next big problem to solve. The plan was to base them on the Observable design, because that seems fairly simple.
+It requires some functions for creating event streams:
+  * `timer_framerate`
+    * args:
+      * framerate: `u64`
+    * returns: `stream<tick_event>`
+  * `source_stream`
+    * args:
+      * poll_function: `fun(*void, *E, *tick_event) -> bool`
+      * source: `*void`
+      * initial_state: `E`
+      * sampler: `stream<tick_event>`
+    * returns: `stream<E>`
+  * `merge_stream`
+    * args:
+      * a: `stream<A>`
+      * b: `stream<B>`
+    * returns: `stream<C>`
+  * `state_stream`
+    * args:
+      * initial_state: `S`
+      * update: `fun(*E, *S)`
+      * input: `stream<E>`
+    * returns: `stream<S>`
+  * `sample_stream`
+    * args
+      * source: `stream<E>`
+      * sampler: `stream<T>`
+    * returns: `stream<E>`
 
-There has to be a central event loop, and it needs to find the event streams when some code is loaded. It needs to be able to push events to functions that are observing them.
+The trouble with these functions is that most of them are polymorphic, and they even refer to polymorphic types. I could iron over this polymorphism by using either void pointers or some kind of limited type-erasure mechanism.
 
-Plan:
+Alternatively, I could try to find the simplest path to some kind templating system, likely based on Terra. Ultimately if the event loop is implemented in Rust, the FFI will have to be monomorphic. LibUV is a very successful high-performance event loop library, and it is written in C so it must also be monomorphic.
 
-* Have an event type (struct of pointers to functions/state/whatever)
-  * source state (e.g. sdl reference)
-  * poll function
-* Have a built-in function for creating event streams
-  * it will be found on the env
-  * in future it can change as the local context changes
-* Have an observe function for registering listeners
+I haven't considered how an event stream gets hooked into the core event loop. Should every event stream be immediately hooked in upon creation? This is okay as long as they are destroyed along with the `def` that introduced them.
+
