@@ -13,6 +13,7 @@ mod ffi;
 pub mod interop;
 pub mod types;
 pub mod debug;
+pub mod event_loop;
 pub mod hotload;
 mod graph;
 

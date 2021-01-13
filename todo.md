@@ -72,3 +72,49 @@ Alternatively, I could try to find the simplest path to some kind templating sys
 
 I haven't considered how an event stream gets hooked into the core event loop. Should every event stream be immediately hooked in upon creation? This is okay as long as they are destroyed along with the `def` that introduced them.
 
+## Implementing streams 2
+
+I can bind streams to state cells, but something has to push events through the stream.
+
+All events are pushed by other streams
+
+The root stream type is a timer
+
+Event streams are usually implemented as a filtered map or a fold. For example:
+
+  * a stream of packets would be a filtered map on a timer (although it holds state?)
+  * a state stream would be a fold
+
+What if a stream needs to hold state but not push it? arguably the packet stream is doing this, because the socket is modelled as state.
+
+This is perhaps the strength of observers. They can have any internal state, unrelated to the type of event that they push.
+
+So a stream type would be like:
+
+```rust
+struct Stream<Input, State, Output> {
+  state : State,
+  handle_event : fn (state : &mut State, event : Input) -> bool,
+}
+```
+
+If you want to push a bunch of events, you have to output a vec (or a slice). It's up to the receiver to flatten them. The stream only pushes to dependent streams if `handle_event` returns true.
+
+As a monomorphic struct, it looks like this:
+
+```rust
+struct Stream {
+  state : *mut (),
+  handle_event : fn (s : *mut (), event : *const ()) -> bool,
+}
+```
+
+This API should eventually handle failures. Possibly as follows:
+
+```rust
+struct Stream {
+  state : *mut (),
+  handle_event : fn (s : *mut (), event : *const ())
+    -> Result<bool, HandlerError>,
+}
+```
