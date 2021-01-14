@@ -1,102 +1,98 @@
+;; primitives
 
-(include env (ref "examples/lib/prelude.gen"))
-(include env (ref "examples/lib/sdl2.gen"))
+(debug 5) ;; 5
+(debug (typeof 5)) ;; u64
+(debug (typeof u32)) ;; type
 
-;; ------------ Create an SDL instance --------------
+;; pointers
 
-(def title "SDL Example")
+(debug (ptr u64)) ;; (ptr u64)
+(debug (typeof (ptr u64))) ;; type
 
-(def window (do
-  (sdl_init SDL_INIT_VIDEO)
-  (sdl_create_window
-    (. title data)
-    SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED
-    (800 u32) (600 u32)
-    SDL_WINDOW_SHOWN)
-))
-
-(def poll_input (fun ((source (ptr void)) (e (ptr sdl_event)) (t (ptr tick_event)))
-  (== (1 u32) (sdl_poll_event e))
-))
-
-(def input_stream
-  ;; the `source_stream` function defines a new root event source
-  (source_stream
-    poll_input                ;; the polling function
-    (cast 0 (ptr void))       ;; the event source (unused here because sdl doesn't need one)
-    (zero_init sdl_event)     ;; the initial event value (maybe it should be the type?)     
-    (timer_framerate 1000))   ;; the sample timer
+(do
+  (let p (cast (malloc 8) (ptr u64)))
+  (set (* p) 500)
+  (debug (* p)) ;; 500
+  (let local 1000)
+  (debug (* (ref local))) ;; 1000
 )
 
-;; ------------ Define the logic --------------
+;; structs
 
-(def game (struct
-  (ticker i32)
+(def pos2 (struct (x u64) (y u64)))
+(debug pos2) ;; type
+
+(do
+  (let v (init pos2 40 50))
+  (debug (. v x)) ;; 40
+  (debug (. v y)) ;; 50
+
+  ;; field assignment
+  (set (. v y) 300)
+  (debug (do 
+    (. v y) ;; 300
+  ))
+)
+
+;; strings
+
+(debug (typeof "hello")) ;; (struct (ptr u8) u64)
+
+;; arrays
+
+(do
+  (let a (array 1 2 3 4))
+  (debug (typeof a)) ;; (sized_array u64 4)
+  (debug (index a 0)) ;; 1
+  (debug (index a 3)) ;; 4
+  (let p (ref (index a 2)))
+  (set (* p) 300)
+  (debug (index a 2)) ;; 4
+)
+
+;; conditions
+
+(debug (if (> 3 5) 3 5)) ;; 5
+
+;; functions
+
+(def add (fun ((a u64) (b u64)) u64
+  (+ a b)
 ))
 
-(def new_game (fun ()
-  (init game 0)
-))
+(debug (typeof add)) ;; (fn (i64 i64) i64)
 
-(def game_update (fun ((e (ptr game_event)) (state (ptr game)) (do
-  ;; use the event to update the state
-  (set (. game ticker) (+ (. game ticker) 1))
-  (if (> (. game ticker) 100) (set (. game ticker) 0))
-)))
+(debug (add 6 7)) ;; 13
 
-(def render_game (fun ((state (ptr game)) (r sdl_renderer_handle)) (do
-  ;; render
-  (sdl_set_draw_color renderer (0 u8) (0 u8) (0 u8) (0 u8))
-  (sdl_clear renderer)
+;; labelled blocks (and loops)
 
-  (sdl_set_draw_color renderer (255 u8) (0 u8) (0 u8) (255 u8))
+(do
+  (let v 0)
+  (label loop (do
+    (if (> v 10) (do
+      (break loop)
+    ))
+    (set v (+ v 1))
+    (repeat loop)
+  ))
+  (debug v) ;; 11
+)
 
-  (let rect (init sdl_rect (+ 50 (. game ticker)) 50 300 200))
+;; quotes
 
-  (sdl_fill_rect renderer (ref rect))
-  (sdl_present renderer)
-)))
+(do
+  (let n (node_from_literal 300))
+  (debug (# (+ 500 ($ n))))
+)
 
-(def window_update (fun ((e (ptr sdl_event)) (window sdl_window_handle) (do
-  (if (== (. e event_type) SDL_QUIT)
-    (sdl_window_destroy window)
-  )
-)))
+;; include
 
-;; ------------ Define the event graph --------------
+(include env (ref "examples/lib/prelude.gen"))
 
-(def game_timer (timer_framerate 30))
+;; while loops
 
-(def game_event (struct
-  (input (ptr sdl_event))
-  (tick (ptr tick_event))
-))
-
-(def merge_game_event (fun ((input (ptr sdl_event)) (tick (ptr tick_event)))
-  ;; one of these pointers will be null
-  (init game_event input tick)
-))
-
-;; Game state is represented as a state stream
-(def game_state (do
-  ;; The game must respond to both input events and game ticks
-  (let update_stream (merge_stream input_stream game_timer merge_game_event))
-  (state_stream (new_game) game_update update_stream)
-))
-
-;; Renderer is represented as a state stream (it's an output buffer)
-(def render_stream (do
-  (let renderer
-    (sdl_create_renderer win u32_max SDL_RENDERER_ACCELERATED))
-  (let game_sample (sample_stream game_state game_timer)
-  (state_stream renderer render_game game_sample)
-))
-
-;; An SDL window has state, which includes things like
-;; the size, position, title, whether the window is shown
-;; or hidden, etc.
-;; It can also be used to close the window.
-;; This state is also represented as a state stream.
-(def window_state (do
-  (state_stream window window_update input_stream)
-))
+(debug (do
+  (let i 0)
+  (while (< i 10) (set i (+ i 1)))
+  i
+)) ;; 10

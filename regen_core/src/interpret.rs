@@ -248,7 +248,7 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
         }
         Instr::Debug(sym, l, t) => {
           let p = frame.local_addr(l);
-          println!("{}: {}", sym, debug::display(p as *const (), t));
+          println!("debug {}: {}", sym, debug::display(p as *const (), t));
         }
         Instr::Return(val) => {
           if let Some(val) = val {

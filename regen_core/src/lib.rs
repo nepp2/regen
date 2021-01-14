@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-mod perm_alloc;
+pub mod perm_alloc;
 pub mod symbols;
 mod sexp;
 mod parse;

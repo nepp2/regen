@@ -1,4 +1,3 @@
-
 # Immediate TODO
 
 * Integrate event streams

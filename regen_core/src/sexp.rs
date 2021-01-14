@@ -220,7 +220,7 @@ fn parse_list(ns : &mut Vec<Node>, ts : &mut TokenStream) {
             parse_list(ns, ts);
             // TODO handle error properly
             if peek(ts).1 != ")" {
-              panic!("syntax error: unbalanced list");
+              panic!("syntax error: expected `)`, found `{}`", t.1);
             }
             skip(ts);
           }

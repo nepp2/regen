@@ -96,6 +96,7 @@ fn node_content_eq(a : Node, b : Node) -> bool {
   match (a.content, b.content) {
     (Sym(a), Sym(b)) => a == b,
     (Literal(U64(a)), Literal(U64(b))) => a == b,
+    (Literal(String(a)), Literal(String(b))) => a.as_str() == b.as_str(),
     (List(a_children), List(b_children)) => {
       a_children.as_slice().iter()
         .zip(b_children.as_slice().iter())
@@ -156,6 +157,17 @@ fn load_def(
   Ok(())
 }
 
+fn is_external_dependency(hs : &HotloadState, env : Env, new_defs : &mut HashMap<Symbol, DefState>, name : Symbol) -> bool {
+  if !new_defs.contains_key(&name) {
+    if !hs.defs.contains_key(&name) {
+      if env.values.contains_key(&name) {
+        return true;
+      }
+    }
+  }
+  false
+}
+
 fn hotload_def(
   hs : &mut HotloadState,
   env : Env,
@@ -172,10 +184,10 @@ fn hotload_def(
       let mut changed = def.1.value_expr != value_expr;
       // check dependencies
       for n in hs.dependencies[&name].iter() {
-        match new_defs.get(n) {
-          Some(DefState::Unchanged) => (),
-          _ => {
-            changed = true
+        if !is_external_dependency(hs, env, new_defs, *n) {
+          if new_defs.get(n) != Some(&DefState::Unchanged) {
+            changed = true;
+            break;
           }
         }
       }
