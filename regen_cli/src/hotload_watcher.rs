@@ -1,8 +1,7 @@
 
 use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher, watcher};
-use std::{path::PathBuf, sync::mpsc::{Sender, Receiver, TryRecvError, channel}};
+use std::{path::PathBuf, sync::mpsc::{Receiver, TryRecvError, channel}};
 use std::time::Duration;
-use std::thread;
 
 use crate::bind_libs;
 

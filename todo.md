@@ -37,33 +37,34 @@
 I created a stream-based SDL example in `scratchpad.gen`.
 
 It requires some functions for creating event streams:
-  * `timer_framerate`
+  * `timer_stream`
     * args:
-      * framerate: `u64`
+      * millisecond_interval: `i64`
     * returns: `stream<tick_event>`
-  * `source_stream`
+  * `filter_stream`
     * args:
-      * poll_function: `fun(*void, *E, *tick_event) -> bool`
-      * source: `*void`
-      * initial_state: `E`
-      * sampler: `stream<tick_event>`
-    * returns: `stream<E>`
+      * input_stream: `stream<event>`
+      * initial_state: `state`
+      * poll_function: `fun(*state, *event) -> bool`
+    * returns: `stream<state>`
   * `merge_stream`
     * args:
       * a: `stream<A>`
       * b: `stream<B>`
+      * merge_a: `fun(*A) -> C`
+      * merge_b: `fun(*B) -> C`
     * returns: `stream<C>`
   * `state_stream`
     * args:
-      * initial_state: `S`
-      * update: `fun(*E, *S)`
-      * input: `stream<E>`
-    * returns: `stream<S>`
+      * input: `stream<event>`
+      * initial_state: `state`
+      * update: `fun(*state, *event)`
+    * returns: `stream<state>`
   * `sample_stream`
     * args
       * source: `stream<E>`
       * sampler: `stream<T>`
-    * returns: `stream<E>`
+    * returns: `stream<(E, T)>`
 
 The trouble with these functions is that most of them are polymorphic, and they even refer to polymorphic types. I could iron over this polymorphism by using either void pointers or some kind of limited type-erasure mechanism.
 
