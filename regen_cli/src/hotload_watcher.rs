@@ -7,11 +7,11 @@ use crate::bind_libs;
 
 use regen_core::{
   new_env,
-  env::Env,
+  env::{Env, get_event_loop},
   hotload,
   hotload::HotloadState,
   event_loop,
-  event_loop::{StreamGraph, TimerState},
+  event_loop::{EventLoop, TimerState},
   perm_alloc::perm,
   
 };
@@ -46,10 +46,10 @@ pub fn watch_file(path : impl AsRef<Path>) {
   watcher.watch(path.as_ref(), RecursiveMode::Recursive).unwrap();
   let watch_state = WatchState { rx, watcher };
 
+  let mut event_loop = get_event_loop(env);
 
-  let mut graph = perm(StreamGraph::new());
-  let timer = graph.create_timer(0, 10);
-  let file_changes = graph.create_stream(timer, watch_state, |ws, _ : &TimerState| {
+  let timer = event_loop.create_timer(0, 10);
+  let file_changes = event_loop.create_stream(timer, watch_state, |ws, _ : &TimerState| {
     match ws.rx.try_recv() {
       Ok(event) => {
         match event {
@@ -73,11 +73,11 @@ pub fn watch_file(path : impl AsRef<Path>) {
   hotload_file(env, &mut hs, path.as_ref());
   let cs = CompilerState { env, hs, path: path.as_ref().to_path_buf() };
 
-  graph.create_stream(file_changes, cs, |cs, _ : &WatchState| {
+  event_loop.create_stream(file_changes, cs, |cs, _ : &WatchState| {
     hotload_file(cs.env, &mut cs.hs, &cs.path);
     true
   });
   
-  event_loop::start_loop(graph);
+  event_loop::start_loop(event_loop);
 }
 

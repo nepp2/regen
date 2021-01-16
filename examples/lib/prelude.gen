@@ -2,3 +2,22 @@
 (def node_index (fun ((ns node_slice) (i u64)) node (do
   (ptr_index (. ns data) i)
 )))
+
+(def tick_stream (fun ((millisecond_interval i64))
+  (tick_stream_ffi event_loop millisecond_interval)
+))
+
+(def state_stream (fun (
+  (input_stream u64)
+  (state_type type)
+  (initial_state (ptr void))
+  (update_function (ptr void))
+)
+  (state_stream_ffi
+    event_loop
+    input_stream
+    state_type
+    initial_state
+    env
+    update_function)
+))

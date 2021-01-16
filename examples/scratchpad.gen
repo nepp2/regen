@@ -1,98 +1,48 @@
-;; primitives
-
-(debug 5) ;; 5
-(debug (typeof 5)) ;; u64
-(debug (typeof u32)) ;; type
-
-;; pointers
-
-(debug (ptr u64)) ;; (ptr u64)
-(debug (typeof (ptr u64))) ;; type
-
-(do
-  (let p (cast (malloc 8) (ptr u64)))
-  (set (* p) 500)
-  (debug (* p)) ;; 500
-  (let local 1000)
-  (debug (* (ref local))) ;; 1000
-)
-
-;; structs
-
-(def pos2 (struct (x u64) (y u64)))
-(debug pos2) ;; type
-
-(do
-  (let v (init pos2 40 50))
-  (debug (. v x)) ;; 40
-  (debug (. v y)) ;; 50
-
-  ;; field assignment
-  (set (. v y) 300)
-  (debug (do 
-    (. v y) ;; 300
-  ))
-)
-
-;; strings
-
-(debug (typeof "hello")) ;; (struct (ptr u8) u64)
-
-;; arrays
-
-(do
-  (let a (array 1 2 3 4))
-  (debug (typeof a)) ;; (sized_array u64 4)
-  (debug (index a 0)) ;; 1
-  (debug (index a 3)) ;; 4
-  (let p (ref (index a 2)))
-  (set (* p) 300)
-  (debug (index a 2)) ;; 4
-)
-
-;; conditions
-
-(debug (if (> 3 5) 3 5)) ;; 5
-
-;; functions
-
-(def add (fun ((a u64) (b u64)) u64
-  (+ a b)
-))
-
-(debug (typeof add)) ;; (fn (i64 i64) i64)
-
-(debug (add 6 7)) ;; 13
-
-;; labelled blocks (and loops)
-
-(do
-  (let v 0)
-  (label loop (do
-    (if (> v 10) (do
-      (break loop)
-    ))
-    (set v (+ v 1))
-    (repeat loop)
-  ))
-  (debug v) ;; 11
-)
-
-;; quotes
-
-(do
-  (let n (node_from_literal 300))
-  (debug (# (+ 500 ($ n))))
-)
-
-;; include
 
 (include env (ref "examples/lib/prelude.gen"))
+(include env (ref "examples/lib/sdl2.gen"))
 
-;; while loops
+(def title "SDL Example")
 
-(debug (do
-  (let i 0)
-  (while (< i 10) (set i (+ i 1)))
-  i
-)) ;; 10
+(sdl_init SDL_INIT_VIDEO)
+
+(def win
+  (sdl_create_window
+    (. title data)
+    SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED
+    (800 u32) (600 u32)
+    SDL_WINDOW_SHOWN))
+
+(def renderer
+  (sdl_create_renderer win u32_max SDL_RENDERER_ACCELERATED))
+
+(def update (fun ((state (ptr void)) (event (ptr void))) (do
+  ;; handle events
+  (let e (zero_init sdl_event))
+  (if (== (1 u32) (sdl_poll_event (ref e))) (do
+    (if (== (. e event_type) SDL_QUIT)
+      (sdl_destroy_window win)
+    )
+  ))
+
+  ;; render
+  (sdl_set_draw_color renderer (0 u8) (0 u8) (0 u8) (0 u8))
+  (sdl_clear renderer)
+
+  (sdl_set_draw_color renderer (255 u8) (0 u8) (0 u8) (255 u8))
+
+  (let rect (init sdl_rect 50 50 300 200))
+
+  (sdl_fill_rect renderer (ref rect))
+  (sdl_present renderer)
+)))
+
+(def frame_timer (tick_stream 10))
+
+(def game_stream
+  (state_stream
+    frame_timer
+    i64
+    (cast (ref 0) (ptr void))
+    (cast update (ptr void)))
+)

@@ -26,10 +26,12 @@ impl <T> Perm<T> {
   }
 
   pub fn from_ptr(p : *mut T) -> Self {
+    let TODO = (); // mark as unsafe
     Perm { p }
   }
 
   pub fn from_u64(v : u64) -> Self {
+    let TODO = (); // mark as unsafe
     Perm { p: v as *mut T }
   }
 }

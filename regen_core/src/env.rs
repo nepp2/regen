@@ -1,6 +1,6 @@
 /// Defines the environment (the global hashmap that defs are added to)
 
-use crate::symbols::{Symbol, SymbolTable, to_symbol};
+use crate::{event_loop, event_loop::EventLoop, symbols::{Symbol, SymbolTable, to_symbol}};
 use crate::types;
 use types::{ TypeHandle, CoreTypes, core_types, c_function_type };
 use crate::sexp;
@@ -130,19 +130,27 @@ pub fn define_global(e : Env, s : &str, v : u64, t : TypeHandle) {
   }
 }
 
-pub fn get_global_value<T : Copy>(e : Env, sym : Symbol, t : TypeHandle) -> Option<T> {
+pub fn get_global<T : Copy>(e : Env, sym : Symbol, t : TypeHandle) -> Option<Perm<T>> {
   if let Some(entry) = e.values.get(&sym) {
     if entry.tag == t {
-      unsafe {
-        return Some(*(entry.ptr as *mut T))
-      }
+      return Some(Perm::from_ptr(entry.ptr as *mut T));
     }
   }
   None
 }
 
+pub fn get_global_value<T : Copy>(e : Env, sym : Symbol, t : TypeHandle) -> Option<T> {
+  get_global::<T>(e, sym, t).map(|v| *v)
+}
+
 pub fn get_global_type(e : Env, sym : Symbol) -> Option<TypeHandle> {
   e.values.get(&sym).map(|entry| entry.tag)
+}
+
+pub fn get_event_loop(e : Env) -> Perm<EventLoop> {
+  let sym = to_symbol(e.st, "event_loop");
+  let entry = e.values.get(&sym).unwrap();
+  unsafe { *(entry.ptr as *mut Perm<EventLoop>) }
 }
 
 pub fn new_env(st : SymbolTable) -> Env {
@@ -151,6 +159,7 @@ pub fn new_env(st : SymbolTable) -> Env {
     st,
     c: core_types(st),
   });
+  let event_loop = perm(EventLoop::new());
   let e = env;
   let c = &e.c;
   for (n, t) in &c.core_types {
@@ -186,6 +195,14 @@ pub fn new_env(st : SymbolTable) -> Env {
 
   define_global(e, "env_get_global_ptr", env_get_global_ptr as u64,
     c_function_type(&[u64, u64], void_ptr));
+
+  define_global(e, "event_loop", Perm::to_u64(event_loop), u64);
+
+  define_global(e, "tick_stream_ffi", event_loop::ffi::tick_stream as u64,
+    c_function_type(&[u64, u64], u64));
+
+  define_global(e, "state_stream_ffi", event_loop::ffi::state_stream as u64,
+    c_function_type(&[u64, u64, type_tag, void_ptr, u64, void_ptr], u64));
 
   define_global(e, "symbol_display", symbol_display as u64,
     c_function_type(&[u64], void));

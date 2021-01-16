@@ -6,14 +6,15 @@ use perm_alloc::{Perm, perm};
 
 use time::{Duration, Instant};
 
-use crate::perm_alloc;
+use crate::{compile::Function, env::Env, interpret, perm_alloc};
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct StreamId(u64);
 
 
 #[derive(Clone)]
-pub struct StreamGraph {
+pub struct EventLoop {
+  start_time : Instant,
   id_counter : u64,
   observers : HashMap<StreamId, Vec<Perm<Stream>>>,
   timers : Vec<Perm<Stream>>,
@@ -29,7 +30,64 @@ pub struct TimerState {
 pub struct Stream {
   pub id : StreamId,
   pub state : *mut (),
-  pub handle_event : unsafe fn (state : *mut (), event : *const ()) -> bool,
+  pub handle_event : Handler,
+}
+
+#[derive(Clone, Copy)]
+pub enum HandlerType { Regen(Env), Native }
+
+#[derive(Clone, Copy)]
+pub struct Handler {
+  handler_type : HandlerType,
+  handler_ptr : *const (),
+  is_polling_handler : bool,
+}
+
+impl Handler {
+  fn regen(env : Env, handler : *const Function, is_polling_handler : bool) -> Self {
+    Handler {
+      handler_type: HandlerType::Regen(env),
+      handler_ptr: handler as *const (),
+      is_polling_handler,
+    }
+  }
+
+  fn native(handler_ptr : *const (), is_polling_handler : bool) -> Self {
+    Handler {
+      handler_type: HandlerType::Native,
+      handler_ptr,
+      is_polling_handler,
+    }
+  }
+
+  fn handle(&self, state : *mut (), event : *const ()) -> bool {
+    use HandlerType::*;
+    match self.handler_type {
+      Regen(env) => {
+        if self.is_polling_handler {
+          panic!();
+        }
+        interpret::interpret_function(
+          self.handler_ptr as *const Function,
+          &[state as u64, event as u64],
+          env);
+        true
+      }
+      Native => {
+        if self.is_polling_handler {
+          let handler : extern "C" fn(*mut (), *const ()) -> bool =
+            unsafe { std::mem::transmute(self.handler_ptr as *const ()) };
+          handler(state, event)
+        }
+        else {
+          let handler : extern "C" fn(*mut (), *const ()) =
+            unsafe { std::mem::transmute(self.handler_ptr as *const ()) };
+          handler(state, event);
+          true
+        }
+      }
+    }
+  }
 }
 
 #[derive(Clone, Copy)]
@@ -38,13 +96,20 @@ struct Observer {
   push_events : bool,
 }
 
-impl StreamGraph {
+impl EventLoop {
   pub fn new() -> Self {
-    StreamGraph {
+    EventLoop {
+      start_time: Instant::now(),
       id_counter: 0,
       observers: HashMap::new(),
       timers: vec![],
     }
+  }
+
+  fn next_id(&mut self) -> StreamId {
+    let id = StreamId(self.id_counter);
+    self.id_counter += 1;
+    id
   }
 
   fn create_orphan_stream<Event, State>(
@@ -52,12 +117,10 @@ impl StreamGraph {
     handler : fn(&mut State, &Event) -> bool,
   ) -> Perm<Stream>
   {
-    let id = StreamId(self.id_counter);
-    self.id_counter += 1;
     let stream = perm(Stream {
-      id,
+      id : self.next_id(),
       state: Perm::to_ptr(perm(state)) as *mut (),
-      handle_event: unsafe { std::mem::transmute(handler as *const ()) },
+      handle_event: Handler::native(handler as *const (), true),
     });
     stream
   }
@@ -90,29 +153,28 @@ fn current_millisecond(start : Instant) -> i64 {
   Instant::now().duration_since(start).as_millis() as i64
 }
 
-fn handle_stream_input(graph : Perm<StreamGraph>, stream : Perm<Stream>, event : *const ()) {
+fn handle_stream_input(event_loop : Perm<EventLoop>, stream : Perm<Stream>, event : *const ()) {
   let TODO = (); // doesn't solve the diamond/glitch problem yet
-  let handler = stream.handle_event;
-  let push_to_observers = unsafe { handler(stream.state, event) };
+  let push_to_observers = stream.handle_event.handle(stream.state, event);
   if push_to_observers {
-    if let Some(observers) = graph.observers.get(&stream.id) {
+    if let Some(observers) = event_loop.observers.get(&stream.id) {
       for &o in observers {
-        handle_stream_input(graph, o, stream.state);
+        handle_stream_input(event_loop, o, stream.state);
       }
     }
   }
 }
 
-pub fn start_loop(graph : Perm<StreamGraph>) {
-  let start = Instant::now();
+pub fn start_loop(event_loop : Perm<EventLoop>) {
+  let start = event_loop.start_time;
   loop {
-    if graph.timers.is_empty() {
+    if event_loop.timers.is_empty() {
       // there will never be another event
       return;
     }
     // figure out which timer will tick next
     let (stream, mut timer) =
-      graph.timers.iter().map(|&s| {
+      event_loop.timers.iter().map(|&s| {
         let t : Perm<TimerState> = Perm::from_ptr(s.state as *mut TimerState);
         (s, t)
       })
@@ -128,6 +190,47 @@ pub fn start_loop(graph : Perm<StreamGraph>) {
     // handle the timer event
     let now = current_millisecond(start);
     timer.next_tick_millisecond = now + timer.millisecond_interval;
-    handle_stream_input(graph, stream, (&now) as *const i64 as *const ());
+    handle_stream_input(event_loop, stream, (&now) as *const i64 as *const ());
+  }
+}
+
+// ----------- Define FFI to call from regen -------------
+
+pub mod ffi {
+  use super::*;
+  use crate::{compile::Function, types::TypeHandle};
+
+  pub extern "C" fn tick_stream(
+    mut el : Perm<EventLoop>,
+    millisecond_interval : i64,
+  ) -> Perm<Stream>
+  {
+    let now = current_millisecond(el.start_time);
+    el.create_timer(now, millisecond_interval)
+  }
+
+  pub extern "C" fn state_stream(
+    mut el : Perm<EventLoop>,
+    input_stream : Perm<Stream>,
+    state_type : TypeHandle,
+    initial_state : *const (),
+    env : Env,
+    update_function : *const Function,
+  ) -> Perm<Stream>
+  {
+    use std::alloc::{alloc, Layout};
+    let layout = Layout::from_size_align(state_type.size_of as usize, 8).unwrap();
+    let state = unsafe {
+      let ptr = alloc(layout) as *mut ();
+      std::ptr::copy_nonoverlapping(initial_state, ptr, state_type.size_of as usize);
+      ptr as *mut ()
+    };
+    let stream = perm(Stream {
+      id: el.next_id(),
+      state,
+      handle_event: Handler::regen(env, update_function, false),
+    });
+    el.observers.entry(input_stream.id).or_insert(vec![]).push(stream);
+    stream
   }
 }
