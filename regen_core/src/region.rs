@@ -2,21 +2,28 @@ use crate::perm_alloc::{Perm, perm};
 
 
 #[derive(Clone, Copy)]
-struct Resource {
-  resource : *mut (),
-  destructor : fn(*mut ()),
+#[repr(C)]
+pub struct Resource {
+  pub resource : *mut (),
+  pub destructor : fn(*mut ()),
 }
 
-struct Region {
+#[derive(Clone)]
+pub struct Region {
   resources : Vec<Resource>,
 }
 
-fn create_region() -> Perm<Region> {
+pub fn region_alloc(r : Perm<Region>, bytes : u64) -> *mut () {
+  let layout = std::alloc::Layout::from_size_align(bytes as usize, 8).unwrap();
+  unsafe { std::alloc::alloc(layout) as *mut () }
+}
+
+pub fn create_region() -> Perm<Region> {
   let r = Region { resources: vec![] };
   perm(r)
 }
 
-fn free_region(region : Region) {
+pub fn free_region(region : Region) {
   for r in region.resources {
     (r.destructor)(r.resource)
   }

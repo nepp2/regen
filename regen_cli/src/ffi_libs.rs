@@ -2,7 +2,7 @@
 use regen_core::{
   env::{Env, define_global},
   symbols::{Symbol, to_symbol},
-  interop::RegenString,
+  ffi_libs::RegenString,
   types,
   types::c_function_type,
   interpret,
@@ -25,7 +25,7 @@ pub extern "C" fn include(env : Env, file_name : &RegenString) {
     let code =
       fs::read_to_string(&path)
       .expect("Something went wrong reading the file");
-    interpret::interpret_file(&code, env);
+    interpret::interpret_file(file_name, &code, env);
     let u64 = env.c.u64_tag;
     define_global(env, path_symbol.as_str(), path_symbol.as_u64(), u64);
   }
@@ -58,9 +58,10 @@ pub extern "C" fn load_library_symbol(lib : &Library, symbol : Symbol) -> *const
 pub fn bind_libs(env : Env) {
   let u64 = env.c.u64_tag;
   let void = env.c.void_tag;
+  let void_ptr = types::pointer_type(void);;
   let string_ptr = types::pointer_type(env.c.string_tag);
   define_global(env, "include", include as u64,
-    c_function_type(&[u64, string_ptr], void));
+    c_function_type(&[void_ptr, string_ptr], void));
   define_global(env, "load_library", load_library as u64,
     c_function_type(&[u64], u64));
   define_global(env, "load_library_symbol", load_library_symbol as u64,

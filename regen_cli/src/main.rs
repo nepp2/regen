@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 mod watcher;
-mod bind_libs;
+mod ffi_libs;
 mod hotload_watcher;
 
 #[cfg(test)]
@@ -9,15 +9,14 @@ mod test;
 
 use regen_core::{interpret::interpret_file, new_env};
 use std::fs;
-use std::path::Path;
 
-pub fn run_file(path : impl AsRef<Path>) {
+pub fn run_file(path : &str) {
   let code =
     fs::read_to_string(path)
     .expect("Something went wrong reading the file");
   let env = new_env();
-  bind_libs::bind_libs(env);
-  interpret_file(&code, env);
+  ffi_libs::bind_libs(env);
+  interpret_file(path, &code, env);
 }
 
 fn main(){

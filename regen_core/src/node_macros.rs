@@ -49,7 +49,7 @@ impl NodeBuilder {
   }
 
   fn sexp(&self, s : &str) -> Node {
-    sexp::sexp_list(self.st, s).children()[0]
+    sexp::sexp_list(self.st, &self.loc.module.name, s).children()[0]
   }
 
   fn sym(&self, s : &str) -> Node {

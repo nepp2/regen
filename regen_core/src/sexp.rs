@@ -2,17 +2,17 @@
 
 use std::str::CharIndices;
 
-use crate::{symbols, perm_alloc, interop };
+use crate::{symbols, perm_alloc, ffi_libs };
 use symbols::{Symbol, SymbolTable, to_symbol};
 use perm_alloc::{perm, perm_slice, Perm, PermSlice};
-use interop::RegenString;
+use ffi_libs::RegenString;
 
 struct TokenStream<'l>{
   code : &'l str,
   st : SymbolTable,
   next_start : usize,
   next_len : usize,
-  perm_code : Perm<String>,
+  module : Perm<CodeModule>,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -21,6 +21,35 @@ use TokenType::*;
 
 #[derive(Copy, Clone)]
 struct Token<'l>(TokenType, &'l str);
+
+pub type Node = Perm<NodeInfo>;
+
+#[derive(Clone, Copy)]
+pub enum NodeContent {
+  List(PermSlice<Node>),
+  Sym(Symbol),
+  Literal(NodeLiteral),
+}
+use NodeContent::*;
+
+#[derive(Clone, Copy)]
+pub enum NodeLiteral {
+  U64(u64),
+  String(Perm<RegenString>),
+}
+
+#[derive(Clone)]
+pub struct CodeModule {
+  pub name : String,
+  pub code : String,
+}
+
+#[derive(Clone, Copy)]
+pub struct SrcLocation {
+  pub start : usize,
+  pub end : usize,  
+  pub module : Perm<CodeModule>,
+}
 
 fn trim_token(s : &str) -> Token {
   fn is_symbol_char(c : char) -> bool {
@@ -103,34 +132,10 @@ fn skip<'l>(ts : &mut TokenStream<'l>) {
   ts.next_len = 0;
 }
 
-pub type Node = Perm<NodeInfo>;
-
-#[derive(Clone, Copy)]
-pub enum NodeContent {
-  List(PermSlice<Node>),
-  Sym(Symbol),
-  Literal(NodeLiteral),
-}
-
-#[derive(Clone, Copy)]
-pub enum NodeLiteral {
-  U64(u64),
-  String(Perm<RegenString>),
-}
-
-use NodeContent::*;
-
-#[derive(Clone, Copy, Debug)]
-pub struct SrcLocation {
-  pub start : usize,
-  pub end : usize,  
-  pub code : Perm<String>,
-}
-
 impl SrcLocation {
   pub fn zero() -> Self {
     SrcLocation {
-      start: 0, end: 0, code: Perm { p : std::ptr::null_mut() },
+      start: 0, end: 0, module: Perm { p : std::ptr::null_mut() },
     }
   }
 }
@@ -194,8 +199,8 @@ fn parse_string(ts : &mut TokenStream) -> NodeContent {
     if t.0 == Normal && t.1 == "\"" { break }
     end = ts.next_start;
   }
-  let s = ts.perm_code[start..end].to_string();
-  let str_ptr = perm(interop::from_string(s));
+  let s = ts.code[start..end].to_string();
+  let str_ptr = perm(ffi_libs::from_string(s));
   NodeContent::Literal(NodeLiteral::String(str_ptr))
 }
 
@@ -228,14 +233,14 @@ fn parse_list(ns : &mut Vec<Node>, ts : &mut TokenStream) {
             let start = ts.next_start;
             skip(ts);
             let content = parse_string(ts);
-            let loc = SrcLocation { start, end: ts.next_start, code: ts.perm_code };
+            let loc = SrcLocation { start, end: ts.next_start, module: ts.module };
             ns.push(perm(NodeInfo{ loc, content }));
           }
           _ => {
             let loc = SrcLocation {
               start: ts.next_start,
               end: ts.next_start + ts.next_len,
-              code: ts.perm_code,
+              module: ts.module,
             };
             let content = parse_atom(ts.st, &ts.code[loc.start..loc.end]);
             let atom = NodeInfo { loc, content };
@@ -248,7 +253,7 @@ fn parse_list(ns : &mut Vec<Node>, ts : &mut TokenStream) {
   }
   let children = perm_slice(&ns[node_index..]);
   ns.truncate(node_index);
-  let loc = SrcLocation { start, end: ts.next_start, code: ts.perm_code };
+  let loc = SrcLocation { start, end: ts.next_start, module: ts.module };
   ns.push(perm(NodeInfo{ loc, content: NodeContent::List(children) }));
 }
 
@@ -279,10 +284,13 @@ pub fn code_segment(code : &str, n : Node) -> &str {
   &code[n.loc.start..n.loc.end]
 }
 
-pub fn sexp_list(st : SymbolTable, code : &str) -> Node {
+pub fn sexp_list(st : SymbolTable, module_name : &str, code : &str) -> Node {
   let mut ns = vec!();
-  let perm_code = perm(code.to_string());
-  let mut ts = TokenStream { code, st, next_start: 0, next_len: 0, perm_code };
+  let module = perm(CodeModule {
+    name: module_name.to_string(),
+    code: code.to_string(),
+  });
+  let mut ts = TokenStream { code, st, next_start: 0, next_len: 0, module };
   parse_list(&mut ns, &mut ts);
   loop {
     let t = peek(&mut ts);
@@ -307,13 +315,14 @@ impl fmt::Display for SrcLocation {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let mut line_start = 0;
     let mut line_number = 1;
-    for (i, c) in self.code.as_str()[0..self.start].char_indices() {
+    for (i, c) in self.module.code.as_str()[0..self.start].char_indices() {
       if c == '\n' {
         line_start = i;
         line_number += 1;
       }
     }
-    write!(f, "line {}, {} to {}",
+    write!(f, "'{}', line {}, {} to {}",
+      self.module.name,
       line_number,
       self.start - line_start,
       self.end - line_start)

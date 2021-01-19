@@ -3,7 +3,7 @@
 /// Receives a sexp node tree and compiles/interprets the top level
 /// nodes one at a time.
 
-use crate::{sexp, parse, bytecode, env, ffi, compile, types, debug, perm_alloc};
+use crate::{sexp, parse, bytecode, env, ffi_ccall, compile, types, debug, perm_alloc};
 
 use env::Env;
 use sexp::Node;
@@ -59,8 +59,8 @@ pub fn interpret_node(n : Node, env : Env) -> u64 {
   interpret_expr(e, env)
 }
 
-pub fn interpret_file(code : &str, env : Env) {
-  let n = sexp::sexp_list(env.st, &code);
+pub fn interpret_file(module_name : &str, code : &str, env : Env) {
+  let n = sexp::sexp_list(env.st, module_name, code);
   for &c in n.children() {
     interpret_node(c, env);
   }
@@ -199,7 +199,7 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
                 let data = frame.sbp.advance_bytes(fun.bc.frame_bytes).u64_offset(0);
                 std::slice::from_raw_parts(data, args.len)
               };
-              let val = unsafe { ffi::call_c_function(fptr, args) };
+              let val = unsafe { ffi_ccall::call_c_function(fptr, args) };
               // TODO: the line below is incorrect for void types, and probably also
               // for any types that isn't exactly 64 bits wide. The arguments passed are
               // also suspect; args smaller than 64 bits may be passed incorrectly.

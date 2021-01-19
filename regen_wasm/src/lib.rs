@@ -10,6 +10,6 @@ use regen_core::interpret::interpret_file;
 #[wasm_bindgen]
 pub fn interpret(code : String) -> String {
   let env = regen_core::new_env();
-  interpret_file(&code, env);
+  interpret_file("wasm_test_module", &code, env);
   format!("Regen launched")
 }

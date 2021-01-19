@@ -1,9 +1,9 @@
 
 use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher, watcher};
-use std::{path::PathBuf, sync::mpsc::{Receiver, TryRecvError, channel}};
+use std::{sync::mpsc::{Receiver, TryRecvError, channel}};
 use std::time::Duration;
 
-use crate::bind_libs;
+use crate::ffi_libs;
 
 use regen_core::{
   new_env,
@@ -11,19 +11,17 @@ use regen_core::{
   hotload,
   hotload::HotloadState,
   event_loop,
-  event_loop::{EventLoop, TimerState},
-  perm_alloc::perm,
+  event_loop::{TimerState},
   
 };
 use std::fs;
-use std::path::Path;
 
-fn hotload_file(env : Env, hs : &mut HotloadState, path : impl AsRef<Path>) {
-  println!("Hotloading file '{}'", path.as_ref().display());
+fn hotload_file(env : Env, hs : &mut HotloadState, path : &str) {
+  println!("Hotloading file '{}'", path);
   let code =
     fs::read_to_string(path)
     .expect("Something went wrong reading the file");
-  hotload::hotload_changes(&code, env, hs);
+  hotload::hotload_changes(path, &code, env, hs);
 }
 
 struct WatchState {
@@ -34,16 +32,16 @@ struct WatchState {
 struct CompilerState {
   env : Env,
   hs : HotloadState,
-  path : PathBuf,
+  path : String,
 }
 
-pub fn watch_file(path : impl AsRef<Path>) {
+pub fn watch_file(path : &str) {
   let env = new_env();
-  bind_libs::bind_libs(env);
+  ffi_libs::bind_libs(env);
 
   let (tx, rx) = channel();
   let mut watcher = watcher(tx, Duration::from_millis(500)).unwrap();
-  watcher.watch(path.as_ref(), RecursiveMode::Recursive).unwrap();
+  watcher.watch(path, RecursiveMode::Recursive).unwrap();
   let watch_state = WatchState { rx, watcher };
 
   let mut event_loop = get_event_loop(env);
@@ -70,8 +68,8 @@ pub fn watch_file(path : impl AsRef<Path>) {
   });
 
   let mut hs = HotloadState::new();
-  hotload_file(env, &mut hs, path.as_ref());
-  let cs = CompilerState { env, hs, path: path.as_ref().to_path_buf() };
+  hotload_file(env, &mut hs, path);
+  let cs = CompilerState { env, hs, path: path.to_string() };
 
   event_loop.create_stream(file_changes, cs, |cs, _ : &WatchState| {
     hotload_file(cs.env, &mut cs.hs, &cs.path);

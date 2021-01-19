@@ -216,11 +216,11 @@ fn hotload_def(
   new_defs.insert(name, new_def_state);
 }
 
-pub fn hotload_changes(code : &str, env : Env, hs : &mut HotloadState) {
+pub fn hotload_changes(module_name : &str, code : &str, env : Env, hs : &mut HotloadState) {
   // Parse file
   let n = {
     let r = std::panic::catch_unwind(|| {
-      sexp::sexp_list(env.st, &code)
+      sexp::sexp_list(env.st, module_name, &code)
     });
     if let Ok(n) = r { n } else { return }
   };

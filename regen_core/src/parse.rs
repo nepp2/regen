@@ -1,5 +1,5 @@
 
-use crate::{sexp, symbols, node_macros, perm_alloc, interop, bytecode};
+use crate::{sexp, symbols, node_macros, perm_alloc, ffi_libs, bytecode};
 use sexp::{
   Node,
   NodeLiteral,
@@ -9,7 +9,7 @@ use sexp::{
 use node_macros::{NodeBuilder, def_macro, template_macro};
 use symbols::{Symbol, SymbolTable};
 use perm_alloc::{Perm, PermSlice, perm, perm_slice_from_vec};
-use interop::RegenString;
+use ffi_libs::RegenString;
 use bytecode::Operator;
 
 use std::collections::HashSet;
