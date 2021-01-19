@@ -1,5 +1,7 @@
 # Immediate TODO
 
+* Free resources when a cell is unloaded
+
 * Integrate event streams
 
 * Fix the code/value dependency issue
@@ -15,8 +17,6 @@
 * Compiler panics in response to syntax/type errors
   * Currently I catch panics
   * I should use proper error handling for a better and more reliable experience
-
-* Replace event polling loops with event streams
 
 * Free memory of old/deleted nodes
   * Note that SrcLocation structs reference the full source for a file
@@ -118,3 +118,18 @@ struct Stream {
     -> Result<bool, HandlerError>,
 }
 ```
+
+# Unloading defs
+
+Concerns:
+  * Unregistering event streams
+  * Reclaiming memory
+  * Closing files and shit
+
+This is all just standard destructor stuff. I want to avoid RAII-style destructors, and instead manage resources using regions.
+
+Memory is allocated from a region, and resources that need reclaiming are registered with the region.
+
+The simplest thing is to allow resources to register themselves with a region, instead of being bound to a single object/value. This should work as long as short-lived regions can be easily and cheaply created.
+
+

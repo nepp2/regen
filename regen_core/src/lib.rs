@@ -15,7 +15,10 @@ pub mod types;
 pub mod debug;
 pub mod event_loop;
 pub mod hotload;
-mod graph;
+mod region;
+
+// TODO: is this needed?
+// mod graph;
 
 pub fn new_env() -> env::Env {
   env::new_env(symbols::symbol_table())
