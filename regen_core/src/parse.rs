@@ -8,13 +8,13 @@ use sexp::{
 };
 use node_macros::{NodeBuilder, template_macro};
 use symbols::{Symbol, SymbolTable};
-use perm_alloc::{Perm, PermSlice, perm, perm_slice_from_vec};
+use perm_alloc::{Ptr, SlicePtr, perm, perm_slice_from_vec};
 use ffi_libs::RegenString;
 use bytecode::Operator;
 
 use std::collections::HashSet;
 
-pub type Expr = Perm<ExprData>;
+pub type Expr = Ptr<ExprData>;
 
 #[derive(Copy, Clone)]
 pub struct ExprData {
@@ -28,19 +28,19 @@ pub enum ExprContent {
   DefMarker { name: Node, initialiser : Expr },
   LocalRef(Symbol),
   GlobalRef(Symbol),
-  StructInit(Expr, PermSlice<Expr>),
+  StructInit(Expr, SlicePtr<Expr>),
   ZeroInit(Expr),
-  ArrayInit(PermSlice<Expr>),
+  ArrayInit(SlicePtr<Expr>),
   ArrayIndex { array : Expr, index : Expr },
   ArrayAsSlice(Expr),
   PtrIndex { ptr : Expr, index : Expr },
   FieldIndex { structure : Expr, field_name : Node },
   LiteralU64(u64),
-  LiteralString(Perm<RegenString>),
+  LiteralString(Ptr<RegenString>),
   LiteralBool(bool),
   LiteralVoid,
-  Call(Expr, PermSlice<Expr>),
-  InstrinicOp(Operator, PermSlice<Expr>),
+  Call(Expr, SlicePtr<Expr>),
+  InstrinicOp(Operator, SlicePtr<Expr>),
   Cast{ value : Expr, to_type : Expr },
   IfElse { cond : Expr, then_expr : Expr, else_expr : Option<Expr>},
   Debug(Expr),
@@ -52,24 +52,24 @@ pub enum ExprContent {
   Break(Option<Symbol>),
   Repeat(Option<Symbol>),
   LabelledBlock(Symbol, Expr),
-  Do(PermSlice<Expr>),
+  Do(SlicePtr<Expr>),
   Quote(Node),
   Fun {
-    args : PermSlice<(Symbol, Expr)>,
+    args : SlicePtr<(Symbol, Expr)>,
     ret : Option<Expr>,
     body: Expr,
   },
   ArrayLen(Expr),
   TypeOf(Expr),
   FnType {
-    args : PermSlice<Arg>,
+    args : SlicePtr<Arg>,
     ret : Expr,
   },
   CFunType {
-    args : PermSlice<Arg>,
+    args : SlicePtr<Arg>,
     ret : Expr,
   },
-  StructType(PermSlice<Arg>),
+  StructType(SlicePtr<Arg>),
   PtrType(Expr),
   SizedArrayType{ element_type: Expr, length: Expr },
 }
@@ -361,7 +361,7 @@ fn to_expr_content(ts : &mut TagState, n : Node) -> ExprContent {
   }
 }
 
-fn to_args_body(ts : &mut TagState, args : &[Node], body : Node) -> (PermSlice<(Symbol, Expr)>, Expr) {
+fn to_args_body(ts : &mut TagState, args : &[Node], body : Node) -> (SlicePtr<(Symbol, Expr)>, Expr) {
   let mut v = Vec::with_capacity(args.len());
   for &a in args {
     if let [name, type_tag] = a.children() {
@@ -380,7 +380,7 @@ fn to_args_body(ts : &mut TagState, args : &[Node], body : Node) -> (PermSlice<(
   (args, body)
 }
 
-fn to_type_args_list(ts : &mut TagState, args : &[Node]) -> PermSlice<Arg> {
+fn to_type_args_list(ts : &mut TagState, args : &[Node]) -> SlicePtr<Arg> {
   let mut v = Vec::with_capacity(args.len());
   for a in args {
     let arg = {
@@ -400,7 +400,7 @@ fn to_type_args_list(ts : &mut TagState, args : &[Node]) -> PermSlice<Arg> {
   perm_slice_from_vec(v)
 }
 
-fn to_expr_list(ts : &mut TagState, ns : &[Node]) -> PermSlice<Expr> {
+fn to_expr_list(ts : &mut TagState, ns : &[Node]) -> SlicePtr<Expr> {
   let mut v = Vec::with_capacity(ns.len());
   for &n in ns {
     v.push(to_expr(ts, n));

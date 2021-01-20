@@ -11,7 +11,7 @@ use crate::{
 
 use env::{Env, define_global};
 use sexp::{Node, NodeInfo, NodeContent, NodeLiteral, SrcLocation};
-use perm_alloc::{PermSlice, perm_slice, perm_slice_from_vec, perm};
+use perm_alloc::{SlicePtr, perm_slice, perm_slice_from_vec, perm};
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -57,7 +57,7 @@ pub extern "C" fn symbol_display(sym : Symbol) {
   println!("symbol: {}", sym)
 }
 
-pub extern "C" fn node_children(out : &mut PermSlice<Node>, node : Node) {
+pub extern "C" fn node_children(out : &mut SlicePtr<Node>, node : Node) {
   let s = match node.content {
     NodeContent::List(l) => l,
     _ => perm_slice(&[]),
@@ -65,7 +65,7 @@ pub extern "C" fn node_children(out : &mut PermSlice<Node>, node : Node) {
   *out = s;
 }
 
-pub extern "C" fn node_from_list(list : &PermSlice<Node>) -> Node {
+pub extern "C" fn node_from_list(list : &SlicePtr<Node>) -> Node {
   let info = NodeInfo {
     loc: SrcLocation::zero(),
     content: NodeContent::List(perm_slice(list.as_slice())),
@@ -98,8 +98,8 @@ pub extern "C" fn node_display(node : Node) {
 }
 
 pub extern "C" fn calculate_packed_field_offsets(
-  field_types : &PermSlice<TypeHandle>,
-  field_offsets : &mut PermSlice<u64>,
+  field_types : &SlicePtr<TypeHandle>,
+  field_offsets : &mut SlicePtr<u64>,
 ) -> u64
 {
   let (offsets, size_of) = types::calculate_packed_field_offsets(field_types.as_slice());

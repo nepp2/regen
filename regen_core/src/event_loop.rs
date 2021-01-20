@@ -2,7 +2,7 @@
 use std::{hash::Hash, thread};
 use std::time;
 use std::collections::HashMap;
-use perm_alloc::{Perm, perm};
+use perm_alloc::{Ptr, perm};
 
 use time::{Duration, Instant};
 
@@ -16,8 +16,8 @@ pub struct StreamId(u64);
 pub struct EventLoop {
   start_time : Instant,
   id_counter : u64,
-  observers : HashMap<StreamId, Vec<Perm<Stream>>>,
-  timers : Vec<Perm<Stream>>,
+  observers : HashMap<StreamId, Vec<Ptr<Stream>>>,
+  timers : Vec<Ptr<Stream>>,
 }
 
 #[derive(Copy, Clone)]
@@ -92,7 +92,7 @@ impl Handler {
 
 #[derive(Clone, Copy)]
 struct Observer {
-  stream : Perm<Stream>,
+  stream : Ptr<Stream>,
   push_events : bool,
 }
 
@@ -115,27 +115,27 @@ impl EventLoop {
   fn create_orphan_stream<Event, State>(
     &mut self, state : State,
     handler : fn(&mut State, &Event) -> bool,
-  ) -> Perm<Stream>
+  ) -> Ptr<Stream>
   {
     let stream = perm(Stream {
       id : self.next_id(),
-      state: Perm::to_ptr(perm(state)) as *mut (),
+      state: Ptr::to_ptr(perm(state)) as *mut (),
       handle_event: Handler::native(handler as *const (), true),
     });
     stream
   }
 
   pub fn create_stream<Event, State>(
-    &mut self, parent : Perm<Stream>, state : State,
+    &mut self, parent : Ptr<Stream>, state : State,
     handler : fn(&mut State, &Event) -> bool,
-  ) -> Perm<Stream>
+  ) -> Ptr<Stream>
   {
     let s = self.create_orphan_stream(state, handler);
     self.observers.entry(parent.id).or_insert(vec![]).push(s);
     s
   }
   
-  pub fn create_timer(&mut self, current_millisecond : i64, millisecond_interval : i64) -> Perm<Stream> {
+  pub fn create_timer(&mut self, current_millisecond : i64, millisecond_interval : i64) -> Ptr<Stream> {
     let timer_state = TimerState {
       millisecond_interval,
       next_tick_millisecond: current_millisecond + millisecond_interval,
@@ -153,7 +153,7 @@ fn current_millisecond(start : Instant) -> i64 {
   Instant::now().duration_since(start).as_millis() as i64
 }
 
-fn handle_stream_input(event_loop : Perm<EventLoop>, stream : Perm<Stream>, event : *const ()) {
+fn handle_stream_input(event_loop : Ptr<EventLoop>, stream : Ptr<Stream>, event : *const ()) {
   let TODO = (); // doesn't solve the diamond/glitch problem yet
   let push_to_observers = stream.handle_event.handle(stream.state, event);
   if push_to_observers {
@@ -165,7 +165,7 @@ fn handle_stream_input(event_loop : Perm<EventLoop>, stream : Perm<Stream>, even
   }
 }
 
-pub fn start_loop(event_loop : Perm<EventLoop>) {
+pub fn start_loop(event_loop : Ptr<EventLoop>) {
   let start = event_loop.start_time;
   loop {
     if event_loop.timers.is_empty() {
@@ -175,7 +175,7 @@ pub fn start_loop(event_loop : Perm<EventLoop>) {
     // figure out which timer will tick next
     let (stream, mut timer) =
       event_loop.timers.iter().map(|&s| {
-        let t : Perm<TimerState> = Perm::from_ptr(s.state as *mut TimerState);
+        let t : Ptr<TimerState> = Ptr::from_ptr(s.state as *mut TimerState);
         (s, t)
       })
       .min_by_key(|x| x.1.next_tick_millisecond)
@@ -201,22 +201,22 @@ pub mod ffi {
   use crate::{compile::Function, types::TypeHandle};
 
   pub extern "C" fn tick_stream(
-    mut el : Perm<EventLoop>,
+    mut el : Ptr<EventLoop>,
     millisecond_interval : i64,
-  ) -> Perm<Stream>
+  ) -> Ptr<Stream>
   {
     let now = current_millisecond(el.start_time);
     el.create_timer(now, millisecond_interval)
   }
 
   pub extern "C" fn state_stream(
-    mut el : Perm<EventLoop>,
-    input_stream : Perm<Stream>,
+    mut el : Ptr<EventLoop>,
+    input_stream : Ptr<Stream>,
     state_type : TypeHandle,
     initial_state : *const (),
     env : Env,
     update_function : *const Function,
-  ) -> Perm<Stream>
+  ) -> Ptr<Stream>
   {
     use std::alloc::{alloc, Layout};
     let layout = Layout::from_size_align(state_type.size_of as usize, 8).unwrap();

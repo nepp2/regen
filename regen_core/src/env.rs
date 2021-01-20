@@ -8,7 +8,7 @@ use crate::{
 };
 use types::{ TypeHandle, CoreTypes, core_types };
 use crate::ffi_libs::*;
-use crate::perm_alloc::{Perm, perm};
+use crate::perm_alloc::{Ptr, perm};
 
 use std::collections::HashMap;
 
@@ -20,13 +20,13 @@ pub struct Environment {
   pub c : CoreTypes,
 }
 
-pub type Env = Perm<Environment>;
+pub type Env = Ptr<Environment>;
 
 #[derive(Copy, Clone)]
 pub struct EnvEntry {
   pub ptr : *mut (),
   pub tag : TypeHandle,
-  pub region : Perm<Region>,
+  pub region : Ptr<Region>,
 }
 
 pub fn unload_def(mut env : Env, name : Symbol) {
@@ -39,7 +39,7 @@ pub fn get_entry(env : &Env, name : Symbol) -> Option<&EnvEntry> {
   env.values.get(&name)
 }
 
-pub fn env_alloc_global(mut env : Env, name : Symbol, tag : TypeHandle) -> (*mut (), Perm<Region>) {
+pub fn env_alloc_global(mut env : Env, name : Symbol, tag : TypeHandle) -> (*mut (), Ptr<Region>) {
   let region = create_region();
   let ptr = region_alloc(region, tag.size_of);
   if env.values.contains_key(&name) {
@@ -61,7 +61,7 @@ fn region_symbol(env : Env) -> Symbol {
   to_symbol(env.st, "region")
 }
 
-pub fn set_active_region(mut env : Env, r : Perm<Region>) {
+pub fn set_active_region(mut env : Env, r : Ptr<Region>) {
   let sym = region_symbol(env);
   if !env.values.contains_key(&sym) {
     let void_ptr = types::pointer_type(env.c.void_tag);
@@ -69,22 +69,22 @@ pub fn set_active_region(mut env : Env, r : Perm<Region>) {
   }
   let entry = env.values.get_mut(&sym).unwrap();
   unsafe {
-    *(entry.ptr as *mut Perm<Region>) = r;
+    *(entry.ptr as *mut Ptr<Region>) = r;
   }
 }
 
-pub fn get_active_region(mut env : Env) -> Perm<Region> {
+pub fn get_active_region(mut env : Env) -> Ptr<Region> {
   let sym = region_symbol(env);
   let entry = env.values.get_mut(&sym).unwrap();
   unsafe {
-    *(entry.ptr as *mut Perm<Region>)
+    *(entry.ptr as *mut Ptr<Region>)
   }
 }
 
-pub fn get_global<T : Copy>(e : Env, sym : Symbol, t : TypeHandle) -> Option<Perm<T>> {
+pub fn get_global<T : Copy>(e : Env, sym : Symbol, t : TypeHandle) -> Option<Ptr<T>> {
   if let Some(entry) = e.values.get(&sym) {
     if entry.tag == t {
-      return Some(Perm::from_ptr(entry.ptr as *mut T));
+      return Some(Ptr::from_ptr(entry.ptr as *mut T));
     }
   }
   None
@@ -98,10 +98,10 @@ pub fn get_global_type(e : Env, sym : Symbol) -> Option<TypeHandle> {
   e.values.get(&sym).map(|entry| entry.tag)
 }
 
-pub fn get_event_loop(e : Env) -> Perm<EventLoop> {
+pub fn get_event_loop(e : Env) -> Ptr<EventLoop> {
   let sym = to_symbol(e.st, "event_loop");
   let entry = e.values.get(&sym).unwrap();
-  unsafe { *(entry.ptr as *mut Perm<EventLoop>) }
+  unsafe { *(entry.ptr as *mut Ptr<EventLoop>) }
 }
 
 pub fn new_env(st : SymbolTable) -> Env {
@@ -113,17 +113,17 @@ pub fn new_env(st : SymbolTable) -> Env {
   let event_loop = perm(EventLoop::new());
   let c = &env.c;
   for (n, t) in &c.core_types {
-    define_global(env, n, Perm::to_u64(*t), env.c.type_tag);
+    define_global(env, n, Ptr::to_u64(*t), env.c.type_tag);
   }
 
   let void = env.c.void_tag;
   let void_ptr = types::pointer_type(void);
 
-  define_global(env, "env", Perm::to_u64(env), void_ptr);
+  define_global(env, "env", Ptr::to_u64(env), void_ptr);
 
   define_global(env, "region", 0, void_ptr);
 
-  define_global(env, "event_loop", Perm::to_u64(event_loop), void_ptr);
+  define_global(env, "event_loop", Ptr::to_u64(event_loop), void_ptr);
   load_ffi_libs(env);
 
   env

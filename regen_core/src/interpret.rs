@@ -12,7 +12,7 @@ use bytecode::{
   Instr, InstrExpr, Operator, LocalHandle,
 };
 use compile::Function;
-use perm_alloc::PermSlice;
+use perm_alloc::SlicePtr;
 use types::{TypeHandle, Primitive};
 
 pub type CompileExpression = fn(env : &Env, fun : Node) -> Function;
@@ -330,7 +330,7 @@ impl StackPtr {
 
 impl Frame {
 
-  fn initialise_array(&self, l : LocalHandle, element_type : TypeHandle, element_vals : PermSlice<LocalHandle>) {
+  fn initialise_array(&self, l : LocalHandle, element_type : TypeHandle, element_vals : SlicePtr<LocalHandle>) {
     let addr = self.local_addr(l) as *mut u8;
     let byte_width = element_type.size_of;
     for i in 0..element_vals.len() {
@@ -343,7 +343,7 @@ impl Frame {
     }
   }
 
-  fn initialise_struct(&self, l : LocalHandle, field_offsets : PermSlice<u64>, field_vals : PermSlice<LocalHandle>) {
+  fn initialise_struct(&self, l : LocalHandle, field_offsets : SlicePtr<u64>, field_vals : SlicePtr<LocalHandle>) {
     let addr = self.local_addr(l) as *mut u8;
     for i in 0..field_vals.len() {
       let offset = field_offsets[i];
@@ -356,7 +356,7 @@ impl Frame {
     }
   }
 
-  fn push_args(&self, args : PermSlice<LocalHandle>) {
+  fn push_args(&self, args : SlicePtr<LocalHandle>) {
     let args_ptr =
         self.sbp.advance_bytes(self.fun().bc.frame_bytes);
     let mut byte_offset = 0;

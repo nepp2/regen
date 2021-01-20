@@ -4,11 +4,11 @@
 use crate::{symbols, perm_alloc, sexp};
 
 use symbols::{Symbol, SymbolTable, to_symbol};
-use perm_alloc::{Perm, PermSlice, perm, perm_slice, perm_slice_from_vec};
+use perm_alloc::{Ptr, SlicePtr, perm, perm_slice, perm_slice_from_vec};
 use sexp::Node;
 use std::fmt;
 
-pub type TypeHandle = Perm<TypeInfo>;
+pub type TypeHandle = Ptr<TypeInfo>;
 
 #[derive(Copy, Clone, PartialEq)]
 #[repr(u64)]
@@ -68,9 +68,9 @@ pub struct ArrayInfo {
 #[derive(Copy, Clone, PartialEq)]
 #[repr(C)]
 pub struct StructInfo {
-  pub field_names : PermSlice<Symbol>,
-  pub field_types : PermSlice<TypeHandle>,
-  pub field_offsets : PermSlice<u64>,
+  pub field_names : SlicePtr<Symbol>,
+  pub field_types : SlicePtr<TypeHandle>,
+  pub field_offsets : SlicePtr<u64>,
 }
 
 #[derive(Copy, Clone)]
@@ -89,7 +89,7 @@ pub struct NominalInfo {
 #[derive(Copy, Clone, PartialEq)]
 #[repr(C)]
 pub struct FunctionInfo {
-  pub args : PermSlice<TypeHandle>,
+  pub args : SlicePtr<TypeHandle>,
   pub returns : TypeHandle,
   pub c_function : bool,
 }
@@ -162,7 +162,7 @@ pub fn deref_pointer_type(t : TypeHandle) -> Option<TypeHandle> {
 
 pub fn type_as_macro(t : &TypeInfo) -> Option<TypeHandle> {
   if let Kind::Macro = t.kind {
-    return Some(Perm::from_ptr(t.info as *mut TypeInfo))
+    return Some(Ptr::from_ptr(t.info as *mut TypeInfo))
   }
   None
 }
@@ -194,7 +194,7 @@ pub fn calculate_packed_field_offsets(field_types : &[TypeHandle]) -> (Vec<u64>,
   (fields, size)
 }
 
-pub fn struct_type(field_names : PermSlice<Symbol>, field_types : PermSlice<TypeHandle>) -> TypeHandle {
+pub fn struct_type(field_names : SlicePtr<Symbol>, field_types : SlicePtr<TypeHandle>) -> TypeHandle {
   let (offsets, size) = calculate_packed_field_offsets(field_types.as_slice());
   let info =
     Box::into_raw(Box::new(
@@ -220,11 +220,11 @@ pub fn array_type(inner : TypeHandle, length : u64) -> TypeHandle {
 }
 
 pub fn pointer_type(inner : TypeHandle) -> TypeHandle {
-  new_type(Kind::Pointer, 8, Perm::to_u64(inner))
+  new_type(Kind::Pointer, 8, Ptr::to_u64(inner))
 }
 
 pub fn macro_type(inner : TypeHandle) -> TypeHandle {
-  new_type(Kind::Macro, 8, Perm::to_u64(inner))
+  new_type(Kind::Macro, 8, Ptr::to_u64(inner))
 }
 
 fn function_type_inner(args : &[TypeHandle], returns : TypeHandle, c_function : bool) -> TypeHandle {

@@ -4,7 +4,7 @@ use std::str::CharIndices;
 
 use crate::{symbols, perm_alloc, ffi_libs };
 use symbols::{Symbol, SymbolTable, to_symbol};
-use perm_alloc::{perm, perm_slice, Perm, PermSlice};
+use perm_alloc::{perm, perm_slice, Ptr, SlicePtr};
 use ffi_libs::RegenString;
 
 struct TokenStream<'l>{
@@ -12,7 +12,7 @@ struct TokenStream<'l>{
   st : SymbolTable,
   next_start : usize,
   next_len : usize,
-  module : Perm<CodeModule>,
+  module : Ptr<CodeModule>,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -22,11 +22,11 @@ use TokenType::*;
 #[derive(Copy, Clone)]
 struct Token<'l>(TokenType, &'l str);
 
-pub type Node = Perm<NodeInfo>;
+pub type Node = Ptr<NodeInfo>;
 
 #[derive(Clone, Copy)]
 pub enum NodeContent {
-  List(PermSlice<Node>),
+  List(SlicePtr<Node>),
   Sym(Symbol),
   Literal(NodeLiteral),
 }
@@ -35,7 +35,7 @@ use NodeContent::*;
 #[derive(Clone, Copy)]
 pub enum NodeLiteral {
   U64(u64),
-  String(Perm<RegenString>),
+  String(Ptr<RegenString>),
 }
 
 #[derive(Clone)]
@@ -48,7 +48,7 @@ pub struct CodeModule {
 pub struct SrcLocation {
   pub start : usize,
   pub end : usize,  
-  pub module : Perm<CodeModule>,
+  pub module : Ptr<CodeModule>,
 }
 
 fn trim_token(s : &str) -> Token {
@@ -135,7 +135,7 @@ fn skip<'l>(ts : &mut TokenStream<'l>) {
 impl SrcLocation {
   pub fn zero() -> Self {
     SrcLocation {
-      start: 0, end: 0, module: Perm { p : std::ptr::null_mut() },
+      start: 0, end: 0, module: Ptr { p : std::ptr::null_mut() },
     }
   }
 }
@@ -151,7 +151,7 @@ impl NodeInfo {
     self.perm_children().as_slice()
   }
 
-  pub fn perm_children(&self) -> PermSlice<Node> {
+  pub fn perm_children(&self) -> SlicePtr<Node> {
     match self.content {
       List(l) => l,
       _ => perm_slice(&[]),

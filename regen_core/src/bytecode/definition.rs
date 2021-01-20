@@ -4,7 +4,7 @@ use crate::{symbols, types, perm_alloc, sexp};
 use symbols::Symbol;
 use sexp::Node;
 use types::TypeHandle;
-use perm_alloc::{PermSlice, Perm};
+use perm_alloc::{SlicePtr, Ptr};
 
 /// Identifies a storage location that is local to a stack frame
 #[derive(Copy, Clone)]
@@ -17,9 +17,9 @@ pub struct LocalInfo {
 }
 
 /// Identifies a storage location that is local to a stack frame
-pub type LocalHandle = Perm<LocalInfo>;
+pub type LocalHandle = Ptr<LocalInfo>;
 
-pub type SequenceHandle = Perm<SequenceInfo>;
+pub type SequenceHandle = Ptr<SequenceInfo>;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Operator {
@@ -37,16 +37,16 @@ pub enum Operator {
 pub enum InstrExpr {
   Def(Symbol),
   LocalAddr(LocalHandle),
-  Init(PermSlice<LocalHandle>),
+  Init(SlicePtr<LocalHandle>),
   ZeroInit,
-  Array(PermSlice<LocalHandle>),
+  Array(SlicePtr<LocalHandle>),
   FieldIndex { struct_addr : LocalHandle, index : u64 },
   LiteralU64(u64),
   Literal(TypeHandle, *const ()),
   BinaryOp(Operator, LocalHandle, LocalHandle),
   UnaryOp(Operator, LocalHandle),
-  Invoke(LocalHandle, PermSlice<LocalHandle>),
-  InvokeC(LocalHandle, PermSlice<LocalHandle>),
+  Invoke(LocalHandle, SlicePtr<LocalHandle>),
+  InvokeC(LocalHandle, SlicePtr<LocalHandle>),
   Load(LocalHandle),
   PtrOffset { ptr: LocalHandle, offset: LocalHandle },
   Cast(LocalHandle),

@@ -12,7 +12,7 @@ use bytecode::{
 
 use types::{TypeHandle, CoreTypes, Kind};
 
-use perm_alloc::{Perm, perm_slice_from_vec, perm_slice, perm};
+use perm_alloc::{Ptr, perm_slice_from_vec, perm_slice, perm};
 
 use symbols::Symbol;
 use env::Env;
@@ -467,7 +467,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     // literal string
     ExprContent::LiteralString(s) => {
       let t = types::pointer_type(b.env.c.string_tag);
-      let e = InstrExpr::Literal(t, Perm::to_ptr(s) as *const ());
+      let e = InstrExpr::Literal(t, Ptr::to_ptr(s) as *const ());
       let v = push_expr(b, e, t);
       Some(pointer_to_locator(v, false))
     }
@@ -656,7 +656,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     ExprContent::TypeOf(v) => {
       // TODO: it's weird to codegen the expression when we only need its type
       let var = compile_expr_to_var(b, v);
-      let e = InstrExpr::LiteralU64(Perm::to_u64(var.t));
+      let e = InstrExpr::LiteralU64(Ptr::to_u64(var.t));
       return Some(push_expr(b, e, b.env.c.type_tag).to_ref());
     }
     // deref
@@ -714,7 +714,7 @@ fn compile_literal(b : &mut Builder, l : NodeLiteral) -> Ref {
     }
     NodeLiteral::String(s) => {
       let t = types::pointer_type(b.env.c.string_tag);
-      let e = InstrExpr::Literal(t, Perm::to_ptr(s) as *const ());
+      let e = InstrExpr::Literal(t, Ptr::to_ptr(s) as *const ());
       let v = push_expr(b, e, t);
       pointer_to_locator(v, false)
     }
@@ -746,7 +746,7 @@ fn eval_literal_u64(env : Env, e : Expr) -> u64 {
 
 fn compile_type_expr(b : &mut Builder, e : Expr) -> Var {
   let type_tag = expr_to_type(b, e);
-  let e = InstrExpr::LiteralU64(Perm::to_u64(type_tag));
+  let e = InstrExpr::LiteralU64(Ptr::to_u64(type_tag));
   push_expr(b, e, b.env.c.type_tag)
 }
 
@@ -943,7 +943,7 @@ fn compile_intrinic_op(b : &mut Builder, e : Expr, op : Operator, args : &[Expr]
 }
 
 fn compile_quote(b : &mut Builder, quoted : Node) -> Var {
-  let e = InstrExpr::LiteralU64(Perm::to_ptr(quoted) as u64);
+  let e = InstrExpr::LiteralU64(Ptr::to_ptr(quoted) as u64);
   let node_tag = b.env.c.node_tag;
   push_expr(b, e, node_tag)
 }
