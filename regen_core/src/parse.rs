@@ -6,7 +6,7 @@ use sexp::{
   NodeShape::*,
   NodeContent,
 };
-use node_macros::{NodeBuilder, def_macro, template_macro};
+use node_macros::{NodeBuilder, template_macro};
 use symbols::{Symbol, SymbolTable};
 use perm_alloc::{Perm, PermSlice, perm, perm_slice_from_vec};
 use ffi_libs::RegenString;
@@ -15,15 +15,6 @@ use bytecode::Operator;
 use std::collections::HashSet;
 
 pub type Expr = Perm<ExprData>;
-
-/// TODO: unused
-// #[derive(Copy, Clone)]
-// pub struct ExprType {
-//   t : TypeHandle,
-//   const_expr : bool,
-//   is_locator : bool,
-//   mutable : bool,
-// }
 
 #[derive(Copy, Clone)]
 pub struct ExprData {
@@ -232,12 +223,6 @@ fn to_expr_content(ts : &mut TagState, n : Node) -> ExprContent {
     // quotation
     Command("quote", [quoted]) => {
       Quote(*quoted)
-    }
-    // def
-    Command("def", [def_name, value]) => {
-      let nb = NodeBuilder { loc: n.loc, st: ts.st };
-      let def_node = def_macro(&nb, *def_name, *value);
-      DefMarker{ name: *def_name, initialiser: to_expr(ts, def_node) }
     }
     // fun
     Command("fun", [arg_nodes, body]) => {

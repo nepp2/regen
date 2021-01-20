@@ -3,10 +3,10 @@
 /// Receives a sexp node tree and compiles/interprets the top level
 /// nodes one at a time.
 
-use crate::{sexp, parse, bytecode, env, ffi_ccall, compile, types, debug, perm_alloc};
+use crate::{bytecode, compile, debug, env, ffi_ccall, parse, perm_alloc, sexp, symbols::Symbol, types};
 
-use env::Env;
-use sexp::Node;
+use env::{Env};
+use sexp::{Node, NodeShape};
 use parse::Expr;
 use bytecode::{
   Instr, InstrExpr, Operator, LocalHandle,
@@ -17,10 +17,24 @@ use types::{TypeHandle, Primitive};
 
 pub type CompileExpression = fn(env : &Env, fun : Node) -> Function;
 
-pub fn interpret_function(f : *const Function, args : &[u64], env : Env) -> u64 {
+pub fn interpret_function(f : *const Function, args : &[u64], env : Env, return_addr : Option<*mut ()>) {
   let mut stack = [0 as u8 ; 16384];
+  let mut return_offset = 0;
+  let return_addr = {
+    if let Some(ptr) = return_addr {
+      ptr
+    }
+    else {
+      // if the caller doesn't supply a return address,
+      // make room for the return value on the stack
+      let t = unsafe { (*f).t };
+      let fun = types::type_as_function(&t).unwrap();
+      return_offset += fun.returns.size_of;
+      &mut stack[0] as *mut u8 as *mut ()
+    }
+  };
   let stack_ptr = StackPtr {
-    mem: &mut stack[0] as *mut u8,
+    mem: &mut stack[return_offset as usize] as *mut u8,
     byte_pos: 0,
     max_bytes: stack.len() as u32,
   };
@@ -28,41 +42,58 @@ pub fn interpret_function(f : *const Function, args : &[u64], env : Env) -> u64 
     std::slice::from_raw_parts_mut(stack_ptr.mem as *mut u64, args.len())
   };
   stack_args.copy_from_slice(args);
+  // unsafe {
+  //   let t = (*f).t;
+  //   let fun = types::type_as_function(&t).unwrap();
+  //   if fun.returns.size_of == 8 {
+  //     *(stack_ptr.mem as *mut u64)
+  //   }
+  //   else {
+  //     0
+  //   }
+  // }
   let mut shadow_stack = vec![
     Frame {
       pc: 0,
       sbp: stack_ptr,
       f,
-      return_addr: stack_ptr.to_raw_ptr(0),
+      return_addr,
     }
   ];
   interpreter_loop(&mut shadow_stack, env);
-  unsafe {
-    let t = (*f).t;
-    let fun = types::type_as_function(&t).unwrap();
-    if fun.returns.size_of == 8 {
-      *(stack_ptr.mem as *mut u64)
-    }
-    else {
-      0
-    }
-  }
 }
 
-pub fn interpret_expr(e : Expr, env : Env) -> u64 {
+pub fn interpret_def_expr(name : Symbol, expr : Expr, env : Env) {
+  let f = compile::compile_expr_to_function(env, expr);
+  let def_type = types::type_as_function(&f.t).unwrap().returns;
+  let (def_ptr, region) = env::env_alloc_global(env, name, def_type);
+  env::set_active_region(env, region);
+  interpret_function(&f, &[], env, Some(def_ptr));
+}
+
+pub fn interpret_def_node(name : Symbol, expr : Node, env : Env) {
+  let e = parse::parse_to_expr(env.st, expr);
+  interpret_def_expr(name, e, env)
+}
+
+pub fn interpret_node(expr : Node, env : Env) {
+  let e = parse::parse_to_expr(env.st, expr);
   let f = compile::compile_expr_to_function(env, e);
-  interpret_function(&f, &[], env)
-}
-
-pub fn interpret_node(n : Node, env : Env) -> u64 {
-  let e = parse::parse_to_expr(env.st, n);
-  interpret_expr(e, env)
+  interpret_function(&f, &[], env, None);
 }
 
 pub fn interpret_file(module_name : &str, code : &str, env : Env) {
   let n = sexp::sexp_list(env.st, module_name, code);
-  for &c in n.children() {
-    interpret_node(c, env);
+  for c in n.children() {
+    match sexp::node_shape(c) {
+      NodeShape::Command("def", [name, expr]) => {
+        let name = name.as_symbol();
+        interpret_def_node(name, *expr, env);
+      }
+      _ => {
+        interpret_node(*c, env);
+      }
+    }
   }
 }
   
@@ -118,8 +149,8 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
               frame.set_local(var, &v);
             }
             Def(sym) => {
-              if let Some(f) = env.values.get(&sym) {
-                frame.set_local(var, &f.ptr);
+              if let Some(entry) = env::get_entry(&env, sym) {
+                frame.set_local(var, &entry.ptr);
               }
               else {
                 panic!("Symbol '{}' not present in env", sym);

@@ -70,7 +70,7 @@ impl Handler {
         interpret::interpret_function(
           self.handler_ptr as *const Function,
           &[state as u64, event as u64],
-          env);
+          env, None);
         true
       }
       Native => {

@@ -1,5 +1,6 @@
 
 use crate::{
+  env,
   env::Env,
   sexp,
   sexp::{
@@ -18,7 +19,7 @@ use crc32fast;
 type SymbolGraph = HashMap<Symbol, HashSet<Symbol>>;
 
 pub struct HotloadState {
-  defs : HashMap<Symbol, Def>,
+  defs : HashMap<Symbol, ComparableNode>,
   dependencies : SymbolGraph,
 }
 
@@ -31,19 +32,9 @@ impl HotloadState {
   }
 }
 
-#[derive(Clone, Copy)]
-struct Def {
-  def_node : Node,
-  value_expr : ComparableNode,
-}
-
 #[derive(Clone, Copy, PartialEq)]
 enum DefState {
   Changed, Unchanged, Broken,
-}
-
-fn def(def_node : Node, value_expr : ComparableNode) -> Def {
-  Def { def_node, value_expr }
 }
 
 /// Allows nodes to be compared based on their content.
@@ -106,35 +97,31 @@ fn node_content_eq(a : Node, b : Node) -> bool {
   }
 }
 
-pub fn clear_state(mut env : Env, hs : &mut HotloadState) {
+pub fn clear_state(env : Env, hs : &mut HotloadState) {
   hs.dependencies.clear();
   for (name, _) in hs.defs.drain() {
-    env.values.remove(&name); // TODO: leaks memory
+    env::unload_def(env, name);
   }
 }
 
-fn unload_def(hs : &mut HotloadState, mut env : Env, name : Symbol){
-  // println!("unload def '{}'", name);
+fn unload_def(hs : &mut HotloadState, env : Env, name : Symbol){
   hs.dependencies.remove(&name);
   hs.defs.remove(&name);
-  env.values.remove(&name); // TODO: leaks memory
+  env::unload_def(env, name);
 }
 
 fn load_def(
   hs : &mut HotloadState,
   env : Env,
   new_defs : &HashMap<Symbol, DefState>,
-  def_node : Node,
   value_expr : ComparableNode,
   name : Symbol
 ) -> Result<(), ()>
 {
-  // println!("loading def '{}'", name);
-  // TODO: using catch unwind is very ugly. Replace with proper error handling.
-  let aaa = ();
+  let TODO = (); // using catch unwind is very ugly. Replace with proper error handling.
   let global_references = std::panic::catch_unwind(|| {
     let (expr, global_references) =
-      parse::parse_to_expr_with_global_references(env.st, def_node);
+      parse::parse_to_expr_with_global_references(env.st, value_expr.n);
     // check dependencies are available
     for n in global_references.iter() {
       match new_defs.get(n) {
@@ -149,10 +136,10 @@ fn load_def(
         _ => (),
       }
     }
-    interpret::interpret_expr(expr, env);
+    interpret::interpret_def_expr(name, expr, env);
     global_references
   }).map_err(|_| ())?;
-  hs.defs.insert(name, def(def_node, value_expr));
+  hs.defs.insert(name, value_expr);
   hs.dependencies.insert(name, global_references);
   Ok(())
 }
@@ -160,7 +147,7 @@ fn load_def(
 fn is_external_dependency(hs : &HotloadState, env : Env, new_defs : &mut HashMap<Symbol, DefState>, name : Symbol) -> bool {
   if !new_defs.contains_key(&name) {
     if !hs.defs.contains_key(&name) {
-      if env.values.contains_key(&name) {
+      if env::get_entry(&env, name).is_some() {
         return true;
       }
     }
@@ -172,7 +159,6 @@ fn hotload_def(
   hs : &mut HotloadState,
   env : Env,
   name : Symbol,
-  def_node : Node,
   value_expr : ComparableNode,
   new_defs : &mut HashMap<Symbol, DefState>,
 )
@@ -181,7 +167,7 @@ fn hotload_def(
     // if already defined
     if let Some(def) = hs.defs.iter().find(|d| *d.0 == name) {
       // check if expression has changed
-      let mut changed = def.1.value_expr != value_expr;
+      let mut changed = def.1 != &value_expr;
       // check dependencies
       for n in hs.dependencies[&name].iter() {
         if !is_external_dependency(hs, env, new_defs, *n) {
@@ -204,14 +190,14 @@ fn hotload_def(
     }
   }) ();
   if new_def_state == DefState::Changed {
-    let r = load_def(hs, env, new_defs, def_node, value_expr, name);
+    let r = load_def(hs, env, new_defs, value_expr, name);
     if r.is_err() {
       new_def_state = DefState::Broken;
     }
   }
   if new_def_state == DefState::Unchanged {
     // Update nodes so that their text locations are correct
-    hs.defs.insert(name, def(def_node, value_expr));
+    hs.defs.insert(name, value_expr);
   }
   new_defs.insert(name, new_def_state);
 }
@@ -233,7 +219,7 @@ pub fn hotload_changes(module_name : &str, code : &str, env : Env, hs : &mut Hot
       NodeShape::Command("def", [name, expr]) => {
         let name = name.as_symbol();
         let value_expr = ComparableNode::new(*expr);
-        hotload_def(hs, env, name, *node, value_expr, &mut new_defs);
+        hotload_def(hs, env, name, value_expr, &mut new_defs);
       }
       _ => {
         let value_expr = ComparableNode::new(*node);
@@ -243,7 +229,7 @@ pub fn hotload_changes(module_name : &str, code : &str, env : Env, hs : &mut Hot
           write!(symbol_buffer, "__toplevel__{}_{}", value_expr.checksum, i).unwrap();
           let name = to_symbol(env.st, &symbol_buffer);
           if !new_defs.contains_key(&name) {
-            hotload_def(hs, env, name, *node, value_expr, &mut new_defs);
+            hotload_def(hs, env, name, value_expr, &mut new_defs);
             break;
           }
           i += 1;

@@ -1,8 +1,19 @@
-# Immediate TODO
+# Kanban issue
 
 * Free resources when a cell is unloaded
 
-* Integrate event streams
+## Immediate TODO
+
+* Add basic regions to env cells
+  * Set the active region before evaluating a cell
+    * Consider changing the way cells are assigned
+      * they are currently code-generated
+      * this could just be handled by the hotloader
+      * would mean removing other evaluation modes
+  * Set the active region before evaluating an event
+    * Does the active region change depending on the handler?
+
+# Issues
 
 * Fix the code/value dependency issue
   * `(def val 5)`
@@ -11,8 +22,6 @@
   * causes `f` to be recompiled
   * Is this actually a blocker?
     * It is incredibly slow and stupid behaviour, but not actually wrong
-
-# Issues
 
 * Compiler panics in response to syntax/type errors
   * Currently I catch panics
@@ -31,6 +40,8 @@
     * provide a way to insert & evaluate a list of definitions in the top level
 
 # Roadmap
+
+* Integrate event streams
 
 ## Implementing event streams
 

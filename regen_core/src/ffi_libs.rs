@@ -1,16 +1,15 @@
 use crate::{
-  env::{Env, EnvEntry, define_global},
+  env,
   event_loop,
-  interpret,
   node_macros::template,
   perm_alloc,
-  region,
   sexp,
   symbols::Symbol,
   types,
   types::{TypeHandle, c_function_type}
 };
 
+use env::{Env, define_global};
 use sexp::{Node, NodeInfo, NodeContent, NodeLiteral, SrcLocation};
 use perm_alloc::{PermSlice, perm_slice, perm_slice_from_vec, perm};
 
@@ -50,18 +49,8 @@ extern {
   pub fn memset(dest : *mut u8, val: i32, count : usize) -> *mut u8;
 }
 
-pub extern "C" fn env_alloc_global(mut env : Env, name : Symbol, tag : TypeHandle) -> *mut () {
-  let region = region::create_region();
-  let ptr = region::region_alloc(region, tag.size_of);
-  if env.values.contains_key(&name) {
-    panic!("global {} already defined", name);
-  }
-  env.values.insert(name, EnvEntry { ptr, tag, region });
-  ptr
-}
-
 pub extern "C" fn env_get_global_ptr(env : Env, sym : Symbol) -> *mut () {
-  env.values.get(&sym).unwrap().ptr
+  env::get_entry(&env, sym).unwrap().ptr
 }
 
 pub extern "C" fn symbol_display(sym : Symbol) {
@@ -106,10 +95,6 @@ pub extern "C" fn node_as_symbol(n : Node) -> Symbol {
 
 pub extern "C" fn node_display(node : Node) {
   println!("{}", node);
-}
-
-pub extern "C" fn eval(env : Env, n : Node) -> u64 {
-  interpret::interpret_node(n, env)
 }
 
 pub extern "C" fn calculate_packed_field_offsets(
@@ -158,9 +143,6 @@ pub fn load_ffi_libs(e : Env) {
   define_global(e, "memset", memset as u64,
     c_function_type(&[void_ptr, u32, u64], void_ptr));
 
-  define_global(e, "env_alloc_global", env_alloc_global as u64,
-    c_function_type(&[void_ptr, u64, type_tag], void_ptr));
-
   define_global(e, "env_get_global_ptr", env_get_global_ptr as u64,
     c_function_type(&[void_ptr, u64], void_ptr));
 
@@ -190,9 +172,6 @@ pub fn load_ffi_libs(e : Env) {
 
   define_global(e, "node_as_symbol", node_as_symbol as u64,
     c_function_type(&[u64], u64));
-
-  define_global(e, "eval", eval as u64,
-    c_function_type(&[void_ptr, u64], u64));
 
   define_global(e, "template_quote", template_quote as u64,
     c_function_type(&[node, types::pointer_type(node), u64], node));

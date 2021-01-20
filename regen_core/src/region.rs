@@ -14,6 +14,7 @@ pub struct Region {
 }
 
 pub fn region_alloc(r : Perm<Region>, bytes : u64) -> *mut () {
+  let TODO = (); // this still allocates with the global allocator
   let layout = std::alloc::Layout::from_size_align(bytes as usize, 8).unwrap();
   unsafe { std::alloc::alloc(layout) as *mut () }
 }
@@ -23,8 +24,8 @@ pub fn create_region() -> Perm<Region> {
   perm(r)
 }
 
-pub fn free_region(region : Region) {
-  for r in region.resources {
+pub fn free_region(region : Perm<Region>) {
+  for r in &region.resources {
     (r.destructor)(r.resource)
   }
 }
