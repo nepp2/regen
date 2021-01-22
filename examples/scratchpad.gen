@@ -16,16 +16,8 @@
 (def renderer
   (sdl_create_renderer win u32_max SDL_RENDERER_ACCELERATED))
 
-(def update (fun ((state (ptr void)) (event (ptr void))) (do
-  ;; handle events
-  (let e (zero_init sdl_event))
-  (if (== (1 u32) (sdl_poll_event (ref e))) (do
-    (if (== (. e event_type) SDL_QUIT)
-      (sdl_destroy_window win)
-    )
-  ))
-
-  ;; render
+;; render
+(def render (fun () (do
   (sdl_set_draw_color renderer (0 u8) (0 u8) (0 u8) (0 u8))
   (sdl_clear renderer)
 
@@ -37,6 +29,18 @@
   (sdl_present renderer)
 )))
 
+(def handle_sdl_event (fun ((state (ptr void)) (event (ptr void))) (do
+  ;; handle events
+  (let e (zero_init sdl_event))
+  (if (== (1 u32) (sdl_poll_event (ref e))) (do
+    (if (== (. e event_type) SDL_QUIT)
+      (sdl_destroy_window win)
+    )
+  ))
+
+  (render)
+)))
+
 (def frame_timer (tick_stream 10))
 
 (def game_stream
@@ -44,5 +48,5 @@
     frame_timer
     i64
     (cast (ref 0) (ptr void))
-    (cast update (ptr void)))
+    (cast handle_sdl_event (ptr void)))
 )

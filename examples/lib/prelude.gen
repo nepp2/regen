@@ -4,7 +4,7 @@
 )))
 
 (def tick_stream (fun ((millisecond_interval i64))
-  (tick_stream_ffi event_loop millisecond_interval)
+  (tick_stream_ffi env event_loop millisecond_interval)
 ))
 
 (def state_stream (fun (
@@ -14,10 +14,10 @@
   (update_function (ptr void))
 )
   (state_stream_ffi
+    env
     event_loop
     input_stream
     state_type
     initial_state
-    env
     update_function)
 ))

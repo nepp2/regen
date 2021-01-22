@@ -66,9 +66,10 @@ pub fn interpret_function(f : *const Function, args : &[u64], env : Env, return_
 pub fn interpret_def_expr(name : Symbol, expr : Expr, env : Env) {
   let f = compile::compile_expr_to_function(env, expr);
   let def_type = types::type_as_function(&f.t).unwrap().returns;
-  let (def_ptr, region) = env::env_alloc_global(env, name, def_type);
-  env::set_active_region(env, region);
+  let def_ptr = env::env_alloc_global(env, name, def_type);
+  env::set_active_definition(env, Some(name));
   interpret_function(&f, &[], env, Some(def_ptr));
+  env::set_active_definition(env, None);
 }
 
 pub fn interpret_def_node(name : Symbol, expr : Node, env : Env) {

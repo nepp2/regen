@@ -44,10 +44,10 @@ pub fn watch_file(path : &str) {
   watcher.watch(path, RecursiveMode::Recursive).unwrap();
   let watch_state = WatchState { rx, watcher };
 
-  let mut event_loop = get_event_loop(env);
+  let event_loop = get_event_loop(env);
 
-  let timer = event_loop.create_timer(0, 10);
-  let file_changes = event_loop.create_stream(timer, watch_state, |ws, _ : &TimerState| {
+  let timer = event_loop::create_timer(event_loop, 0, 10);
+  let file_changes = event_loop::create_stream(event_loop, timer, watch_state, |ws, _ : &TimerState| {
     match ws.rx.try_recv() {
       Ok(event) => {
         match event {
@@ -71,7 +71,7 @@ pub fn watch_file(path : &str) {
   hotload_file(env, &mut hs, path);
   let cs = CompilerState { env, hs, path: path.to_string() };
 
-  event_loop.create_stream(file_changes, cs, |cs, _ : &WatchState| {
+  event_loop::create_stream(event_loop, file_changes, cs, |cs, _ : &WatchState| {
     hotload_file(cs.env, &mut cs.hs, &cs.path);
     true
   });

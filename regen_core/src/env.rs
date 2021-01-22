@@ -1,14 +1,12 @@
 /// Defines the environment (the global hashmap that defs are added to)
 
 use crate::{
-  event_loop::EventLoop,
-  region::{Region, region_alloc, create_region, free_region},
-  types,
-  symbols::{Symbol, SymbolTable, to_symbol}
+  event_loop::{self, EventLoop, StreamId},
+  symbols::{Symbol, SymbolTable, to_symbol},
+  types::{self, TypeHandle, CoreTypes, core_types },
+  ffi_libs::*,
+  perm_alloc::{Ptr, perm},
 };
-use types::{ TypeHandle, CoreTypes, core_types };
-use crate::ffi_libs::*;
-use crate::perm_alloc::{Ptr, perm};
 
 use std::collections::HashMap;
 
@@ -18,20 +16,24 @@ pub struct Environment {
   values : HashMap<Symbol, EnvEntry>,
   pub st : SymbolTable,
   pub c : CoreTypes,
+  pub active_definition : Option<Symbol>,
 }
 
 pub type Env = Ptr<Environment>;
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct EnvEntry {
   pub ptr : *mut (),
   pub tag : TypeHandle,
-  pub region : Ptr<Region>,
+  pub streams : Vec<StreamId>,
 }
 
 pub fn unload_def(mut env : Env, name : Symbol) {
   let entry = env.values.get(&name).unwrap();
-  free_region(entry.region);
+  let el = get_event_loop(env);
+  for &id in &entry.streams {
+    event_loop::destroy_stream(el, id);
+  }
   env.values.remove(&name);
 }
 
@@ -39,19 +41,19 @@ pub fn get_entry(env : &Env, name : Symbol) -> Option<&EnvEntry> {
   env.values.get(&name)
 }
 
-pub fn env_alloc_global(mut env : Env, name : Symbol, tag : TypeHandle) -> (*mut (), Ptr<Region>) {
-  let region = create_region();
-  let ptr = region_alloc(region, tag.size_of);
+pub fn env_alloc_global(mut env : Env, name : Symbol, tag : TypeHandle) -> *mut () {
   if env.values.contains_key(&name) {
     panic!("global {} already defined", name);
   }
-  env.values.insert(name, EnvEntry { ptr, tag, region });
-  (ptr, region)
+  let layout = std::alloc::Layout::from_size_align(tag.size_of as usize, 8).unwrap();
+  let ptr = unsafe { std::alloc::alloc(layout) as *mut () };
+  env.values.insert(name, EnvEntry { ptr, tag, streams: vec![] });
+  ptr
 }
 
 pub fn define_global(e : Env, s : &str, v : u64, t : TypeHandle) {
   let sym = to_symbol(e.st, s);
-  let (p, _) = env_alloc_global(e, sym, t);
+  let p = env_alloc_global(e, sym, t);
   unsafe {
     *(p as *mut u64) = v;
   }
@@ -61,24 +63,14 @@ fn region_symbol(env : Env) -> Symbol {
   to_symbol(env.st, "region")
 }
 
-pub fn set_active_region(mut env : Env, r : Ptr<Region>) {
-  let sym = region_symbol(env);
-  if !env.values.contains_key(&sym) {
-    let void_ptr = types::pointer_type(env.c.void_tag);
-    env_alloc_global(env, sym, void_ptr);
-  }
-  let entry = env.values.get_mut(&sym).unwrap();
-  unsafe {
-    *(entry.ptr as *mut Ptr<Region>) = r;
-  }
+pub fn set_active_definition(mut env : Env, def : Option<Symbol>) {
+  env.active_definition = def;
 }
 
-pub fn get_active_region(mut env : Env) -> Ptr<Region> {
-  let sym = region_symbol(env);
-  let entry = env.values.get_mut(&sym).unwrap();
-  unsafe {
-    *(entry.ptr as *mut Ptr<Region>)
-  }
+pub fn register_stream(mut env : Env, id : StreamId) {
+  let name = env.active_definition.expect("can't register a stream; no active definition");
+  let entry = env.values.get_mut(&name).unwrap();
+  entry.streams.push(id);
 }
 
 pub fn get_global<T : Copy>(e : Env, sym : Symbol, t : TypeHandle) -> Option<Ptr<T>> {
@@ -109,8 +101,9 @@ pub fn new_env(st : SymbolTable) -> Env {
     values: Default::default(),
     st,
     c: core_types(st),
+    active_definition: None,
   });
-  let event_loop = perm(EventLoop::new());
+  let event_loop = event_loop::create_event_loop();
   let c = &env.c;
   for (n, t) in &c.core_types {
     define_global(env, n, Ptr::to_u64(*t), env.c.type_tag);
