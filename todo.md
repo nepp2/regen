@@ -1,19 +1,31 @@
 # Kanban issue
 
-* Free resources when a cell is unloaded
+* Add the missing event stream functions
+
 
 ## Immediate TODO
-
-* Add basic regions to env cells
-  * Set the active region before evaluating a cell
-    * Consider changing the way cells are assigned
-      * they are currently code-generated
-      * this could just be handled by the hotloader
-      * would mean removing other evaluation modes
-  * Set the active region before evaluating an event
-    * Does the active region change depending on the handler?
+  * `merge_stream`
+    * args:
+      * a: `stream<A>`
+      * b: `stream<B>`
+      * merge_a: `fun(*A) -> C`
+      * merge_b: `fun(*B) -> C`
+    * returns: `stream<C>`
+  * `sample_stream`
+    * args
+      * source: `stream<E>`
+      * sampler: `stream<T>`
+    * returns: `stream<(E, T)>`
+  * `filter_stream`
+    * just requires support for script-defined functions
 
 # Issues
+
+* Add support for binding event streams to defs
+
+* Fix event handler ordering
+
+* Rename defs to "cells"?
 
 * Fix the code/value dependency issue
   * `(def val 5)`

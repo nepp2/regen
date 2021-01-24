@@ -8,11 +8,12 @@ use crate::ffi_libs;
 use regen_core::{
   new_env,
   env::{Env, get_event_loop},
-  hotload,
-  hotload::HotloadState,
-  event_loop,
-  event_loop::{TimerState},
-  
+  hotload::{self, HotloadState},
+  event_loop::{
+    self, TimerState,
+    native_filter_op,
+    native_state_op
+  },
 };
 use std::fs;
 
@@ -47,7 +48,7 @@ pub fn watch_file(path : &str) {
   let event_loop = get_event_loop(env);
 
   let timer = event_loop::create_timer(event_loop, 0, 10);
-  let file_changes = event_loop::create_stream(event_loop, timer, watch_state, |ws, _ : &TimerState| {
+  let watcher_op = native_filter_op(|ws : &mut WatchState, _ : &TimerState| {
     match ws.rx.try_recv() {
       Ok(event) => {
         match event {
@@ -66,15 +67,16 @@ pub fn watch_file(path : &str) {
       },
     }
   });
+  let file_changes = event_loop::create_stream(event_loop, timer, watch_state, watcher_op);
 
   let mut hs = HotloadState::new();
   hotload_file(env, &mut hs, path);
   let cs = CompilerState { env, hs, path: path.to_string() };
 
-  event_loop::create_stream(event_loop, file_changes, cs, |cs, _ : &WatchState| {
+  let compile_op = native_state_op(|cs : &mut CompilerState, _ : &WatchState| {
     hotload_file(cs.env, &mut cs.hs, &cs.path);
-    true
   });
+  event_loop::create_stream(event_loop, file_changes, cs, compile_op);
   
   event_loop::start_loop(event_loop);
 }

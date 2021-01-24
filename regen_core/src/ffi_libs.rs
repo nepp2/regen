@@ -152,6 +152,9 @@ pub fn load_ffi_libs(e : Env) {
   define_global(e, "state_stream_ffi", event_loop::ffi::register_state_stream as u64,
     c_function_type(&[void_ptr, void_ptr, u64, type_tag, void_ptr, void_ptr], u64));
 
+  define_global(e, "filter_stream_ffi", event_loop::ffi::register_state_stream as u64,
+    c_function_type(&[void_ptr, void_ptr, u64, type_tag, void_ptr, void_ptr], u64));
+
   define_global(e, "symbol_display", symbol_display as u64,
     c_function_type(&[u64], void));
 
