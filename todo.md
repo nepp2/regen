@@ -4,20 +4,8 @@
 
 
 ## Immediate TODO
-  * `merge_stream`
-    * args:
-      * a: `stream<A>`
-      * b: `stream<B>`
-      * merge_a: `fun(*A) -> C`
-      * merge_b: `fun(*B) -> C`
-    * returns: `stream<C>`
-  * `sample_stream`
-    * args
-      * source: `stream<E>`
-      * sampler: `stream<T>`
-    * returns: `stream<(E, T)>`
-  * `filter_stream`
-    * just requires support for script-defined functions
+
+* Answer the stream merging question
 
 # Issues
 
@@ -57,102 +45,52 @@
 
 ## Implementing event streams
 
-I created a stream-based SDL example in `scratchpad.gen`.
+Some issues:
 
-It requires some functions for creating event streams:
-  * `timer_stream`
-    * args:
-      * millisecond_interval: `i64`
-    * returns: `stream<tick_event>`
-  * `filter_stream`
-    * args:
-      * input_stream: `stream<event>`
-      * initial_state: `state`
-      * poll_function: `fun(*state, *event) -> bool`
-    * returns: `stream<state>`
-  * `merge_stream`
-    * args:
-      * a: `stream<A>`
-      * b: `stream<B>`
-      * merge_a: `fun(*A) -> C`
-      * merge_b: `fun(*B) -> C`
-    * returns: `stream<C>`
-  * `state_stream`
-    * args:
-      * input: `stream<event>`
-      * initial_state: `state`
-      * update: `fun(*state, *event)`
-    * returns: `stream<state>`
-  * `sample_stream`
-    * args
-      * source: `stream<E>`
-      * sampler: `stream<T>`
-    * returns: `stream<(E, T)>`
+* the design of sample stream implies that streams must _always_ contain a default value
+* the design of merge stream is ambiguous, particulary when both input streams share a root stream
 
-The trouble with these functions is that most of them are polymorphic, and they even refer to polymorphic types. I could iron over this polymorphism by using either void pointers or some kind of limited type-erasure mechanism.
+these aren't really event streams. they are state containers.
 
-Alternatively, I could try to find the simplest path to some kind templating system, likely based on Terra. Ultimately if the event loop is implemented in Rust, the FFI will have to be monomorphic. LibUV is a very successful high-performance event loop library, and it is written in C so it must also be monomorphic.
-
-I haven't considered how an event stream gets hooked into the core event loop. Should every event stream be immediately hooked in upon creation? This is okay as long as they are destroyed along with the `def` that introduced them.
-
-## Implementing streams 2
-
-I can bind streams to state cells, but something has to push events through the stream.
-
-All events are pushed by other streams
-
-The root stream type is a timer
-
-Event streams are usually implemented as a filtered map or a fold. For example:
-
-  * a stream of packets would be a filtered map on a timer (although it holds state?)
-  * a state stream would be a fold
-
-What if a stream needs to hold state but not push it? arguably the packet stream is doing this, because the socket is modelled as state.
-
-This is perhaps the strength of observers. They can have any internal state, unrelated to the type of event that they push.
-
-So a stream type would be like:
+the only real operation they support is:
 
 ```rust
-struct Stream<Input, State, Output> {
-  state : State,
-  handle_event : fn (state : &mut State, event : Input) -> bool,
-}
+  // returns true if the state actually changed
+  fn update(mut state : State) -> bool
 ```
 
-If you want to push a bunch of events, you have to output a vec (or a slice). It's up to the receiver to flatten them. The stream only pushes to dependent streams if `handle_event` returns true.
+or they are streams because they push updates regardless of whether the value changed?
 
-As a monomorphic struct, it looks like this:
+or a change can be forced using a counter (for example)
 
-```rust
-struct Stream {
-  state : *mut (),
-  handle_event : fn (s : *mut (), event : *const ()) -> bool,
-}
+a signal might be a better term, but i'm not sure
+
+it's unclear how to create the desired merge behaviour
+  * error if both inputs are triggered at the same time?
+  * how to detect which is triggered?
+
+should triggers be different to streams?
+
+do the semantics of the event graph even matter? do i care if it's possible to make a stupid graph, as long as it's also possible to make a good graph? should i be following the observable pattern of JSX?
+
+## Syntax
+
+```scala
+  def tick = timer(60);
+
+  def input = {
+    val s = sdl_input_stream();
+    val input = map_stream(s, input_to_game_event);
+    val time = map_stream(tick, time_to_game_event);
+    merge_stream(input, time)
+  };
+
+  def model = state_stream(tick, 0, (state, tick_value) => {
+    state += tick_value;
+  });
+
+  def view = state_stream(tick, renderer, (r, tick_value) => {
+    val m = sample(model);
+    render(m)
+  });
 ```
-
-This API should eventually handle failures. Possibly as follows:
-
-```rust
-struct Stream {
-  state : *mut (),
-  handle_event : fn (s : *mut (), event : *const ())
-    -> Result<bool, HandlerError>,
-}
-```
-
-# Unloading defs
-
-Concerns:
-  * Unregistering event streams
-  * Reclaiming memory
-  * Closing files and shit
-
-This is all just standard destructor stuff. I want to avoid RAII-style destructors, and instead manage resources using regions.
-
-Memory is allocated from a region, and resources that need reclaiming are registered with the region.
-
-The simplest thing is to allow resources to register themselves with a region, instead of being bound to a single object/value. This should work as long as short-lived regions can be easily and cheaply created.
-
-

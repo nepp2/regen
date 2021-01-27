@@ -11,8 +11,8 @@ use regen_core::{
   hotload::{self, HotloadState},
   event_loop::{
     self, TimerState,
-    native_filter_op,
-    native_state_op
+    native_filter_stream,
+    native_state_stream,
   },
 };
 use std::fs;
@@ -48,35 +48,37 @@ pub fn watch_file(path : &str) {
   let event_loop = get_event_loop(env);
 
   let timer = event_loop::create_timer(event_loop, 0, 10);
-  let watcher_op = native_filter_op(|ws : &mut WatchState, _ : &TimerState| {
-    match ws.rx.try_recv() {
-      Ok(event) => {
-        match event {
-          DebouncedEvent::Write(_) => {
-            true
+  let file_changes = native_filter_stream(event_loop, timer, watch_state,
+    |ws : &mut WatchState, _ : &TimerState| {
+      match ws.rx.try_recv() {
+        Ok(event) => {
+          match event {
+            DebouncedEvent::Write(_) => {
+              true
+            }
+            _ => false,
           }
-          _ => false,
-        }
-      },
-      Err(e) => match e {
-        TryRecvError::Disconnected => {
-          println!("watch error: {:?}", e);
-          false
-        }
-        TryRecvError::Empty => false,
-      },
+        },
+        Err(e) => match e {
+          TryRecvError::Disconnected => {
+            println!("watch error: {:?}", e);
+            false
+          }
+          TryRecvError::Empty => false,
+        },
+      }
     }
-  });
-  let file_changes = event_loop::create_stream(event_loop, timer, watch_state, watcher_op);
+  );
 
   let mut hs = HotloadState::new();
   hotload_file(env, &mut hs, path);
   let cs = CompilerState { env, hs, path: path.to_string() };
 
-  let compile_op = native_state_op(|cs : &mut CompilerState, _ : &WatchState| {
-    hotload_file(cs.env, &mut cs.hs, &cs.path);
-  });
-  event_loop::create_stream(event_loop, file_changes, cs, compile_op);
+  native_state_stream(event_loop, file_changes, cs,
+    |cs : &mut CompilerState, _ : &WatchState| {
+      hotload_file(cs.env, &mut cs.hs, &cs.path);
+    }
+  );
   
   event_loop::start_loop(event_loop);
 }

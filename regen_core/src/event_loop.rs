@@ -19,6 +19,7 @@ pub struct EventLoop {
   id_counter : u64,
   observers : HashMap<StreamId, Vec<Ptr<Stream>>>,
   timers : Vec<Ptr<Stream>>,
+  update_count : u64,
 }
 
 #[derive(Copy, Clone)]
@@ -33,6 +34,7 @@ pub struct Stream {
   pub event_loop : Ptr<EventLoop>,
   pub state : *mut (),
   pub operation : StreamOperation,
+  pub last_update : u64,
 }
 
 #[derive(Clone, Copy)]
@@ -40,48 +42,107 @@ pub struct RegenCallback { env : Env, f : *const Function }
 
 #[derive(Clone, Copy)]
 pub enum StreamOperation {
-  Filter(RegenCallback),
-  State(RegenCallback),
-  // Sample,
-  // Merge,
-  NativeFilter(fn(*mut (), *const ()) -> bool),
-  NativeState(fn(*mut (), *const ())),
+  Timer,
+  Filter(Ptr<Stream>, RegenCallback),
+  State(Ptr<Stream>, RegenCallback),
+  Map(Ptr<Stream>, RegenCallback),
+  Sample(Ptr<Stream>),
+  Merge(Ptr<Stream>, Ptr<Stream>),
+
+  NativeFilter(Ptr<Stream>, fn(*mut (), *const ()) -> bool),
+  NativeState(Ptr<Stream>, fn(*mut (), *const ())),
 }
 
-pub fn native_filter_op<State, Event>(f : fn(&mut State, &Event) -> bool) -> StreamOperation {
-  StreamOperation::NativeFilter(unsafe { std::mem::transmute(f as *const ()) })
+pub fn native_filter_stream<State, Event>(
+  mut el : Ptr<EventLoop>,
+  parent : Ptr<Stream>,
+  state : State,
+  f : fn(&mut State, &Event) -> bool
+) -> Ptr<Stream>
+{
+  let op = StreamOperation::NativeFilter(parent, unsafe { std::mem::transmute(f as *const ()) });
+  let s = create_orphan_stream(el, state, op);
+  el.observers.entry(parent.id).or_insert(vec![]).push(s);
+  s
 }
 
-pub fn native_state_op<State, Event>(f : fn(&mut State, &Event)) -> StreamOperation {
-  StreamOperation::NativeState(unsafe { std::mem::transmute(f as *const ()) })
+pub fn native_state_stream<State, Event>(
+  mut el : Ptr<EventLoop>,
+  parent : Ptr<Stream>,
+  state : State,
+  f : fn(&mut State, &Event)
+) -> Ptr<Stream>
+{
+  let op = StreamOperation::NativeState(parent, unsafe { std::mem::transmute(f as *const ()) });
+  let s = create_orphan_stream(el, state, op);
+  el.observers.entry(parent.id).or_insert(vec![]).push(s);
+  s
 }
 
-impl StreamOperation {
-  fn process(&self, state : *mut (), event : *const ()) -> bool {
-    use StreamOperation::*;
-    match self {
-      Filter(f) => {
-        let mut return_val = true;
-        interpret::interpret_function(
-          f.f as *const Function,
-          &[state as u64, event as u64],
-          f.env, Some((&mut return_val) as *mut bool as *mut ()));
-        return_val
+
+fn update_stream(update_number : u64, mut stream : Ptr<Stream>) -> bool {
+  use StreamOperation::*;
+  stream.last_update = update_number;
+  match stream.operation {
+    Timer => {
+      panic!("timer streams should never be triggered by other streams");
+    }
+    Filter(parent, f) => {
+      let event = parent.state;
+      let mut return_val = true;
+      interpret::interpret_function(
+        f.f as *const Function,
+        &[stream.state as u64, event as u64],
+        f.env, Some((&mut return_val) as *mut bool as *mut ()));
+      return_val
+    }
+    NativeFilter(parent, f) => {
+      let event = parent.state;
+      f(stream.state, event)
+    }
+    State(parent, f) => {
+      let event = parent.state;
+      interpret::interpret_function(
+        f.f as *const Function,
+        &[stream.state as u64, event as u64],
+        f.env, None);
+      true
+    }
+    NativeState(parent, f) => {
+      let event = parent.state;
+      f(stream.state, event);
+      true
+    }
+    Map(parent, f) => {
+      let event = parent.state;
+      interpret::interpret_function(
+        f.f as *const Function,
+        &[event as u64],
+        f.env, Some(stream.state));
+      true
+    }
+    Sample(sample_from) => {
+      // this can just be done once when the stream is created,
+      // as long as streams never reallocate their state pointers?
+      // what happens if the state being sampled from doesn't _have_
+      // a value yet?
+      let TODO = ();
+      stream.state = sample_from.state;
+      true
+    }
+    Merge(stream_a, stream_b) => {
+      // check if stream A has a new event
+      if stream_a.last_update == update_number {
+        stream.state = stream_a.state;
+        return true;
       }
-      State(f) => {
-        interpret::interpret_function(
-          f.f as *const Function,
-          &[state as u64, event as u64],
-          f.env, None);
-        true
+      // check if stream B has a new event
+      if stream_b.last_update == update_number {
+        stream.state = stream_b.state;
+        return true;
       }
-      NativeFilter(f) => {
-        f(state, event)
-      }
-      NativeState(f) => {
-        f(state, event);
-        true
-      }
+      // panic if neither of them do
+      panic!("merge was triggered, but no events are available")
     }
   }
 }
@@ -98,6 +159,7 @@ pub fn create_event_loop() -> Ptr<EventLoop> {
     id_counter: 0,
     observers: HashMap::new(),
     timers: vec![],
+    update_count: 0,
   })
 }
 
@@ -117,20 +179,9 @@ fn create_orphan_stream<State>(
     event_loop: el,
     state: Ptr::to_ptr(perm(state)) as *mut (),
     operation,
+    last_update: 0,
   });
   stream
-}
-
-pub fn create_stream<State>(
-  mut el : Ptr<EventLoop>,
-  parent : Ptr<Stream>,
-  state : State,
-  operation : StreamOperation,
-) -> Ptr<Stream>
-{
-  let s = create_orphan_stream(el, state, operation);
-  el.observers.entry(parent.id).or_insert(vec![]).push(s);
-  s
 }
 
 pub fn destroy_stream(mut el : Ptr<EventLoop>, id : StreamId) {
@@ -145,10 +196,7 @@ pub fn create_timer(mut el : Ptr<EventLoop>, current_millisecond : i64, millisec
     millisecond_interval,
     next_tick_millisecond: current_millisecond + millisecond_interval,
   };
-  let op = native_state_op(|timer : &mut TimerState, current_time : &i64| {
-    timer.next_tick_millisecond = *current_time + timer.millisecond_interval;
-  });
-  let s = create_orphan_stream(el, timer_state, op);
+  let s = create_orphan_stream(el, timer_state, StreamOperation::Timer);
   el.timers.push(s);
   s
 }
@@ -159,13 +207,31 @@ fn current_millisecond(start : Instant) -> i64 {
 
 fn handle_stream_input(event_loop : Ptr<EventLoop>, stream : Ptr<Stream>, event : *const ()) {
   let TODO = (); // doesn't solve the diamond/glitch problem yet
-  let push_to_observers = stream.operation.process(stream.state, event);
-  if push_to_observers {
-    if let Some(observers) = event_loop.observers.get(&stream.id) {
-      for &o in observers {
-        handle_stream_input(event_loop, o, stream.state);
-      }
+  let should_push = update_stream(event_loop.update_count, stream);
+  if should_push {
+    push_to_observers(event_loop, stream);
+  }
+}
+
+fn push_to_observers(event_loop : Ptr<EventLoop>, stream : Ptr<Stream>) {
+  if let Some(observers) = event_loop.observers.get(&stream.id) {
+    for &o in observers {
+      handle_stream_input(event_loop, o, stream.state);
     }
+  }
+}
+
+fn handle_timer_pulse(mut event_loop : Ptr<EventLoop>, stream : Ptr<Stream>, current_time : i64) {
+  if let StreamOperation::Timer = stream.operation {
+    let timer : &mut TimerState = unsafe {
+      &mut *(stream.state as *mut TimerState)
+    };
+    timer.next_tick_millisecond = current_time + timer.millisecond_interval;
+    event_loop.update_count += 1;
+    push_to_observers(event_loop, stream);
+  }
+  else {
+    panic!("expected timer");
   }
 }
 
@@ -193,14 +259,17 @@ pub fn start_loop(event_loop : Ptr<EventLoop>) {
     // handle the timer event
     let now = current_millisecond(start);
     timer.next_tick_millisecond = now + timer.millisecond_interval;
-    handle_stream_input(event_loop, stream, (&now) as *const i64 as *const ());
+    handle_timer_pulse(event_loop, stream, now);
   }
 }
 
-fn register_regen_stream(
+fn add_observer(mut el : Ptr<EventLoop>, parent : Ptr<Stream>, observer : Ptr<Stream>) {
+  el.observers.entry(parent.id).or_insert(vec![]).push(observer);
+}
+
+fn create_regen_stream(
   env : Env,
-  mut el : Ptr<EventLoop>,
-  input_stream : Ptr<Stream>,
+  el : Ptr<EventLoop>,
   state_type : TypeHandle,
   initial_state : *const (),
   operation : StreamOperation,
@@ -217,8 +286,8 @@ fn register_regen_stream(
     event_loop: el,
     state,
     operation,
+    last_update: 0,
   });
-  el.observers.entry(input_stream.id).or_insert(vec![]).push(stream);
   env::register_stream(env, stream.id);
   stream
 }
@@ -249,8 +318,10 @@ pub mod ffi {
     update_function : *const Function,
   ) -> Ptr<Stream>
   {
-    let op = StreamOperation::State(RegenCallback { env, f: update_function });
-    register_regen_stream(env, el, input_stream, state_type, initial_state, op)
+    let op = StreamOperation::State(input_stream, RegenCallback { env, f: update_function });
+    let stream = create_regen_stream(env, el, state_type, initial_state, op);
+    add_observer(el, input_stream, stream);
+    stream
   }
 
   pub extern "C" fn register_filter_stream(
@@ -262,8 +333,10 @@ pub mod ffi {
     update_function : *const Function,
   ) -> Ptr<Stream>
   {
-    let op = StreamOperation::State(RegenCallback { env, f: update_function });
-    register_regen_stream(env, el, input_stream, state_type, initial_state, op)
+    let op = StreamOperation::State(input_stream, RegenCallback { env, f: update_function });
+    let stream = create_regen_stream(env, el, state_type, initial_state, op);
+    add_observer(el, input_stream, stream);
+    stream
   }
 
   // pub extern "C" fn register_merge_stream(
