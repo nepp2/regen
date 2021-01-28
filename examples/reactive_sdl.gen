@@ -20,12 +20,13 @@
 ))
 
 (def input_stream
-  ;; the `source_stream` function defines a new root event source
-  (source_stream
+  ;; the `poll_stream` function defines a new event source
+  (poll_stream
+    (tick_stream 1)           ;; the sample rate
+    window                    ;; poll state
+    sdl_window_handle         ;; poll state type
+    sdl_event                 ;; event type
     poll_input                ;; the polling function
-    (cast 0 (ptr void))       ;; the event source (unused here because sdl doesn't need one)
-    (zero_init sdl_event)     ;; the initial event value (maybe it should be the type?)     
-    (timer_framerate 1000))   ;; the sample timer
 )
 
 ;; ------------ Define the logic --------------
@@ -67,21 +68,27 @@
 
 (def game_timer (timer_framerate 30))
 
+;; one of these pointers will be null
 (def game_event (struct
   (input (ptr sdl_event))
   (tick (ptr tick_event))
 ))
 
-(def merge_game_event (fun ((input (ptr sdl_event)) (tick (ptr tick_event)))
-  ;; one of these pointers will be null
-  (init game_event input tick)
+(def input_to_game_event (fun ((output (ptr game_event)) (event (ptr sdl_event)))
+  (init game_event event (0 as (ptr tick_event)))
+))
+
+(def tick_to_game_event (fun ((output (ptr game_event)) (event (ptr tick_event)))
+  (init game_event (0 as (ptr sdl_event)) event)
 ))
 
 ;; Game state is represented as a state stream
 (def game_state (do
   ;; The game must respond to both input events and game ticks
-  (let update_stream (merge_stream input_stream game_timer merge_game_event))
-  (state_stream (new_game) game_update update_stream)
+  (let game_input (map_stream input_stream game_event input_to_game_event))
+  (let game_tick (map_stream game_timer game_event tick_to_game_event))
+  (let game_events (merge_stream game_input game_tick game_event))
+  (state_stream (new_game) game_update game_events)
 ))
 
 ;; Renderer is represented as a state stream (it's an output buffer)
