@@ -1,12 +1,12 @@
 use crate::{
   env,
-  event_loop,
   node_macros::template,
   perm_alloc,
   sexp,
   symbols::Symbol,
   types,
-  types::{TypeHandle, c_function_type}
+  types::{TypeHandle, c_function_type, function_type},
+  event_loop::ffi::*,
 };
 
 use env::{Env, define_global};
@@ -121,12 +121,19 @@ pub extern "C" fn type_display(t : TypeHandle) {
 }
 
 pub fn load_ffi_libs(e : Env) {
+  let bool_type = e.c.bool_tag;
   let u64 = e.c.u64_tag;
+  let i64 = u64;
   let u32 = e.c.u32_tag;
   let void = e.c.void_tag;
   let void_ptr = types::pointer_type(void);
+  let stream_ptr = void_ptr;
+  let env_ptr = void_ptr;
+  let event_loop_ptr = void_ptr;
   let node = e.c.node_tag;
   let type_tag = e.c.type_tag;
+
+  // ----------- Bind core system functions ------------
 
   define_global(e, "fail", fail as u64,
     c_function_type(&[u64], u64));
@@ -146,14 +153,45 @@ pub fn load_ffi_libs(e : Env) {
   define_global(e, "env_get_global_ptr", env_get_global_ptr as u64,
     c_function_type(&[void_ptr, u64], void_ptr));
 
-  define_global(e, "tick_stream_ffi", event_loop::ffi::register_tick_stream as u64,
-    c_function_type(&[void_ptr, void_ptr, u64], u64));
+  // ----------- Bind stream functions ------------
 
-  define_global(e, "state_stream_ffi", event_loop::ffi::register_state_stream as u64,
-    c_function_type(&[void_ptr, void_ptr, u64, type_tag, void_ptr, void_ptr], u64));
+  define_global(e, "register_tick_stream", register_tick_stream as u64,
+    c_function_type(
+      &[env_ptr, event_loop_ptr, i64],
+        stream_ptr));
 
-  define_global(e, "filter_stream_ffi", event_loop::ffi::register_state_stream as u64,
-    c_function_type(&[void_ptr, void_ptr, u64, type_tag, void_ptr, void_ptr], u64));
+  let update_fn_type =
+    function_type(&[void_ptr, void_ptr], void);
+  define_global(e, "register_state_stream", register_state_stream as u64,
+    c_function_type(
+      &[env_ptr, event_loop_ptr, stream_ptr, type_tag, void_ptr, update_fn_type],
+        stream_ptr));
+
+  let poll_fn_type =
+    function_type(&[void_ptr, void_ptr], bool_type);
+  define_global(e, "register_poll_stream", register_poll_stream as u64,
+    c_function_type(
+      &[env_ptr, event_loop_ptr, stream_ptr, type_tag, void_ptr, poll_fn_type],
+        stream_ptr));
+
+  let map_fn_type =
+    function_type(&[void_ptr, void_ptr], void);
+  define_global(e, "register_map_stream", register_map_stream as u64,
+    c_function_type(
+      &[env_ptr, event_loop_ptr, stream_ptr, type_tag, map_fn_type],
+        stream_ptr));
+
+  define_global(e, "register_merge_stream", register_merge_stream as u64,
+    c_function_type(
+      &[env_ptr, event_loop_ptr, stream_ptr, stream_ptr, type_tag],
+        stream_ptr));
+
+  define_global(e, "register_sample_stream", register_sample_stream as u64,
+    c_function_type(
+      &[env_ptr, event_loop_ptr, stream_ptr, stream_ptr, type_tag],
+        stream_ptr));
+
+  // ----------- Bind language introspection functions ------------
 
   define_global(e, "symbol_display", symbol_display as u64,
     c_function_type(&[u64], void));

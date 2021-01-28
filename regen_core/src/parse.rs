@@ -62,20 +62,20 @@ pub enum ExprContent {
   ArrayLen(Expr),
   TypeOf(Expr),
   FnType {
-    args : SlicePtr<Arg>,
+    args : SlicePtr<Expr>,
     ret : Expr,
   },
   CFunType {
-    args : SlicePtr<Arg>,
+    args : SlicePtr<Expr>,
     ret : Expr,
   },
-  StructType(SlicePtr<Arg>),
+  StructType(SlicePtr<Field>),
   PtrType(Expr),
   SizedArrayType{ element_type: Expr, length: Expr },
 }
 
 #[derive(Copy, Clone)]
-pub struct Arg {
+pub struct Field {
   pub name : Option<Node>,
   pub tag : Expr,
 }
@@ -330,7 +330,7 @@ fn to_expr_content(ts : &mut TagState, n : Node) -> ExprContent {
     }
     // struct type
     Command("struct", fields) => {
-      StructType(to_type_args_list(ts, fields))
+      StructType(to_field_list(ts, fields))
     }
     // slice type
     Command("slice", [element_type]) => {
@@ -380,22 +380,39 @@ fn to_args_body(ts : &mut TagState, args : &[Node], body : Node) -> (SlicePtr<(S
   (args, body)
 }
 
-fn to_type_args_list(ts : &mut TagState, args : &[Node]) -> SlicePtr<Arg> {
+fn to_type_args_list(ts : &mut TagState, args : &[Node]) -> SlicePtr<Expr> {
   let mut v = Vec::with_capacity(args.len());
   for a in args {
     let arg = {
-      if let [name, type_tag] = a.children() {
-        name.as_symbol();
-        Arg { name: Some(*name), tag: to_expr(ts, *type_tag) }
+      if let [type_tag] = a.children() {
+        to_expr(ts, *type_tag)
       }
-      else if let [type_tag] = a.children() {
-        Arg { name: None, tag: to_expr(ts, *type_tag) }
+      else if let [name, type_tag] = a.children() {
+        name.as_symbol();
+        to_expr(ts, *type_tag)
       }
       else {
         panic!("expected arg at ({})", a.loc)
       }
     };
     v.push(arg);
+  }
+  perm_slice_from_vec(v)
+}
+
+fn to_field_list(ts : &mut TagState, fields : &[Node]) -> SlicePtr<Field> {
+  let mut v = Vec::with_capacity(fields.len());
+  for f in fields {
+    let field = {
+      if let [name, type_tag] = f.children() {
+        name.as_symbol();
+        Field { name: Some(*name), tag: to_expr(ts, *type_tag) }
+      }
+      else {
+        panic!("expected field at ({})", f.loc)
+      }
+    };
+    v.push(field);
   }
   perm_slice_from_vec(v)
 }

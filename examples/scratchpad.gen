@@ -48,5 +48,5 @@
     frame_timer
     i64
     (cast (ref 0) (ptr void))
-    (cast handle_sdl_event (ptr void)))
+    (cast handle_sdl_event update_fn_type))
 )

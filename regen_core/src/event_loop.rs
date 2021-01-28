@@ -13,11 +13,17 @@ use crate::{
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct StreamId(pub u64);
 
+#[derive(Copy, Clone)]
+struct Observer {
+  stream : Ptr<Stream>,
+  push_changes : bool,
+}
+
 #[derive(Clone)]
 pub struct EventLoop {
   start_time : Instant,
   id_counter : u64,
-  observers : HashMap<StreamId, Vec<Ptr<Stream>>>,
+  observers : HashMap<StreamId, Vec<Observer>>,
   timers : Vec<Ptr<Stream>>,
   update_count : u64,
 }
@@ -43,31 +49,31 @@ pub struct RegenCallback { env : Env, f : *const Function }
 #[derive(Clone, Copy)]
 pub enum StreamOperation {
   Timer,
-  Filter(Ptr<Stream>, RegenCallback),
+  Poll(Ptr<Stream>, RegenCallback),
   State(Ptr<Stream>, RegenCallback),
   Map(Ptr<Stream>, RegenCallback),
   Sample(Ptr<Stream>),
   Merge(Ptr<Stream>, Ptr<Stream>),
 
-  NativeFilter(Ptr<Stream>, fn(*mut (), *const ()) -> bool),
+  NativeSource(Ptr<Stream>, fn(*mut (), *const ()) -> bool),
   NativeState(Ptr<Stream>, fn(*mut (), *const ())),
 }
 
-pub fn native_filter_stream<State, Event>(
-  mut el : Ptr<EventLoop>,
+pub fn native_poll_stream<State, Event>(
+  el : Ptr<EventLoop>,
   parent : Ptr<Stream>,
   state : State,
   f : fn(&mut State, &Event) -> bool
 ) -> Ptr<Stream>
 {
-  let op = StreamOperation::NativeFilter(parent, unsafe { std::mem::transmute(f as *const ()) });
+  let op = StreamOperation::NativeSource(parent, unsafe { std::mem::transmute(f as *const ()) });
   let s = create_orphan_stream(el, state, op);
-  el.observers.entry(parent.id).or_insert(vec![]).push(s);
+  add_push_observer(el, parent, s);
   s
 }
 
 pub fn native_state_stream<State, Event>(
-  mut el : Ptr<EventLoop>,
+  el : Ptr<EventLoop>,
   parent : Ptr<Stream>,
   state : State,
   f : fn(&mut State, &Event)
@@ -75,7 +81,7 @@ pub fn native_state_stream<State, Event>(
 {
   let op = StreamOperation::NativeState(parent, unsafe { std::mem::transmute(f as *const ()) });
   let s = create_orphan_stream(el, state, op);
-  el.observers.entry(parent.id).or_insert(vec![]).push(s);
+  add_push_observer(el, parent, s);
   s
 }
 
@@ -87,7 +93,7 @@ fn update_stream(update_number : u64, mut stream : Ptr<Stream>) -> bool {
     Timer => {
       panic!("timer streams should never be triggered by other streams");
     }
-    Filter(parent, f) => {
+    Poll(parent, f) => {
       let event = parent.state;
       let mut return_val = true;
       interpret::interpret_function(
@@ -96,7 +102,7 @@ fn update_stream(update_number : u64, mut stream : Ptr<Stream>) -> bool {
         f.env, Some((&mut return_val) as *mut bool as *mut ()));
       return_val
     }
-    NativeFilter(parent, f) => {
+    NativeSource(parent, f) => {
       let event = parent.state;
       f(stream.state, event)
     }
@@ -117,8 +123,8 @@ fn update_stream(update_number : u64, mut stream : Ptr<Stream>) -> bool {
       let event = parent.state;
       interpret::interpret_function(
         f.f as *const Function,
-        &[event as u64],
-        f.env, Some(stream.state));
+        &[stream.state as u64, event as u64],
+        f.env, None);
       true
     }
     Sample(sample_from) => {
@@ -145,12 +151,6 @@ fn update_stream(update_number : u64, mut stream : Ptr<Stream>) -> bool {
       panic!("merge was triggered, but no events are available")
     }
   }
-}
-
-#[derive(Clone, Copy)]
-struct Observer {
-  stream : Ptr<Stream>,
-  push_events : bool,
 }
 
 pub fn create_event_loop() -> Ptr<EventLoop> {
@@ -187,7 +187,7 @@ fn create_orphan_stream<State>(
 pub fn destroy_stream(mut el : Ptr<EventLoop>, id : StreamId) {
   el.observers.remove(&id);
   for (_, obs) in el.observers.iter_mut() {
-    obs.retain(|s| s.id != id);
+    obs.retain(|ob| ob.stream.id != id);
   }
 }
 
@@ -215,8 +215,10 @@ fn handle_stream_input(event_loop : Ptr<EventLoop>, stream : Ptr<Stream>, event 
 
 fn push_to_observers(event_loop : Ptr<EventLoop>, stream : Ptr<Stream>) {
   if let Some(observers) = event_loop.observers.get(&stream.id) {
-    for &o in observers {
-      handle_stream_input(event_loop, o, stream.state);
+    for &ob in observers {
+      if ob.push_changes {
+        handle_stream_input(event_loop, ob.stream, stream.state);
+      }
     }
   }
 }
@@ -263,22 +265,30 @@ pub fn start_loop(event_loop : Ptr<EventLoop>) {
   }
 }
 
-fn add_observer(mut el : Ptr<EventLoop>, parent : Ptr<Stream>, observer : Ptr<Stream>) {
-  el.observers.entry(parent.id).or_insert(vec![]).push(observer);
+fn add_push_observer(mut el : Ptr<EventLoop>, parent : Ptr<Stream>, stream : Ptr<Stream>) {
+  let ob = Observer { stream, push_changes: true };
+  el.observers.entry(parent.id).or_insert(vec![]).push(ob);
+}
+
+fn add_sample_observer(mut el : Ptr<EventLoop>, parent : Ptr<Stream>, stream : Ptr<Stream>) {
+  let ob = Observer { stream, push_changes: false };
+  el.observers.entry(parent.id).or_insert(vec![]).push(ob);
 }
 
 fn create_regen_stream(
   env : Env,
   el : Ptr<EventLoop>,
   state_type : TypeHandle,
-  initial_state : *const (),
+  initial_state : Option<*const ()>,
   operation : StreamOperation,
 ) -> Ptr<Stream>
 {
   let layout = Layout::from_size_align(state_type.size_of as usize, 8).unwrap();
   let state = unsafe {
     let ptr = alloc(layout) as *mut ();
-    std::ptr::copy_nonoverlapping(initial_state, ptr, state_type.size_of as usize);
+    if let Some(s) = initial_state {
+      std::ptr::copy_nonoverlapping(s, ptr, state_type.size_of as usize);
+    }
     ptr as *mut ()
   };
   let stream = perm(Stream {
@@ -319,58 +329,67 @@ pub mod ffi {
   ) -> Ptr<Stream>
   {
     let op = StreamOperation::State(input_stream, RegenCallback { env, f: update_function });
-    let stream = create_regen_stream(env, el, state_type, initial_state, op);
-    add_observer(el, input_stream, stream);
+    let stream = create_regen_stream(env, el, state_type, Some(initial_state), op);
+    add_push_observer(el, input_stream, stream);
     stream
   }
 
-  pub extern "C" fn register_filter_stream(
+  pub extern "C" fn register_poll_stream(
     env : Env,
     el : Ptr<EventLoop>,
     input_stream : Ptr<Stream>,
     state_type : TypeHandle,
     initial_state : *const (),
-    update_function : *const Function,
+    poll_function : *const Function,
   ) -> Ptr<Stream>
   {
-    let op = StreamOperation::State(input_stream, RegenCallback { env, f: update_function });
-    let stream = create_regen_stream(env, el, state_type, initial_state, op);
-    add_observer(el, input_stream, stream);
+    let op = StreamOperation::State(input_stream, RegenCallback { env, f: poll_function });
+    let stream = create_regen_stream(env, el, state_type, Some(initial_state), op);
+    add_push_observer(el, input_stream, stream);
     stream
   }
 
-  // pub extern "C" fn register_merge_stream(
-  //   env : Env,
-  //   el : Ptr<EventLoop>,
-  //   merge_type : TypeHandle,
-  //   stream_a : Ptr<Stream>,
-  //   handler_a : *const Function,
-  //   stream_b : Ptr<Stream>,
-  //   handler_b : *const Function,
-  // ) -> Ptr<Stream>
-  // {
-  //   let handle_event = Handler::regen(env, handler_a, true);
-  //   let layout = Layout::from_size_align(merge_type.size_of as usize, 8).unwrap();
-  //   let state = unsafe { alloc(layout) as *mut () };
-  //   let stream = perm(Stream {
-  //     id: next_id(el),
-  //     event_loop: el,
-  //     state,
-  //     handle_event,
-  //   });
-  //   el.observers.entry(input_stream.id).or_insert(vec![]).push(stream);
-  //   env::register_stream(env, stream.id);
-  //   stream
-  //   panic!("merge streams not yet supported")
-  // }
-
-  pub extern "C" fn sample_stream(
+  pub extern "C" fn register_map_stream(
     env : Env,
     el : Ptr<EventLoop>,
-    push_stream : Ptr<Stream>,
-    sample_stream : Ptr<Stream>,
+    input_stream : Ptr<Stream>,
+    output_type : TypeHandle,
+    map_function : *const Function,
   ) -> Ptr<Stream>
   {
-    panic!("sample streams not yet supported")
+    let op = StreamOperation::Map(input_stream, RegenCallback { env, f: map_function });
+    let stream = create_regen_stream(env, el, output_type, None, op);
+    add_push_observer(el, input_stream, stream);
+    stream
+  }
+
+  pub extern "C" fn register_merge_stream(
+    env : Env,
+    el : Ptr<EventLoop>,
+    stream_a : Ptr<Stream>,
+    stream_b : Ptr<Stream>,
+    output_type : TypeHandle,
+  ) -> Ptr<Stream>
+  {
+    let op = StreamOperation::Merge(stream_a, stream_b);
+    let stream = create_regen_stream(env, el, output_type, None, op);
+    add_push_observer(el, stream_a, stream);
+    add_push_observer(el, stream_b, stream);
+    stream
+  }
+
+  pub extern "C" fn register_sample_stream(
+    env : Env,
+    el : Ptr<EventLoop>,
+    trigger_stream : Ptr<Stream>,
+    state_stream : Ptr<Stream>,
+    output_type : TypeHandle,
+  ) -> Ptr<Stream>
+  {
+    let op = StreamOperation::Sample(state_stream);
+    let stream = create_regen_stream(env, el, output_type, None, op);
+    add_push_observer(el, trigger_stream, stream);
+    add_sample_observer(el, state_stream, stream);
+    stream
   }
 }

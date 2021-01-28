@@ -11,7 +11,7 @@ use regen_core::{
   hotload::{self, HotloadState},
   event_loop::{
     self, TimerState,
-    native_filter_stream,
+    native_poll_stream,
     native_state_stream,
   },
 };
@@ -48,12 +48,13 @@ pub fn watch_file(path : &str) {
   let event_loop = get_event_loop(env);
 
   let timer = event_loop::create_timer(event_loop, 0, 10);
-  let file_changes = native_filter_stream(event_loop, timer, watch_state,
+  let file_changes = native_poll_stream(event_loop, timer, watch_state,
     |ws : &mut WatchState, _ : &TimerState| {
       match ws.rx.try_recv() {
         Ok(event) => {
           match event {
             DebouncedEvent::Write(_) => {
+              println!("should hotload file");
               true
             }
             _ => false,

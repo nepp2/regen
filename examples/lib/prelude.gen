@@ -4,20 +4,85 @@
 )))
 
 (def tick_stream (fun ((millisecond_interval i64))
-  (tick_stream_ffi env event_loop millisecond_interval)
+  (register_tick_stream env event_loop millisecond_interval)
 ))
 
+(def stream_ptr (ptr void))
+
+(def update_fn_type
+  (fn ((state (ptr void)) (event (ptr void))) void))
+
 (def state_stream (fun (
-  (input_stream u64)
+  (input_stream stream_ptr)
   (state_type type)
   (initial_state (ptr void))
-  (update_function (ptr void))
+  (update_function update_fn_type)
 )
-  (state_stream_ffi
+  (register_state_stream
     env
     event_loop
     input_stream
     state_type
     initial_state
     update_function)
+))
+
+(def poll_fn_type
+  (fn ((state (ptr void)) (event (ptr void))) bool))
+
+(def poll_stream (fun (
+  (input_stream stream_ptr)
+  (state_type type)
+  (initial_state (ptr void))
+  (poll_function poll_fn_type)
+)
+  (register_poll_stream
+    env
+    event_loop
+    input_stream
+    state_type
+    initial_state
+    poll_function)
+))
+
+(def map_fn_type
+  (fn ((output (ptr void)) (event (ptr void))) void))
+
+(def map_stream (fun (
+  (input_stream stream_ptr)
+  (output_type type)
+  (map_function map_fn_type)
+)
+  (register_map_stream
+    env
+    event_loop
+    input_stream
+    output_type
+    map_function)
+))
+
+(def merge_stream (fun (
+  (a stream_ptr)
+  (b stream_ptr)
+  (output_type type)
+)
+  (register_merge_stream
+    env
+    event_loop
+    a
+    b
+    output_type)
+))
+
+(def sample_stream (fun (
+  (a stream_ptr)
+  (b stream_ptr)
+  (output_type type)
+)
+  (register_sample_stream
+    env
+    event_loop
+    a
+    b
+    output_type)
 ))

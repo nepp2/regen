@@ -772,14 +772,14 @@ fn try_expr_to_type(b: &Builder, e : Expr) -> Option<TypeHandle> {
     // function type
     ExprContent::FnType { args, ret } => {
       let arg_types : Vec<TypeHandle> =
-        args.as_slice().iter().map(|a| expr_to_type(b, a.tag)).collect();
+        args.as_slice().iter().map(|&e| expr_to_type(b, e)).collect();
       let returns = expr_to_type(b, ret);
       types::function_type(&arg_types, returns)
     }
     // c function type
     ExprContent::CFunType { args, ret } => {
       let arg_types : Vec<TypeHandle> =
-        args.as_slice().iter().map(|a| expr_to_type(b, a.tag)).collect();
+        args.as_slice().iter().map(|&e| expr_to_type(b, e)).collect();
       let returns = expr_to_type(b, ret);
       types::c_function_type(&arg_types, returns)
     }
@@ -793,11 +793,11 @@ fn try_expr_to_type(b: &Builder, e : Expr) -> Option<TypeHandle> {
     ExprContent::StructType(fields) => {
       let mut field_names = vec![];
       let mut field_types = vec![];
-      for a in fields {
-        if let Some(name) = a.name {
+      for f in fields {
+        if let Some(name) = f.name {
           field_names.push(name.as_symbol());
         }
-        field_types.push(expr_to_type(b, a.tag));
+        field_types.push(expr_to_type(b, f.tag));
       }
       types::struct_type(
         perm_slice_from_vec(field_names),
