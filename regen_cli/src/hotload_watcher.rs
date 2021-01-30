@@ -18,7 +18,12 @@ use regen_core::{
 use std::fs;
 
 fn hotload_file(env : Env, hs : &mut HotloadState, path : &str) {
+  println!();
+  println!();
+  println!("-----------------------------------");
   println!("Hotloading file '{}'", path);
+  println!("-----------------------------------");
+  println!();
   let code =
     fs::read_to_string(path)
     .expect("Something went wrong reading the file");
@@ -49,12 +54,11 @@ pub fn watch_file(path : &str) {
 
   let timer = event_loop::create_timer(event_loop, 0, 10);
   let file_changes = native_poll_stream(event_loop, timer, watch_state,
-    |ws : &mut WatchState, _ : &TimerState| {
+    |ws : &mut WatchState, _output : &mut i64, _input : &TimerState| {
       match ws.rx.try_recv() {
         Ok(event) => {
           match event {
             DebouncedEvent::Write(_) => {
-              println!("should hotload file");
               true
             }
             _ => false,

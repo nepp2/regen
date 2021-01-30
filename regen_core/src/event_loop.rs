@@ -14,6 +14,15 @@ use crate::{
 pub struct StreamId(pub u64);
 
 #[derive(Copy, Clone)]
+pub struct Stream {
+  pub id : StreamId,
+  pub event_loop : Ptr<EventLoop>,
+  pub output : *mut (),
+  pub operation : StreamOperation,
+  pub last_update : u64,
+}
+
+#[derive(Copy, Clone)]
 struct Observer {
   stream : Ptr<Stream>,
   push_changes : bool,
@@ -34,41 +43,42 @@ pub struct TimerState {
   pub next_tick_millisecond : i64,
 }
 
-#[derive(Copy, Clone)]
-pub struct Stream {
-  pub id : StreamId,
-  pub event_loop : Ptr<EventLoop>,
-  pub state : *mut (),
-  pub operation : StreamOperation,
-  pub last_update : u64,
-}
-
 #[derive(Clone, Copy)]
 pub struct RegenCallback { env : Env, f : *const Function }
 
 #[derive(Clone, Copy)]
 pub enum StreamOperation {
   Timer,
-  Poll(Ptr<Stream>, RegenCallback),
+  Poll{ input_stream: Ptr<Stream>, event_source : *mut (), poll_function : RegenCallback },
   State(Ptr<Stream>, RegenCallback),
   Map(Ptr<Stream>, RegenCallback),
   Sample(Ptr<Stream>),
   Merge(Ptr<Stream>, Ptr<Stream>),
 
-  NativeSource(Ptr<Stream>, fn(*mut (), *const ()) -> bool),
+  NativePoll{
+    input_stream: Ptr<Stream>,
+    event_source : *mut (),
+    poll_function : fn(*mut (), *mut (), *const ()) -> bool,
+  },
   NativeState(Ptr<Stream>, fn(*mut (), *const ())),
 }
 
-pub fn native_poll_stream<State, Event>(
+pub fn native_poll_stream<EventSource, OutputEvent, InputEvent>(
   el : Ptr<EventLoop>,
-  parent : Ptr<Stream>,
-  state : State,
-  f : fn(&mut State, &Event) -> bool
+  input_stream : Ptr<Stream>,
+  event_source : EventSource,
+  f : fn(&mut EventSource, &mut OutputEvent, &InputEvent) -> bool
 ) -> Ptr<Stream>
 {
-  let op = StreamOperation::NativeSource(parent, unsafe { std::mem::transmute(f as *const ()) });
-  let s = create_orphan_stream(el, state, op);
-  add_push_observer(el, parent, s);
+  let event_source = alloc_val(event_source);
+  let op = StreamOperation::NativePoll {
+    input_stream,
+    event_source,
+    poll_function: unsafe { std::mem::transmute(f as *const ()) },
+  };
+  let output = alloc_bytes(std::mem::size_of::<OutputEvent>(), None);
+  let s = create_stream(el, output, op);
+  add_push_observer(el, input_stream, s);
   s
 }
 
@@ -79,8 +89,9 @@ pub fn native_state_stream<State, Event>(
   f : fn(&mut State, &Event)
 ) -> Ptr<Stream>
 {
+  let state = alloc_val(state);
   let op = StreamOperation::NativeState(parent, unsafe { std::mem::transmute(f as *const ()) });
-  let s = create_orphan_stream(el, state, op);
+  let s = create_stream(el, state, op);
   add_push_observer(el, parent, s);
   s
 }
@@ -93,37 +104,38 @@ fn update_stream(update_number : u64, mut stream : Ptr<Stream>) -> bool {
     Timer => {
       panic!("timer streams should never be triggered by other streams");
     }
-    Poll(parent, f) => {
-      let event = parent.state;
+    Poll { input_stream, event_source, poll_function } => {
+      let event = input_stream.output;
       let mut return_val = true;
+      let f = poll_function.f as *const Function;
+      let env = poll_function.env;
       interpret::interpret_function(
-        f.f as *const Function,
-        &[stream.state as u64, event as u64],
-        f.env, Some((&mut return_val) as *mut bool as *mut ()));
+        f,
+        &[event_source as u64, stream.output as u64, event as u64],
+        env, Some((&mut return_val) as *mut bool as *mut ()));
       return_val
     }
-    NativeSource(parent, f) => {
-      let event = parent.state;
-      f(stream.state, event)
+    NativePoll { input_stream, event_source, poll_function } => {
+      poll_function(event_source, stream.output, input_stream.output)
     }
     State(parent, f) => {
-      let event = parent.state;
+      let event = parent.output;
       interpret::interpret_function(
         f.f as *const Function,
-        &[stream.state as u64, event as u64],
+        &[stream.output as u64, event as u64],
         f.env, None);
       true
     }
     NativeState(parent, f) => {
-      let event = parent.state;
-      f(stream.state, event);
+      let event = parent.output;
+      f(stream.output, event);
       true
     }
     Map(parent, f) => {
-      let event = parent.state;
+      let event = parent.output;
       interpret::interpret_function(
         f.f as *const Function,
-        &[stream.state as u64, event as u64],
+        &[stream.output as u64, event as u64],
         f.env, None);
       true
     }
@@ -133,18 +145,18 @@ fn update_stream(update_number : u64, mut stream : Ptr<Stream>) -> bool {
       // what happens if the state being sampled from doesn't _have_
       // a value yet?
       let TODO = ();
-      stream.state = sample_from.state;
+      stream.output = sample_from.output;
       true
     }
     Merge(stream_a, stream_b) => {
       // check if stream A has a new event
       if stream_a.last_update == update_number {
-        stream.state = stream_a.state;
+        stream.output = stream_a.output;
         return true;
       }
       // check if stream B has a new event
       if stream_b.last_update == update_number {
-        stream.state = stream_b.state;
+        stream.output = stream_b.output;
         return true;
       }
       // panic if neither of them do
@@ -169,15 +181,16 @@ fn next_id(mut el : Ptr<EventLoop>) -> StreamId {
   id
 }
 
-fn create_orphan_stream<State>(
-  el : Ptr<EventLoop>, state : State,
+fn create_stream(
+  el : Ptr<EventLoop>,
+  output_addr : *mut (),
   operation : StreamOperation,
 ) -> Ptr<Stream>
 {
   let stream = perm(Stream {
     id : next_id(el),
     event_loop: el,
-    state: Ptr::to_ptr(perm(state)) as *mut (),
+    output: output_addr,
     operation,
     last_update: 0,
   });
@@ -196,7 +209,8 @@ pub fn create_timer(mut el : Ptr<EventLoop>, current_millisecond : i64, millisec
     millisecond_interval,
     next_tick_millisecond: current_millisecond + millisecond_interval,
   };
-  let s = create_orphan_stream(el, timer_state, StreamOperation::Timer);
+  let state = alloc_val(timer_state);
+  let s = create_stream(el, state, StreamOperation::Timer);
   el.timers.push(s);
   s
 }
@@ -205,7 +219,7 @@ fn current_millisecond(start : Instant) -> i64 {
   Instant::now().duration_since(start).as_millis() as i64
 }
 
-fn handle_stream_input(event_loop : Ptr<EventLoop>, stream : Ptr<Stream>, event : *const ()) {
+fn handle_stream_input(event_loop : Ptr<EventLoop>, stream : Ptr<Stream>) {
   let TODO = (); // doesn't solve the diamond/glitch problem yet
   let should_push = update_stream(event_loop.update_count, stream);
   if should_push {
@@ -217,7 +231,7 @@ fn push_to_observers(event_loop : Ptr<EventLoop>, stream : Ptr<Stream>) {
   if let Some(observers) = event_loop.observers.get(&stream.id) {
     for &ob in observers {
       if ob.push_changes {
-        handle_stream_input(event_loop, ob.stream, stream.state);
+        handle_stream_input(event_loop, ob.stream);
       }
     }
   }
@@ -225,12 +239,12 @@ fn push_to_observers(event_loop : Ptr<EventLoop>, stream : Ptr<Stream>) {
 
 fn handle_timer_pulse(mut event_loop : Ptr<EventLoop>, stream : Ptr<Stream>, current_time : i64) {
   if let StreamOperation::Timer = stream.operation {
-    let timer : &mut TimerState = unsafe {
-      &mut *(stream.state as *mut TimerState)
-    };
-    timer.next_tick_millisecond = current_time + timer.millisecond_interval;
     event_loop.update_count += 1;
     push_to_observers(event_loop, stream);
+    let timer : &mut TimerState = unsafe {
+      &mut *(stream.output as *mut TimerState)
+    };
+    timer.next_tick_millisecond = current_time + timer.millisecond_interval;
   }
   else {
     panic!("expected timer");
@@ -247,7 +261,7 @@ pub fn start_loop(event_loop : Ptr<EventLoop>) {
     // figure out which timer will tick next
     let (stream, mut timer) =
       event_loop.timers.iter().map(|&s| {
-        let t : Ptr<TimerState> = Ptr::from_ptr(s.state as *mut TimerState);
+        let t : Ptr<TimerState> = Ptr::from_ptr(s.output as *mut TimerState);
         (s, t)
       })
       .min_by_key(|x| x.1.next_tick_millisecond)
@@ -275,26 +289,34 @@ fn add_sample_observer(mut el : Ptr<EventLoop>, parent : Ptr<Stream>, stream : P
   el.observers.entry(parent.id).or_insert(vec![]).push(ob);
 }
 
+fn alloc_val<V>(v : V) -> *mut () {
+  Ptr::to_ptr(perm(v)) as *mut ()
+}
+
+fn alloc_bytes(bytes : usize, initial_value : Option<*const ()>) -> *mut () {
+  let layout = Layout::from_size_align(bytes, 8).unwrap();
+  unsafe {
+    let ptr = alloc(layout) as *mut ();
+    if let Some(v) = initial_value {
+      std::ptr::copy_nonoverlapping(v as *const u8, ptr as *mut u8, bytes);
+    }
+    ptr as *mut ()
+  }
+}
+
 fn create_regen_stream(
   env : Env,
   el : Ptr<EventLoop>,
-  state_type : TypeHandle,
-  initial_state : Option<*const ()>,
+  output_type : TypeHandle,
+  initial_value : Option<*const ()>,
   operation : StreamOperation,
 ) -> Ptr<Stream>
 {
-  let layout = Layout::from_size_align(state_type.size_of as usize, 8).unwrap();
-  let state = unsafe {
-    let ptr = alloc(layout) as *mut ();
-    if let Some(s) = initial_state {
-      std::ptr::copy_nonoverlapping(s, ptr, state_type.size_of as usize);
-    }
-    ptr as *mut ()
-  };
+  let output = alloc_bytes(output_type.size_of as usize, initial_value);
   let stream = perm(Stream {
     id: next_id(el),
     event_loop: el,
-    state,
+    output,
     operation,
     last_update: 0,
   });
@@ -338,13 +360,19 @@ pub mod ffi {
     env : Env,
     el : Ptr<EventLoop>,
     input_stream : Ptr<Stream>,
-    state_type : TypeHandle,
-    initial_state : *const (),
+    event_source_type : TypeHandle,
+    event_source : *const (),
+    event_type : TypeHandle,
     poll_function : *const Function,
   ) -> Ptr<Stream>
   {
-    let op = StreamOperation::State(input_stream, RegenCallback { env, f: poll_function });
-    let stream = create_regen_stream(env, el, state_type, Some(initial_state), op);
+    let event_source = alloc_bytes(event_source_type.size_of as usize, Some(event_source));
+    let op = StreamOperation::Poll {
+      input_stream,
+      event_source,
+      poll_function: RegenCallback { env, f: poll_function },
+    };
+    let stream = create_regen_stream(env, el, event_type, None, op);
     add_push_observer(el, input_stream, stream);
     stream
   }

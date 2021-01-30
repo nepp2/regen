@@ -168,10 +168,10 @@ pub fn load_ffi_libs(e : Env) {
         stream_ptr));
 
   let poll_fn_type =
-    function_type(&[void_ptr, void_ptr], bool_type);
+    function_type(&[void_ptr, void_ptr, void_ptr], bool_type);
   define_global(e, "register_poll_stream", register_poll_stream as u64,
     c_function_type(
-      &[env_ptr, event_loop_ptr, stream_ptr, type_tag, void_ptr, poll_fn_type],
+      &[env_ptr, event_loop_ptr, stream_ptr, type_tag, void_ptr, type_tag, poll_fn_type],
         stream_ptr));
 
   let map_fn_type =

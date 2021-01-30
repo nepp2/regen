@@ -554,7 +554,9 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     ExprContent::FieldIndex { structure, field_name } => {
       let struct_ref = compile_and_fully_deref(b, structure);
       let struct_addr = struct_ref.get_address(b).id;
-      let info = types::type_as_struct(&struct_ref.t).expect("expected struct");
+      let info =
+        types::type_as_struct(&struct_ref.t)
+        .unwrap_or_else(|| panic!("expected struct, found {} at ({})", struct_ref.t, e.n.loc));
       let i = {
         let sym = field_name.as_symbol();
         info.field_names.as_slice().iter()
@@ -762,7 +764,8 @@ fn expr_to_type(b: &Builder, e : Expr) -> TypeHandle {
 fn try_expr_to_type(b: &Builder, e : Expr) -> Option<TypeHandle> {
   let t = match e.content {
     ExprContent::GlobalRef(sym) => {
-      symbol_to_type(b, sym).expect("expected type")
+      symbol_to_type(b, sym)
+        .unwrap_or_else(|| panic!("expected type at ({})", e.n.loc))
     }
     // pointer type
     ExprContent::PtrType(inner_type) => {
@@ -890,7 +893,7 @@ fn binary_op_type(c : &CoreTypes, op : Operator, a : TypeHandle, b : TypeHandle)
           return Some(a);
         }
       }
-      Eq => {
+      Eq | NEq => {
         if types::is_number(a) || types::is_bool(a) {
           return Some(c.bool_tag);
         }

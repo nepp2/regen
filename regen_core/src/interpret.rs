@@ -124,6 +124,7 @@ macro_rules! binop {
       Div => $frame.set_local(var, &(a / b)),
       Rem => $frame.set_local(var, &(a % b)),
       Eq => $frame.set_local(var, &(a == b)),
+      NEq => $frame.set_local(var, &(a != b)),
       LT => $frame.set_local(var, &(a < b)),
       GT => $frame.set_local(var, &(a > b)),
       LTE => $frame.set_local(var, &(a <= b)),
@@ -198,13 +199,15 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
               
             }
             UnaryOp(op, a) => {
-              let a : u64 = frame.get_local(a);
-              let val = match op {
+              match op {
                 Sub => panic!("signed types not yet supported"),
-                Not => !(a != 0) as u64,
+                Not => {
+                  let mut v : bool = frame.get_local(a);
+                  v = !v;
+                  frame.set_local(var, &v);
+                }
                 _ => panic!("op not unary"),
-              };
-              frame.set_local(var, &val);
+              }
             }
             Invoke(f, args) => {
               frame.push_args(args);

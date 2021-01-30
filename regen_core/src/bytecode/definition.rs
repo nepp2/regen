@@ -26,7 +26,7 @@ pub enum Operator {
   // arithmetic
   Add, Sub, Mul, Div, Rem,
   // comparison
-  Eq, LT, GT, LTE, GTE,
+  Eq, NEq, LT, GT, LTE, GTE,
   // boolean
   Not,
   // bitwise

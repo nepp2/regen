@@ -9,6 +9,8 @@
 
 # Issues
 
+* I don't think the `not` operator works
+
 * Add support for binding event streams to defs
 
 * Fix event handler ordering

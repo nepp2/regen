@@ -19,6 +19,8 @@
 (def sdl_window_handle u64)
 (def sdl_renderer_handle u64)
 
+
+
 ;; Event type codes
 (def SDL_QUIT (256 u32))
 (def SDL_WINDOWEVENT (512 u32))
@@ -63,6 +65,11 @@
 (def sdl_destroy_window (cast
   (load_library_symbol sdl2 (sym SDL_DestroyWindow))
   (cfun ((sdl_window_handle)) void)
+))
+
+(def sdl_get_window_id (cast
+  (load_library_symbol sdl2 (sym SDL_GetWindowID))
+  (cfun ((sdl_window_handle)) u32)
 ))
 
 (def sdl_set_window_position (cast

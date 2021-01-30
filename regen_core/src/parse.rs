@@ -434,6 +434,7 @@ fn str_to_operator(s : &str) -> Option<Operator> {
     "/" => Div,
     "%" => Rem,
     "==" => Eq,
+    "!=" => NEq,
     "<" => LT,
     ">" => GT,
     "<=" => LTE,
