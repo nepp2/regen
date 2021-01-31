@@ -72,7 +72,7 @@
 
   (let x (+ 50 (. state ticker)))
 
-  (let rect (init sdl_rect x 50 300 200))
+  (let rect (init sdl_rect (cast x u32) (50 u32) (300 u32) (200 u32)))
 
   (sdl_fill_rect r (ref rect))
   (sdl_present r)

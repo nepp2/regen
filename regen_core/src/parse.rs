@@ -5,6 +5,7 @@ use sexp::{
   NodeLiteral,
   NodeShape::*,
   NodeContent,
+  SrcLocation,
 };
 use node_macros::{NodeBuilder, template_macro};
 use symbols::{Symbol, SymbolTable};
@@ -19,13 +20,12 @@ pub type Expr = Ptr<ExprData>;
 #[derive(Copy, Clone)]
 pub struct ExprData {
   pub content : ExprContent,
-  pub n : Node,
+  pub loc : SrcLocation,
 }
 
 #[derive(Copy, Clone)]
 pub enum ExprContent {
   Let(Node, Expr),
-  DefMarker { name: Node, initialiser : Expr },
   LocalRef(Symbol),
   GlobalRef(Symbol),
   StructInit(Expr, SlicePtr<Expr>),
@@ -111,7 +111,7 @@ pub fn parse_to_expr_with_global_references(st : SymbolTable, root : Node) -> (E
 fn to_expr(ts : &mut TagState, n : Node) -> Expr {
   let ed = ExprData {
     content: to_expr_content(ts, n),
-    n,
+    loc: n.loc,
   };
   perm(ed)
 }

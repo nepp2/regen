@@ -2,7 +2,7 @@
 
 use crate::{symbols, types, perm_alloc, sexp};
 use symbols::Symbol;
-use sexp::Node;
+use sexp::{SrcLocation};
 use types::TypeHandle;
 use perm_alloc::{SlicePtr, Ptr};
 
@@ -56,7 +56,7 @@ pub enum InstrExpr {
 pub enum Instr {
   Expr(LocalHandle, InstrExpr),
   CJump{ cond: LocalHandle, then_seq: SequenceHandle, else_seq: SequenceHandle },
-  Debug(Node, LocalHandle, TypeHandle),
+  Debug(SrcLocation, LocalHandle, TypeHandle),
   Jump(SequenceHandle),
   Store{ pointer : LocalHandle, value : LocalHandle },
   Return(Option<LocalHandle>),

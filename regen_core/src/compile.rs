@@ -16,7 +16,7 @@ use perm_alloc::{Ptr, perm_slice_from_vec, perm_slice, perm};
 
 use symbols::Symbol;
 use env::Env;
-use sexp::{ Node, NodeLiteral };
+use sexp::{Node, NodeLiteral, SrcLocation};
 use parse::{Expr, ExprContent};
 
 struct LabelledExpr {
@@ -317,7 +317,7 @@ fn compile_if_else(b : &mut Builder, cond_expr : Expr, then_expr : Expr, else_ex
   let else_seq = create_sequence(b, "else");
   let exit_seq = create_sequence(b, "exit");
   let cond = compile_expr_to_var(b, cond_expr).id;
-  assert_type(cond_expr.n, cond.t, b.env.c.bool_tag);
+  assert_type(cond_expr.loc, cond.t, b.env.c.bool_tag);
   b.bc.instrs.push(Instr::CJump{ cond, then_seq, else_seq });
   set_current_sequence(b, then_seq);
   let then_result = compile_expr(b, then_expr);
@@ -368,7 +368,7 @@ fn compile_expr_to_ref(b : &mut Builder, e : Expr) -> Ref {
     r
   }
   else {
-    panic!("expected value, found none, at node {} ({})", e.n, e.n.loc);
+    panic!("expected value, found none at ({})", e.loc);
   }
 }
 
@@ -377,9 +377,9 @@ fn compile_expr_to_var(b : &mut Builder, e : Expr) -> Var {
   r.to_var(b)
 }
 
-fn assert_type(n : Node, t : TypeHandle, expected : TypeHandle) {
+fn assert_type(loc : SrcLocation, t : TypeHandle, expected : TypeHandle) {
   if t != expected {
-    panic!("expected {}, found {} at ({})", expected, t, n.loc)
+    panic!("expected {}, found {} at ({})", expected, t, loc)
   }
 }
 
@@ -456,7 +456,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
         Some(pointer_to_locator(v, true))
       }
       else {
-        panic!("symbol '{}' not defined ({})", sym, e.n.loc)
+        panic!("symbol '{}' not defined ({})", sym, e.loc)
       }
     }
     // literal u64
@@ -484,7 +484,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
         let v = compile_expr_to_var(b, *e);
         if v.t != element_type {
           panic!("expected element of type {} and found type {}, at {}",
-            element_type, v.t, e.n.loc);
+            element_type, v.t, e.loc);
         }
         element_values.push(v.id);
       }
@@ -515,7 +515,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
         info
       }
       else {
-        panic!("expected array at ({})", array.n.loc)
+        panic!("expected array at ({})", array.loc)
       };
       let array_ptr = v.get_address(b);
       let element_ptr_type = types::pointer_type(info.inner);
@@ -541,11 +541,25 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     // init
     ExprContent::StructInit(type_expr, field_vals) => {
       let t = expr_to_type(b, type_expr);
+      let info = if let Some(i) = types::type_as_struct(&t) {
+        i
+      }
+      else {
+        panic!("expected struct, found {} at ({})",
+          t, e.loc);
+      };
+      if field_vals.len() != info.field_types.len() {
+        panic!("expected {} fields, found {}, at ({})",
+          info.field_types.len(), field_vals.len(), e.loc);
+      }
       let mut field_values = Vec::with_capacity(field_vals.len);
-      for f in field_vals {
-        // TODO: check types
-        let aaa = ();
-        field_values.push(compile_expr_to_var(b, *f).id);
+      for (i, f) in field_vals.as_slice().iter().enumerate() {
+        let v = compile_expr_to_var(b, *f);
+        if info.field_types[i] != v.t  {
+          panic!("expected arg of type {}, found type {}, at ({})",
+            info.field_types[i], v.t, f.loc);
+        }
+        field_values.push(v.id);
       }
       let e = InstrExpr::Init(perm_slice_from_vec(field_values));
       Some(push_expr(b, e, t).to_ref())
@@ -556,7 +570,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       let struct_addr = struct_ref.get_address(b).id;
       let info =
         types::type_as_struct(&struct_ref.t)
-        .unwrap_or_else(|| panic!("expected struct, found {} at ({})", struct_ref.t, e.n.loc));
+        .unwrap_or_else(|| panic!("expected struct, found {} at ({})", struct_ref.t, e.loc));
       let i = {
         let sym = field_name.as_symbol();
         info.field_names.as_slice().iter()
@@ -571,11 +585,6 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     // quotation
     ExprContent::Quote(quoted) => {
       Some(compile_quote(b, quoted).to_ref())
-    }
-    // def
-    ExprContent::DefMarker { name, initialiser } => {
-      // TODO: just ignores the name. this is a bit odd.
-      compile_expr(b, initialiser)
     }
     // fun
     ExprContent::Fun { args, ret, body } => {
@@ -606,7 +615,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       let then_seq = create_sequence(b, "then");
       let exit_seq = create_sequence(b, "exit");
       let cond_var = compile_expr_to_var(b, cond).id;
-      assert_type(cond.n, cond_var.t, b.env.c.bool_tag);
+      assert_type(cond.loc, cond_var.t, b.env.c.bool_tag);
       b.bc.instrs.push(Instr::CJump{ cond: cond_var, then_seq, else_seq: exit_seq });
       set_current_sequence(b, then_seq);
       compile_expr(b, then_expr);
@@ -646,7 +655,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     // debug
     ExprContent::Debug(v) => {
       let local = compile_expr_to_var(b, v);
-      b.bc.instrs.push(Instr::Debug(v.n, local.id, local.t));
+      b.bc.instrs.push(Instr::Debug(v.loc, local.id, local.t));
       None
     }
     // symbol
@@ -743,7 +752,7 @@ fn eval_literal_u64(env : Env, e : Expr) -> u64 {
       return v;
     }
   }
-  panic!("{} is not literal u64 at ({})", e.n, e.n.loc)
+  panic!("expected literal u64 at ({})", e.loc)
 }
 
 fn compile_type_expr(b : &mut Builder, e : Expr) -> Var {
@@ -757,7 +766,7 @@ fn expr_to_type(b: &Builder, e : Expr) -> TypeHandle {
     t
   }
   else {
-    panic!("{} is not valid type, at ({})", e.n, e.n.loc);
+    panic!("invalid type expression at ({})", e.loc);
   }
 }
 
@@ -765,7 +774,7 @@ fn try_expr_to_type(b: &Builder, e : Expr) -> Option<TypeHandle> {
   let t = match e.content {
     ExprContent::GlobalRef(sym) => {
       symbol_to_type(b, sym)
-        .unwrap_or_else(|| panic!("expected type at ({})", e.n.loc))
+        .unwrap_or_else(|| panic!("expected type at ({})", e.loc))
     }
     // pointer type
     ExprContent::PtrType(inner_type) => {
@@ -834,23 +843,23 @@ fn compile_function_call(b : &mut Builder, e : Expr, function : Expr, args : &[E
     i
   }
   else {
-    panic!("expected function, found {} expression '{}' at ({})",
-      f.t, function.n, function.n.loc);
+    panic!("expected function, found {} at ({})",
+      f.t, function.loc);
   };
   if args.len() != info.args.len() {
     panic!("expected {} args, found {}, at ({})",
-      info.args.len(), args.len(), e.n.loc);
+      info.args.len(), args.len(), e.loc);
   }
   let mut arg_values = vec![];
   for i in 0..args.len() {
     let arg = args[i];
     let v = compile_expr_to_var(b, arg);
     if info.args[i] != v.t  {
-      panic!("expected arg of type {}, found type {}, at ({})", info.args[i], v.t, arg.n.loc);
+      panic!("expected arg of type {}, found type {}, at ({})", info.args[i], v.t, arg.loc);
     }
     if info.c_function && v.t.size_of > 8 {
       panic!("types passed to a C function must be 64 bits wide or less; found type {} of width {} as ({})",
-        v.t, v.t.size_of, arg.n.loc);
+        v.t, v.t.size_of, arg.loc);
     }
     arg_values.push(v.id);
   }
@@ -931,7 +940,7 @@ fn compile_intrinic_op(b : &mut Builder, e : Expr, op : Operator, args : &[Expr]
       return push_expr(b, e, t);
     }
     panic!("no binary op {} for types {} and {} at ({})",
-      op, v1.t, v2.t, e.n.loc)
+      op, v1.t, v2.t, e.loc)
   }
   if let [v1] = args {
     let v1 = compile_expr_to_var(b, *v1);
@@ -940,9 +949,9 @@ fn compile_intrinic_op(b : &mut Builder, e : Expr, op : Operator, args : &[Expr]
       return push_expr(b, e, t);
     }
     panic!("no unary op {} for type {} at ({})",
-      op, v1.t, e.n.loc)
+      op, v1.t, e.loc)
   }
-  panic!("incorrect number of args to operator {} at ({})", op, e.n.loc)
+  panic!("incorrect number of args to operator {} at ({})", op, e.loc)
 }
 
 fn compile_quote(b : &mut Builder, quoted : Node) -> Var {
