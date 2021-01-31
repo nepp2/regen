@@ -15,7 +15,6 @@ pub mod types;
 pub mod debug;
 pub mod event_loop;
 pub mod hotload;
-mod region;
 
 // TODO: is this needed?
 // mod graph;
