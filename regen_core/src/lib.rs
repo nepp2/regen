@@ -15,6 +15,8 @@ pub mod types;
 pub mod debug;
 pub mod event_loop;
 pub mod hotload;
+mod lexer;
+mod error;
 
 // TODO: is this needed?
 // mod graph;
