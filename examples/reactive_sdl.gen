@@ -96,9 +96,9 @@
   (set (* output) e)
 )))
 
-(def tick_to_game_event (fun ((output (ptr game_event)) (tick_event (ptr tick_event))) (do
+(def tick_to_game_event (fun ((output (ptr game_event)) (tick (ptr tick_event))) (do
   (let e 
-    (init game_event (cast 0 (ptr sdl_event)) tick_event))
+    (init game_event (cast 0 (ptr sdl_event)) tick))
   (set (* output) e)
 )))
 

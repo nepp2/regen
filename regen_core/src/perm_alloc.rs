@@ -169,15 +169,6 @@ impl <T: 'static> Index<RangeFrom<usize>> for SlicePtr<T> {
   }
 }
 
-// impl<'a, T> Iterator for &'a SlicePtr<T> {
-//   type Item = &'a T;
-
-//   fn iter(self) -> Self {
-//       self.as_slice().iter()
-//   }
-// }
-
-
 impl<T : 'static> IntoIterator for SlicePtr<T> {
   type Item = &'static T;
   type IntoIter = std::slice::Iter<'static, T>;
