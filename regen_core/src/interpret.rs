@@ -175,7 +175,7 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
               let field_ptr = unsafe { tuple_ptr.add(field_offset as usize) };
               frame.set_local(var, &field_ptr);
             }
-            LiteralU64(val) => {
+            LiteralI64(val) => {
               frame.set_local(var, &val);
             }
             Literal(_t, p) => {

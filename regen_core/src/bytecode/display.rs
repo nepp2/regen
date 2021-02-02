@@ -103,7 +103,7 @@ impl fmt::Display for Operator {
 impl fmt::Display for DisplayExpr {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match &self.1 {
-      InstrExpr::LiteralU64(v) =>
+      InstrExpr::LiteralI64(v) =>
         write!(f, "{}", v),
       InstrExpr::Literal(t, _v) =>
         write!(f, "(literal {})", t),

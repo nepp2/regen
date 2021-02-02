@@ -34,7 +34,7 @@ use NodeContent::*;
 
 #[derive(Clone, Copy)]
 pub enum NodeLiteral {
-  U64(u64),
+  I64(i64),
   String(Ptr<RegenString>),
 }
 
@@ -176,17 +176,17 @@ impl NodeInfo {
     }
   }
 
-  pub fn as_literal_u64(&self) -> u64 {
+  pub fn as_literal_i64(&self) -> i64 {
     match self.content {
-      Literal(NodeLiteral::U64(v)) => v,
-      _ => panic!("expected literal u64"),
+      Literal(NodeLiteral::I64(v)) => v,
+      _ => panic!("expected literal i64"),
     }
   }
 }
 
 fn parse_atom(st : SymbolTable, s : &str) -> NodeContent {
-  if let Ok(v) = s.parse::<u64>() {
-    Literal(NodeLiteral::U64(v))
+  if let Ok(v) = s.parse::<i64>() {
+    Literal(NodeLiteral::I64(v))
   }
   else {
     Sym(to_symbol(st, s))

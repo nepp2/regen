@@ -17,7 +17,7 @@ pub mod debug;
 pub mod event_loop;
 pub mod hotload;
 mod lexer;
-//mod alt_parse;
+mod alt_parse;
 mod error;
 
 // TODO: is this needed?

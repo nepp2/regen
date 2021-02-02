@@ -14,6 +14,10 @@ impl Symbol {
     self.0 as u64
   }
 
+  pub fn as_i64(self) -> i64 {
+    self.0 as i64
+  }
+
   pub fn as_str(self) -> &'static str {
     unsafe { &**self.0 }
   }

@@ -25,6 +25,10 @@ impl <T> Ptr<T> {
     v.p as u64
   }
 
+  pub fn to_i64(v : Self) -> i64 {
+    v.p as i64
+  }
+
   pub fn from_ptr(p : *mut T) -> Self {
     let TODO = (); // mark as unsafe
     Ptr { p }

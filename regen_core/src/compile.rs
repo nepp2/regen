@@ -258,8 +258,8 @@ fn complete_function(mut b : Builder) -> FunctionBytecode {
 
 fn function_to_var(b : &mut Builder, f : Function) -> Var {
   let function_var = new_var(b, f.t, false);
-  let f_addr = Box::into_raw(Box::new(f)) as u64;
-  b.bc.instrs.push(Instr::Expr(function_var.id, InstrExpr::LiteralU64(f_addr)));
+  let f_addr = Box::into_raw(Box::new(f)) as i64;
+  b.bc.instrs.push(Instr::Expr(function_var.id, InstrExpr::LiteralI64(f_addr)));
   function_var
 }
 
@@ -441,7 +441,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     }
     // boolean
     Literal(Val::Bool(v)) => {
-      let e = InstrExpr::LiteralU64(if v { 1 } else { 0 });
+      let e = InstrExpr::LiteralI64(if v { 1 } else { 0 });
       let v = push_expr(b, e, b.env.c.u64_tag);
       Some(compile_cast(b, v, b.env.c.bool_tag).to_ref())
     }
@@ -469,9 +469,9 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
         }
       }
     }
-    // literal u64
-    Literal(Val::U64(v)) => {
-      let e = InstrExpr::LiteralU64(v);
+    // literal i64
+    Literal(Val::I64(v)) => {
+      let e = InstrExpr::LiteralI64(v);
       Some(push_expr(b, e, b.env.c.u64_tag).to_ref())
     }
     // literal string
@@ -483,7 +483,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     }
     // literal symbol
     Literal(Val::Symbol(s)) => {
-      let e = InstrExpr::LiteralU64(s.as_u64());
+      let e = InstrExpr::LiteralI64(s.as_i64());
       return Some(push_expr(b, e, b.env.c.u64_tag).to_ref());
     }
     // literal node
@@ -683,7 +683,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     List(TypeOf, &[v]) => {
       // TODO: it's weird to codegen the expression when we only need its type
       let var = compile_expr_to_var(b, v);
-      let e = InstrExpr::LiteralU64(Ptr::to_u64(var.t));
+      let e = InstrExpr::LiteralI64(Ptr::to_i64(var.t));
       return Some(push_expr(b, e, b.env.c.type_tag).to_ref());
     }
     // deref
@@ -743,7 +743,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
 fn compile_array_len(b : &mut Builder, array : Expr) -> Var {
   let r = compile_expr_to_ref(b, array);
   let info = types::type_as_array(&r.t).expect("expected array");
-  let e = InstrExpr::LiteralU64(info.length);
+  let e = InstrExpr::LiteralI64(info.length as i64);
   push_expr(b, e, b.env.c.u64_tag)
 }
 
@@ -751,10 +751,10 @@ fn symbol_to_type(b : &Builder, s : Symbol) -> Option<TypeHandle> {
   env::get_global_value(b.env, s, b.env.c.type_tag)
 }
 
-fn eval_literal_u64(b : &Builder, e : Expr) -> u64 {
+fn eval_literal_i64(b : &Builder, e : Expr) -> i64 {
   let env = b.env;
   match e.shape() {
-    ExprShape::Literal(Val::U64(v)) => return v,
+    ExprShape::Literal(Val::I64(v)) => return v,
     ExprShape::Ref(sym) => {
       if b.info.get_ref_type(e) == ReferenceType::Global {
         if let Some(v) = env::get_global_value(env, sym, env.c.u64_tag) {
@@ -769,7 +769,7 @@ fn eval_literal_u64(b : &Builder, e : Expr) -> u64 {
 
 fn compile_type_expr(b : &mut Builder, e : Expr) -> Var {
   let type_tag = expr_to_type(b, e);
-  let e = InstrExpr::LiteralU64(Ptr::to_u64(type_tag));
+  let e = InstrExpr::LiteralI64(Ptr::to_i64(type_tag));
   push_expr(b, e, b.env.c.type_tag)
 }
 
@@ -817,8 +817,8 @@ fn try_expr_to_type(b: &Builder, e : Expr) -> Option<TypeHandle> {
     // array type
     List(SizedArrayType, &[element_type, length]) => {
       let element = expr_to_type(b, element_type);
-      let size = eval_literal_u64(b, length);
-      types::array_type(element, size)
+      let size = eval_literal_i64(b, length);
+      types::array_type(element, size as u64)
     }
     // struct type
     List(StructType, fields) => {
@@ -962,7 +962,7 @@ fn compile_intrinic_op(b : &mut Builder, e : Expr, op : Operator, args : &[Expr]
 }
 
 fn compile_quote(b : &mut Builder, quoted : Expr) -> Var {
-  let e = InstrExpr::LiteralU64(Ptr::to_ptr(quoted) as u64);
+  let e = InstrExpr::LiteralI64(Ptr::to_ptr(quoted) as i64);
   let node_tag = b.env.c.node_tag;
   push_expr(b, e, node_tag)
 }

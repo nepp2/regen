@@ -41,7 +41,7 @@ pub enum InstrExpr {
   ZeroInit,
   Array(SlicePtr<LocalHandle>),
   FieldIndex { struct_addr : LocalHandle, index : u64 },
-  LiteralU64(u64),
+  LiteralI64(i64),
   Literal(TypeHandle, *const ()),
   BinaryOp(Operator, LocalHandle, LocalHandle),
   UnaryOp(Operator, LocalHandle),

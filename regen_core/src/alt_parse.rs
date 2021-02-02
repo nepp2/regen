@@ -1,8 +1,10 @@
-use crate::{lexer::{Token, TokenType}, parse::ExprData, perm_alloc::{Ptr, perm}, sexp::{CodeModule, SrcLocation}, symbols::SymbolTable};
+use crate::{bytecode::Operator, error::error_raw, expr_macros, ffi_libs, lexer::{Token, TokenType}, parse::{ExprData, ExprShape, ExprTag, Val}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, sexp::{CodeModule, SrcLocation}, symbols::{Symbol, SymbolTable, to_symbol}};
 use crate::parse::{Expr, ExprContent};
 use crate::error::{Error, error};
 use std::collections::{HashSet, HashMap};
 use std::str::FromStr;
+
+use ExprTag::*;
 
 pub static EXPECTED_TOKEN_ERROR : &str = "Expected token. Found nothing.";
 
@@ -13,11 +15,10 @@ struct ParseConfig<'l> {
   expression_separators : HashMap<&'l str, i32>,
   prefix_precedence : HashMap<&'l str, i32>,
   infix_precedence : HashMap<&'l str, i32>,
-  special_operators : HashSet<&'l str>,
 }
 
 impl <'l> ParseConfig<'l> {
-  fn new(special_operators : &[&'l str], paren_pairs : &[(&'l str, &'l str)]) -> Self {
+  fn new(paren_pairs : &[(&'l str, &'l str)]) -> Self {
     let mut c = ParseConfig {
       next_precedence: 1,
       paren_pairs: HashMap::new(),
@@ -25,7 +26,6 @@ impl <'l> ParseConfig<'l> {
       expression_separators: HashMap::new(),
       prefix_precedence: HashMap::new(),
       infix_precedence: HashMap::new(),
-      special_operators: special_operators.iter().map(|&s| s.into()).collect(),
     };
     for &(a, b) in paren_pairs {
       c.paren_pairs.insert(a, b);
@@ -59,19 +59,15 @@ impl <'l> ParseConfig<'l> {
 }
 
 fn parse_config() -> ParseConfig<'static> {
-  let special_operators = &[
-    "=", ".", "as", "in", ":", "#", "$"
-  ];
   let paren_pairs = &[
     ("(", ")"),
     ("{", "}"),
     ("[", "]"),
   ];
-  let mut c = ParseConfig::new(special_operators, paren_pairs);
+  let mut c = ParseConfig::new(paren_pairs);
   c.separator(";");
   c.separator(",");
   c.prefix(&["#keyword"]);
-  c.infix(&["=", "+=", "in"]);
   c.infix(&[":"]);
   c.infix(&["as"]);
   c.infix(&["&&", "||"]);
@@ -86,6 +82,26 @@ fn parse_config() -> ParseConfig<'static> {
   c
 }
 
+fn str_to_operator(s : &str) -> Option<Operator> {
+  use Operator::*;
+  let op = match s {
+    "+" => Add,
+    "-" => Sub,
+    "*" => Mul,
+    "/" => Div,
+    "%" => Rem,
+    "==" => Eq,
+    "!=" => NEq,
+    "<" => LT,
+    ">" => GT,
+    "<=" => LTE,
+    ">=" => GTE,
+    "!" => Not,
+    _ => return None,
+  };
+  Some(op)
+}
+
 // TODO: this might be better implemented with a ring buffer (or just a backwards vec)
 struct ParseState<'l> {
   code_module : Ptr<CodeModule>,
@@ -96,6 +112,7 @@ struct ParseState<'l> {
 }
 
 use TokenType::*;
+use expr_macros::{NodeBuilder, template_macro};
 
 fn match_symbol(t : &Token, s : &str) -> bool {
   t.symbol().map(|sym| sym == s).unwrap_or(false)
@@ -113,8 +130,8 @@ fn contains<'l>(m : &'l HashSet<&str>, k : Option<&str>) -> bool {
   k.map(|k| m.contains(k)).unwrap_or(false)
 }
 
-fn expr(content : ExprContent, loc : SrcLocation) -> Expr {
-  let ed = ExprData { content, loc };
+fn expr(tag : ExprTag, content : ExprContent, loc : SrcLocation) -> Expr {
+  let ed = ExprData { tag, content, loc };
   perm(ed)
 }
 
@@ -191,8 +208,23 @@ impl <'l> ParseState<'l> {
   }
 
   fn pop_type(&mut self, token_type : TokenType) -> Result<&Token, Error> {
-    self.expect_type(token_type)?;
+    let t = self.peek()?;
+    if t.token_type != token_type {
+      return error(t.loc, format!("Expected token of type '{:?}', found token type '{:?}'", token_type, t.token_type));
+    }
+    self.skip();
     Ok(&self.tokens[self.pos-1])
+  }
+
+  fn pop_syntax(&mut self, str : &str) -> Result<&Token, Error> {
+    let t = self.pop_type(TokenType::Symbol)?;
+    if t.string == str {
+      Ok(t)
+    }
+    else {
+      return error(t.loc,
+        format!("Expected syntax '{}', found '{}'", str, t.string));
+    }
   }
 
   fn skip(&mut self) {
@@ -219,34 +251,27 @@ impl <'l> ParseState<'l> {
     Ok(())
   }
 
-  /// Returns marker for start of the token if successful
-  fn expect_type(&mut self, token_type : TokenType) -> Result<(), Error> {
-    {
-      let t = self.peek()?;
-      if t.token_type != token_type {
-        return error(t.loc, format!("Expected token of type '{:?}', found token type '{:?}'", token_type, t.token_type));
-      }
-    }
-    self.skip();
-    Ok(())
-  }
-
-  fn add_leaf(&mut self, content : ExprContent, start : usize) -> Expr {
+  fn expr(&mut self, tag : ExprTag, content : ExprContent, start : usize) -> Expr {
     let loc = self.loc(start);
-    expr(content, loc)
+    expr(tag, content, loc)
   }
 
-  fn add_list<S : Into<String>>(&mut self, s : S, list : Vec<Expr>, start : usize) -> Expr
+  fn literal_expr(&mut self, val : Val, start : usize) -> Expr {
+    let loc = self.loc(start);
+    expr(LiteralExpr, ExprContent::LiteralVal(val), loc)
+  }
+
+  fn list_expr(&mut self, tag : ExprTag, list : Vec<Expr>, start : usize) -> Expr
   {
     let loc = self.loc(start);
-    let content = ExprContent::list(s.into(), list);
-    self.add_expr(content, loc)
+    let content = ExprContent::List(perm_slice_from_vec(list));
+    expr(tag, content, loc)
   }
 
-  fn add_symbol<S : Into<String>>(&mut self, s : S, start : TextMarker) -> Expr {
+  fn symbol_expr(&mut self, tag : ExprTag, s : Symbol, start : usize) -> Expr {
     let loc = self.loc(start);
-    let content = ExprContent::symbol(s.into());
-    self.add_expr(content, loc)
+    let content = ExprContent::LiteralVal(Val::Symbol(s));
+    expr(tag, content, loc)
   }
 }
 
@@ -258,27 +283,17 @@ fn pratt_parse(ps : &mut ParseState, precedence : i32) -> Result<Expr, Error> {
     if contains(&ps.config.paren_terminators, t.symbol()) {
       break;
     }
-    // New lines are imlicitly semi-colons (except after an infix operator)
-    else if ps.peek_newline() {
-      let next_precedence = *ps.config.expression_separators.get(";").unwrap();
-      if next_precedence > precedence {
-        expr = parse_list(ps, vec![expr], ";", "block".into())?;
-      }
-      else {
-        break;
-      }
-    }
     // Separators
     else if let Some(&next_precedence) = get(&ps.config.expression_separators, t.symbol()) {
       if next_precedence > precedence {
         let separator = t.symbol().unwrap().as_ref();
         let (tag, separator) = match separator {
-          ";" => ("block", ";"),
-          "," => ("tuple", ","),
+          ";" => (Do, ";"),
+          "," => (Syntax, ","),
           _ => panic!(),
         };
         ps.pop_type(TokenType::Symbol)?;
-        expr = parse_list(ps, vec![expr], separator, tag.into())?;
+        expr = parse_list(ps, vec![expr], separator, tag)?;
       }
       else {
         break;
@@ -311,8 +326,8 @@ fn parse_paren_infix(ps : &mut ParseState, left_expr : Expr, first_arg : Option<
   let start = left_expr.loc.start;
   let t = ps.peek()?;
   let (operation, start_paren) = match t.symbol().map(|s| s.as_ref()) {
-    Some("(") => ("call", "("),
-    Some("[") => ("index", "["),
+    Some("(") => (Call, "("),
+    Some("[") => (ArrayIndex, "["),
     _ => return error(t.loc, "unexpected token"),
   };
   let end_paren = ps.config.paren_pairs.get(start_paren).unwrap().clone();
@@ -323,7 +338,7 @@ fn parse_paren_infix(ps : &mut ParseState, left_expr : Expr, first_arg : Option<
   }
   parse_into_list(ps, &mut list, ",")?;
   ps.expect(&end_paren)?;
-  Ok(ps.add_list(operation, list, start))
+  Ok(ps.list_expr(operation, list, start))
 }
 
 fn parse_prefix(ps : &mut ParseState) -> Result<Expr, Error> {
@@ -332,16 +347,22 @@ fn parse_prefix(ps : &mut ParseState) -> Result<Expr, Error> {
   // if the next token is a prefix operator
   if let Some(new_precedence) = get(&ps.config.prefix_precedence, t.symbol()) {
     let t = ps.peek()?;
-    if contains(&ps.config.special_operators, t.symbol()) {
-      let operator = t.to_string();
-      ps.expect_type(TokenType::Symbol)?;
-      let expr = pratt_parse(ps, *new_precedence)?;
-      Ok(ps.add_list(operator, vec![expr], start))
-    }
-    else {
-      let operator = parse_simple_string(ps)?;
-      let expr = pratt_parse(ps, *new_precedence)?;
-      Ok(ps.add_list("call", vec![operator, expr], start))
+    match t.string {
+      "$" => {
+        ps.pop_type(TokenType::Symbol)?;
+        let expr = pratt_parse(ps, *new_precedence)?;
+        Ok(ps.list_expr(TemplateHole, vec![expr], start)) 
+      }
+      "#" => {
+        ps.pop_type(TokenType::Symbol)?;
+        let quoted = pratt_parse(ps, *new_precedence)?;
+        Ok(to_template_expr(ps.st, quoted))
+      }
+      _ => {
+        let operator = parse_operator(ps)?;
+        let expr = pratt_parse(ps, *new_precedence)?;
+        Ok(ps.list_expr(InstrinicOp, vec![operator, expr], start))
+      }
     }
   }
   // else assume it's an expression term
@@ -353,33 +374,32 @@ fn parse_prefix(ps : &mut ParseState) -> Result<Expr, Error> {
 fn parse_infix(ps : &mut ParseState, left_expr : Expr, precedence : i32) -> Result<Expr, Error> {
   let infix_start = left_expr.loc.start;
   let t = ps.peek()?;
-  if match_symbol(t, ".") {
-    // special handling for method call syntax
-    ps.expect_type(TokenType::Symbol)?;
-    let right_expr = pratt_parse(ps, precedence)?;
-    if ps.has_tokens() && match_symbol(ps.peek()?, "(") {
-      parse_paren_infix(ps, right_expr, Some(left_expr))
+  match t.string {
+    "." => {
+      ps.pop_type(TokenType::Symbol)?;
+      let right_expr = pratt_parse(ps, precedence)?;
+      Ok(ps.list_expr(FieldIndex, vec![left_expr, right_expr], infix_start))      
     }
-    else {
-      Ok(ps.add_list(".", vec![left_expr, right_expr], infix_start))
+    ":" => {
+      ps.pop_type(TokenType::Symbol)?;
+      let right_expr = pratt_parse(ps, precedence)?;
+      Ok(ps.list_expr(Syntax, vec![left_expr, right_expr], infix_start))
     }
-  }
-  else if contains(&ps.config.special_operators, t.symbol()) {
-    let operator = t.to_string();
-    ps.expect_type(TokenType::Symbol)?;
-    let list = vec![left_expr, pratt_parse(ps, precedence)?];
-    Ok(ps.add_list(operator, list, infix_start))
-  }
-  else {
-    let operator = parse_simple_string(ps)?;
-    let list = vec![operator, left_expr, pratt_parse(ps, precedence)?];
-    Ok(ps.add_list("call", list, infix_start))
+    "as" => {
+      ps.pop_type(TokenType::Symbol)?;
+      let list = vec![left_expr, pratt_parse(ps, precedence)?];
+      Ok(ps.list_expr(Cast, list, infix_start))
+    }
+    _ => {
+      let operator = parse_operator(ps)?;
+      let list = vec![operator, left_expr, pratt_parse(ps, precedence)?];
+      Ok(ps.list_expr(InstrinicOp, list, infix_start))
+    }
   }
 }
 
 fn parse_into_list(ps : &mut ParseState, list : &mut Vec<Expr>, separator : &str) -> Result<(), Error> {
   let &precedence = ps.config.expression_separators.get(separator).unwrap();
-  let is_semicolon = separator == ";";
   while ps.has_tokens() {
     let t = ps.peek()?;
     if contains(&ps.config.paren_terminators, t.symbol()) {
@@ -389,8 +409,7 @@ fn parse_into_list(ps : &mut ParseState, list : &mut Vec<Expr>, separator : &str
     if !ps.has_tokens() {
       break;
     }
-    let implicit_separator = is_semicolon && ps.peek_newline();
-    if !(implicit_separator || ps.accept(separator)) {
+    if !ps.accept(separator) {
       break;
     }
   }
@@ -401,18 +420,17 @@ fn peek_statement_terminated(ps : &ParseState) -> bool {
   if let Ok(t) = ps.peek() {
     let symbol = t.symbol();
     contains(&ps.config.paren_terminators, symbol) ||
-      contains_key(&ps.config.expression_separators, symbol) ||
-      ps.peek_newline()
+      contains_key(&ps.config.expression_separators, symbol)
   }
   else {
     true
   }
 }
 
-fn parse_list(ps : &mut ParseState, mut list : Vec<Expr>, separator : &str, tag : String) -> Result<Expr, Error> {
+fn parse_list(ps : &mut ParseState, mut list : Vec<Expr>, separator : &str, tag : ExprTag) -> Result<Expr, Error> {
   let start = list.first().map(|e| e.loc.start).unwrap_or_else(|| ps.peek_marker());
   parse_into_list(ps, &mut list, separator)?;
-  Ok(ps.add_list(tag, list, start))
+  Ok(ps.list_expr(tag, list, start))
 }
 
 fn parse_block_in_braces(ps : &mut ParseState) -> Result<Expr, Error> {
@@ -421,17 +439,17 @@ fn parse_block_in_braces(ps : &mut ParseState) -> Result<Expr, Error> {
   let mut list = vec![];
   parse_into_list(ps, &mut list, ";")?;
   ps.expect("}")?;
-  Ok(ps.add_list("block", list, start))
+  Ok(ps.list_expr(Do, list, start))
 }
 
 fn parse_new_scope(ps : &mut ParseState, precedence : i32) -> Result<Expr, Error> {
   let start = ps.peek_marker();
   let e = pratt_parse(ps, precedence)?;
-  if let Some(("block", _)) = e.try_construct() {
+  if e.tag == Do {
     Ok(e)
   }
   else {
-    Ok(ps.add_list("block", vec![e], start))
+    Ok(ps.list_expr(Do, vec![e], start))
   }
 }
 
@@ -451,15 +469,38 @@ fn parse_literal<T : FromStr>(ps : &mut ParseState) -> Result<T, Error> {
   }
 }
 
-fn parse_simple_string(ps : &mut ParseState) -> Result<Expr, Error> {
+fn parse_symbol_literal(ps : &mut ParseState) -> Result<Expr, Error> {
   let start = ps.peek_marker();
-  let s = ps.pop_type(Symbol)?.to_string();
-  Ok(ps.add_symbol(s, start))
+  let st = ps.st;
+  let s = ps.pop_type(Symbol)?.string;
+  let sym = to_symbol(st, s);
+  Ok(ps.symbol_expr(LiteralExpr, sym, start))
+}
+
+fn parse_reference(ps : &mut ParseState) -> Result<Expr, Error> {
+  let start = ps.peek_marker();
+  let st = ps.st;
+  let s = ps.pop_type(Symbol)?.string;
+  let sym = to_symbol(st, s);
+  Ok(ps.symbol_expr(Reference, sym, start))
+}
+
+fn parse_operator(ps : &mut ParseState) -> Result<Expr, Error> {
+  let start = ps.peek_marker();
+  let t = ps.pop_type(Symbol)?;
+  let op = str_to_operator(t.string).ok_or_else(||
+    error_raw(t.loc,
+      format!("Operator '{}' not supported", t.string)))?;
+  Ok(ps.literal_expr(Val::Operator(op), start))
+}
+
+fn keyword_precedence(ps : &ParseState) -> i32 {
+  *ps.config.prefix_precedence.get("#keyword").unwrap()
 }
 
 fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
   let t = ps.peek()?;
-  let &kp = ps.config.prefix_precedence.get("#keyword").unwrap();
+  let kp = keyword_precedence(ps);
   let start = ps.peek_marker();
   let symbol = match t.symbol() {
     Some(s) => s.as_ref(), None => return Ok(None),
@@ -472,95 +513,128 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       let then_e = parse_new_scope(ps, kp)?;
       if ps.accept("else") {
         let else_e = parse_new_scope(ps, kp)?;
-        ps.add_list("if", vec![cond, then_e, else_e], start)
+        ps.list_expr(IfElse, vec![cond, then_e, else_e], start)
       }
       else {
-        ps.add_list("if", vec![cond, then_e], start)
+        ps.list_expr(IfElse, vec![cond, then_e], start)
       }
     }
     "while" => {
       ps.pop_type(TokenType::Symbol)?;
       let cond = pratt_parse(ps, kp)?;
       let body = parse_block_in_braces(ps)?;
-      ps.add_list("while", vec![cond, body], start)
+      let nb = NodeBuilder { loc: ps.loc(start), st: ps.st };
+      expr_macros::while_macro(&nb, cond, body)
     }
     "for" => {
       ps.pop_type(TokenType::Symbol)?;
-      let var_range = pratt_parse(ps, kp)?;
+      let loop_var = parse_symbol_literal(ps)?;
+      ps.pop_syntax("in")?;
+      let start_val = pratt_parse(ps, kp)?;
+      ps.pop_syntax("to")?;
+      let end_val = pratt_parse(ps, kp)?;
       let body = parse_block_in_braces(ps)?;
-      ps.add_list("for", vec![var_range, body], start)
-    }
-    "struct" => {
-      ps.pop_type(TokenType::Symbol)?;
-      let name = pratt_parse(ps, kp)?;
-      let fields = parse_block_in_braces(ps)?;
-      ps.add_list("struct", vec![name, fields], start)
-    }
-    "union" => {
-      ps.pop_type(TokenType::Symbol)?;
-      let name = pratt_parse(ps, kp)?;
-      let fields = parse_block_in_braces(ps)?;
-      ps.add_list("union", vec![name, fields], start)
-    }
-    "cbind" => {
-      ps.pop_type(TokenType::Symbol)?;
-      let typed_symbol = pratt_parse(ps, kp)?;
-      ps.add_list("cbind", vec![typed_symbol], start)
+      let nb = NodeBuilder { loc: ps.loc(start), st: ps.st };
+      expr_macros::for_macro(&nb, loop_var, start_val, end_val, body)
     }
     "fun" => {
       ps.pop_type(TokenType::Symbol)?;
       let mut es = vec![];
-      let is_full_definition = !match_symbol(ps.peek()?, "(");
-      if is_full_definition {
-        // Parse name
-        es.push(parse_prefix(ps)?);
-      }
       // arguments
       ps.expect("(")?;
-      es.push(parse_list(ps, vec![], ",", "args".into())?);
+      es.push(parse_list(ps, vec![], ",", Syntax)?);
       ps.expect(")")?;
       // return type
       if ps.accept("=>") {
         es.push(pratt_parse(ps, kp)?);
       }
-      if is_full_definition {
-        if ps.accept("with") {
-          es.push(parse_list(ps, vec![], ",", "polytypes".into())?);
-        }
-        // body
-        es.push(parse_block_in_braces(ps)?);
-      }
-      ps.add_list("fun", es, start)
+      // body
+      es.push(parse_block_in_braces(ps)?);
+      ps.list_expr(Fun, es, start)
     }
-    "static" => {
+    "def" => {
       ps.pop_type(TokenType::Symbol)?;
-      let definition = pratt_parse(ps, kp)?;
-      ps.add_list("static", vec![definition], start)
+      let name = parse_symbol_literal(ps)?;
+      ps.pop_syntax("=")?;
+      let value = pratt_parse(ps, kp)?;
+      ps.list_expr(Def, vec![name, value], start)
     }
     "let" => {
       ps.pop_type(TokenType::Symbol)?;
-      let definition = pratt_parse(ps, kp)?;
-      ps.add_list("let", vec![definition], start)
-    }
-    "type" => {
-      ps.pop_type(TokenType::Symbol)?;
-      let definition = pratt_parse(ps, kp)?;
-      ps.add_list("type", vec![definition], start)
+      let name = parse_symbol_literal(ps)?;
+      ps.pop_syntax("=")?;
+      let value = pratt_parse(ps, kp)?;
+      ps.list_expr(Def, vec![name, value], start)
     }
     "return" => {
       let start = ps.peek_marker();
       ps.expect("return")?;
       if peek_statement_terminated(ps) {
-        ps.add_list("return", vec![], start)
+        ps.list_expr(Return, vec![], start)
       }
       else {
         let return_expr = pratt_parse(ps, kp)?;
-        ps.add_list("return", vec![return_expr], start)
+        ps.list_expr(Return, vec![return_expr], start)
       }
+    }
+    "struct" => {
+      ps.pop_type(TokenType::Symbol)?;
+      ps.expect("{")?;
+      let mut fields = vec![];
+      parse_into_list(ps, &mut fields, ",")?;
+      ps.expect("}")?;
+      ps.list_expr(StructType, fields, start)
+    }
+    "ptr" => {
+      ps.pop_type(TokenType::Symbol)?;
+      let inner_type = pratt_parse(ps, kp)?;
+      ps.list_expr(PtrType, vec![inner_type], start)
+    }
+    "fn" => {
+      parse_function_type(ps, false)?
+    }
+    // c function type
+    "cfun" => {
+      parse_function_type(ps, true)?
+    }
+    // array type
+    "sized_array" => {
+      ps.pop_type(TokenType::Symbol)?;
+      let mut es = vec![];
+      ps.expect("(")?;
+      es.push(parse_list(ps, vec![], ",", Syntax)?);
+      ps.expect(")")?;
+      ps.list_expr(SizedArrayType, es, start)
+    }
+    // slice type
+    "slice" => {
+      ps.pop_type(TokenType::Symbol)?;
+      ps.expect("(")?;
+      let element_type = pratt_parse(ps, kp)?;
+      ps.expect(")")?;
+      let loc = ps.loc(start);
+      let nb = NodeBuilder { loc, st: ps.st };
+      expr_macros::slice_type_macro(&nb, element_type)
     }
     _ => return Ok(None),
   };
   Ok(Some(expr))
+}
+
+fn parse_function_type(ps : &mut ParseState, is_cfun : bool) -> Result<Expr, Error> {
+  let start = ps.peek_marker();
+  let kp = keyword_precedence(ps);
+  ps.pop_type(TokenType::Symbol)?;
+  let mut es = vec![];
+  // arguments
+  ps.expect("(")?;
+  es.push(parse_list(ps, vec![], ",", Syntax)?);
+  ps.expect(")")?;
+  // return type
+  ps.expect("=>")?;
+  es.push(pratt_parse(ps, kp)?);
+  let tag = if is_cfun { CFunType} else { FnType };
+  Ok(ps.list_expr(tag, es, start))
 }
 
 fn parse_expression_term(ps : &mut ParseState) -> Result<Expr, Error> {
@@ -571,21 +645,21 @@ fn parse_expression_term(ps : &mut ParseState) -> Result<Expr, Error> {
         // Parens
         let start = ps.peek_marker();
         let paren : String = t.to_string();
-        ps.expect_type(Symbol)?;
+        ps.pop_type(Symbol)?;
         match paren.as_str() {
           "[" => {
-            let e = parse_list(ps, vec![], ",", "array".into())?;
+            let e = parse_list(ps, vec![], ",", ArrayInit)?;
             ps.expect(close_paren)?;
             Ok(e)
           }
           "{" => {
-            let e = parse_list(ps, vec![], ";", "block".into())?;
+            let e = parse_list(ps, vec![], ";", Do)?;
             ps.expect(close_paren)?;
             Ok(e)
           }
           "(" => {
             if ps.accept(close_paren) {
-              Ok(ps.add_leaf(ExprContent::LiteralUnit, start))
+              Ok(ps.literal_expr(Val::Void, start))
             }
             else {
               let e = parse_everything(ps)?;
@@ -606,15 +680,14 @@ fn parse_expression_term(ps : &mut ParseState) -> Result<Expr, Error> {
         if let Some(b) = bool_val {
           let start = ps.peek_marker();
           ps.pop_type(TokenType::Symbol)?;
-          let b = ExprContent::LiteralBool(b);
-          Ok(ps.add_leaf(b, start))
+          Ok(ps.literal_expr(Val::Bool(b), start))
         }
           // keyword terms (if, while, etc)
         else if let Some(e) = try_parse_keyword_term(ps)? {
           Ok(e)
         }
         else {
-          parse_simple_string(ps)
+          parse_reference(ps)
         }
       }
     }
@@ -622,34 +695,62 @@ fn parse_expression_term(ps : &mut ParseState) -> Result<Expr, Error> {
       let start = ps.peek_marker();
       let s = {
         let t = ps.pop_type(StringLiteral)?;
-        ExprContent::literal_string(t.to_string())
+        let s = ffi_libs::from_string(t.to_string());
+        perm(s)
       };
-      Ok(ps.add_leaf(s, start))
+      Ok(ps.literal_expr(Val::String(s), start))
     }
     FloatLiteral => {
       let start = ps.peek_marker();
-      let f = ExprContent::LiteralFloat(parse_literal(ps)?);
-      Ok(ps.add_leaf(f, start))
+      let f = parse_literal(ps)?;
+      Ok(ps.literal_expr(Val::F64(f), start))
     }
     IntLiteral => {
       let start = ps.peek_marker();
-      let i = ExprContent::LiteralInt(parse_literal(ps)?);
-      Ok(ps.add_leaf(i, start))
+      let i = parse_literal(ps)?;
+      Ok(ps.literal_expr(Val::I64(i), start))
     }
+    Whitespace | Comment | Newline =>
+      panic!("whitespace, comment and newline tokens should be filtered out already")
   }
 }
 
 fn parse_top_level(ps : &mut ParseState) -> Result<Expr, Error> {
-  parse_list(ps, vec![], ";", "block".into())
+  parse_list(ps, vec![], ";", Do)
 }
 
-pub fn parse(source : SourceId, tokens : Vec<Token>, st : &StringCache) -> Result<Expr, Error> {
+pub fn parse(module : Ptr<CodeModule>, tokens : Vec<Token>, st : SymbolTable) -> Result<Expr, Error> {
   let config = parse_config();
-  let mut ps = ParseState::new(source, tokens, &config, st);
+  let mut ps = ParseState::new(module, tokens, &config, st);
   let e = parse_top_level(&mut ps)?;
   if ps.has_tokens() {
     let t = ps.peek()?;
     return error(t.loc, format!("Unexpected token '{}' of type '{:?}'", t.to_string(), t.token_type));
   }
   return Ok(e);
+}
+
+fn to_template_expr(st : SymbolTable, quoted : Expr) -> Expr {
+  
+  fn find_template_arguments(e : Expr, args : &mut Vec<Expr>) {
+    match e.shape() {
+      ExprShape::List(TemplateHole, &[inner]) => {
+        args.push(inner);
+      }
+      _ => (),
+    }
+    for &c in e.children() {
+      find_template_arguments(c, args);
+    }
+  }
+
+  let mut template_args = vec![];
+  find_template_arguments(quoted, &mut template_args);
+  if template_args.len() > 0 {
+    let nb = NodeBuilder { loc: quoted.loc, st };
+    template_macro(&nb, quoted, template_args)
+  }
+  else {
+    expr(LiteralExpr, ExprContent::LiteralVal(Val::Expr(quoted)), quoted.loc)
+  }
 }

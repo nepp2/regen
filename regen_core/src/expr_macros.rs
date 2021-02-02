@@ -1,8 +1,8 @@
 
 use crate::{parse::{self, Expr, ExprShape}, perm_alloc, sexp, symbols};
-use parse::{ExprContent, ExprData};
+use parse::{ExprContent, ExprData, ExprTag};
 use perm_alloc::{perm, perm_slice, perm_slice_from_vec};
-use symbols::{SymbolTable, to_symbol};
+use symbols::{SymbolTable};
 use sexp::{SrcLocation, Node, NodeContent, NodeInfo};
 
 pub fn template(e : Expr, args : &[Expr]) -> Expr {
@@ -53,39 +53,41 @@ impl NodeBuilder {
     })
   }
 
-  fn sexp(&self, s : &str) -> Expr {
-    parse::parse_expression(self.st, &self.loc.module.name, s)
+  fn set_loc(&self, mut e : Expr) {
+    e.loc = self.loc;
+    for &c in e.children() { self.set_loc(c) }
   }
 
-  fn sym(&self, s : &str) -> Node {
-    let sym = to_symbol(self.st, s);
-    perm(NodeInfo {
-      loc: self.loc,
-      content: NodeContent::Sym(sym),
-    })
+  fn sexp(&self, s : &str) -> Expr {
+    let e = parse::parse_expression(self.st, &self.loc.module.name, s);
+    self.set_loc(e);
+    e
+  }
+
+  fn expr(&self, tag : ExprTag, content : ExprContent) -> Expr {
+    perm(ExprData { tag, content, loc: self.loc })
   }
 }
 
-pub fn template_macro(nb : &NodeBuilder, n : Node, args : &[Node]) -> Node {
+pub fn template_macro(nb : &NodeBuilder, e : Expr, args : Vec<Expr>) -> Expr {
   // (do
   //   (let args (array a b c))
-  //   (template_quote n (ref args) (array_len args))
+  //   (template_quote e (ref args) (array_len args))
   // )
-  let mut array = vec![nb.sym("array")];
-  array.extend_from_slice(args);
-  nb.list(&[
-    nb.sym("do"),
-    nb.list(&[nb.sym("let"), nb.sym("args"), nb.list_from_vec(array)]),
-    nb.list(&[
-      nb.sym("template_quote"),
-        nb.list(&[nb.sym("quote"), n]),
-        nb.list(&[nb.sym("cast"),
-          nb.list(&[nb.sym("ref"), nb.sym("args")]),
-          nb.list(&[nb.sym("ptr"), nb.sym("node")]),
-        ]),
-        nb.list(&[nb.sym("array_len"), nb.sym("args")]),
-    ])
-  ])
+  let array = {
+    let c = ExprContent::List(perm_slice_from_vec(args));
+    nb.expr(ExprTag::ArrayInit, c)
+  };
+  let template_call = nb.sexp("
+    (do
+      (let args ($ array)
+      (template_quote
+        (quote ($ e))
+        (cast (ref args) (ptr node))
+        (array_len args))
+    )
+  ");
+  template(template_call, &[array, e])
 }
 
 pub fn for_macro(nb : &NodeBuilder, loop_var : Expr, start : Expr, end : Expr, body : Expr) -> Expr {

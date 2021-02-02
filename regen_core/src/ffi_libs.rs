@@ -86,10 +86,10 @@ pub extern "C" fn node_from_symbol(s : Symbol) -> Node {
   perm(info)
 }
 
-pub extern "C" fn node_from_literal(v : u64) -> Node {
+pub extern "C" fn node_from_literal(v : i64) -> Node {
   let info = NodeInfo {
     loc: SrcLocation::zero(),
-    content: NodeContent::Literal(NodeLiteral::U64(v)),
+    content: NodeContent::Literal(NodeLiteral::I64(v)),
   };
   perm(info)
 }

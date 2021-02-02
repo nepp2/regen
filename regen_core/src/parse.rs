@@ -65,7 +65,8 @@ pub enum ExprTag {
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Val {
-  U64(u64),
+  I64(i64), // TODO: rename
+  F64(u64),
   String(Ptr<RegenString>),
   Bool(bool),
   Symbol(Symbol),
@@ -171,28 +172,23 @@ pub fn parse_expression(st : SymbolTable, module_name : &str, code : &str) -> Ex
 }
 
 fn list_expr(n : Node, tag : ExprTag, exprs : &[Expr]) -> Expr {
-  expr(n, tag, List(perm_slice(exprs)))
+  expr(n.loc, tag, List(perm_slice(exprs)))
 }
 
 fn list_expr_from_vec(n : Node, tag : ExprTag, exprs : Vec<Expr>) -> Expr {
-  expr(n, tag, List(perm_slice_from_vec(exprs)))
+  expr(n.loc, tag, List(perm_slice_from_vec(exprs)))
 }
 
 fn literal_expr(n : Node, v : Val) -> Expr {
-  expr(n, LiteralExpr, LiteralVal(v))
+  expr(n.loc, LiteralExpr, LiteralVal(v))
 }
 
 fn symbol_literal(n : Node) -> Expr {
   literal_expr(n, Val::Symbol(n.as_symbol()))
 }
 
-fn expr(n : Node, tag : ExprTag, content: ExprContent) -> Expr {
-  let ed = ExprData {
-    tag,
-    content,
-    loc: n.loc,
-  };
-  perm(ed)
+fn expr(loc : SrcLocation, tag : ExprTag, content: ExprContent) -> Expr {
+  perm(ExprData { tag, content, loc })
 }
 
 fn parse_expr(st : SymbolTable, n : Node) -> Expr {
@@ -207,15 +203,15 @@ fn parse_expr(st : SymbolTable, n : Node) -> Expr {
         "false" => literal_expr(n, Val::Bool(true)),
         _ => {
           let sym = n.as_symbol();
-          expr(n, Reference, LiteralVal(Val::Symbol(sym)))
+          expr(n.loc, Reference, LiteralVal(Val::Symbol(sym)))
         }
       }
     }
     // literal
     Literal(l) => {
       match l {
-        NodeLiteral::U64(v) => {
-          literal_expr(n, Val::U64(v))
+        NodeLiteral::I64(v) => {
+          literal_expr(n, Val::I64(v))
         }
         NodeLiteral::String(s) => {
           literal_expr(n, Val::String(s))
@@ -235,7 +231,7 @@ fn parse_expr(st : SymbolTable, n : Node) -> Expr {
     // array
     Command("array", elements) => {
       let es = parse_expr_list(st, elements);
-      expr(n, ArrayInit, List(es))
+      expr(n.loc, ArrayInit, List(es))
     }
     // array length
     Command("array_len", &[e]) => {
@@ -286,7 +282,7 @@ fn parse_expr(st : SymbolTable, n : Node) -> Expr {
     }
     // template
     Command("#", &[quoted]) => {
-      to_template_expr(st, n, quoted)
+      to_template_expr(st, parse_expr(st, quoted))
     }
     // template hole
     Command("$", &[quoted]) => {
@@ -369,7 +365,7 @@ fn parse_expr(st : SymbolTable, n : Node) -> Expr {
     }
     Command("do", exprs) => {
       let es = parse_expr_list(st, exprs);
-      expr(n, Do, List(es))
+      expr(n.loc, Do, List(es))
     }
   // Debug
     Command("debug", &[v]) => {
@@ -430,7 +426,7 @@ fn parse_expr(st : SymbolTable, n : Node) -> Expr {
     // struct type
     Command("struct", fields) => {
       let fs = to_field_list(st, fields);
-      expr(n, StructType, List(fs))
+      expr(n.loc, StructType, List(fs))
     }
     // slice type
     Command("slice", &[element_type]) => {
@@ -444,7 +440,7 @@ fn parse_expr(st : SymbolTable, n : Node) -> Expr {
         return literal_expr(n, Val::Void);
       }
       if let [lit, tag] = ns {
-        if let NodeContent::Literal(NodeLiteral::U64(_)) = lit.content {
+        if let NodeContent::Literal(NodeLiteral::I64(_)) = lit.content {
           return list_expr(n, Cast, &[
             parse_expr(st, *lit),
             parse_expr(st, *tag),
@@ -460,7 +456,7 @@ fn parse_expr(st : SymbolTable, n : Node) -> Expr {
         }
       }
       let es = parse_expr_list(st, ns);
-      expr(n, Call, List(es))
+      expr(n.loc, Call, List(es))
     }
   }
 }
@@ -480,7 +476,7 @@ fn to_args_body(st : SymbolTable, args_node : Node, body : Node) -> (Expr, Expr)
   }
   let args = perm_slice_from_vec(v);
   let body = parse_expr(st, body);
-  let args_expr = expr(args_node, Syntax, List(args));
+  let args_expr = expr(args_node.loc, Syntax, List(args));
   (args_expr, body)
 }
 
@@ -501,7 +497,7 @@ fn to_type_args_list(st : SymbolTable, args : Node) -> Expr {
     };
     v.push(arg);
   }
-  expr(args, Syntax, List(perm_slice_from_vec(v)))
+  expr(args.loc, Syntax, List(perm_slice_from_vec(v)))
 }
 
 fn to_field_list(st : SymbolTable, fields : &[Node]) -> SlicePtr<Expr> {
@@ -555,16 +551,16 @@ fn str_to_operator(s : &str) -> Option<Operator> {
   Some(op)
 }
 
-fn to_template_expr(st : SymbolTable, n : Node, quoted : Node) -> Expr {
+fn to_template_expr(st : SymbolTable, quoted : Expr) -> Expr {
   
-  fn find_template_arguments(n : Node, args : &mut Vec<Node>) {
-    match sexp::node_shape(&n) {
-      Command("$", [e]) => {
-        args.push(*e);
+  fn find_template_arguments(e : Expr, args : &mut Vec<Expr>) {
+    match e.shape() {
+      ExprShape::List(TemplateHole, &[inner]) => {
+        args.push(inner);
       }
       _ => (),
     }
-    for &c in n.children() {
+    for &c in e.children() {
       find_template_arguments(c, args);
     }
   }
@@ -573,11 +569,9 @@ fn to_template_expr(st : SymbolTable, n : Node, quoted : Node) -> Expr {
   find_template_arguments(quoted, &mut template_args);
   if template_args.len() > 0 {
     let nb = NodeBuilder { loc: quoted.loc, st };
-    let n = template_macro(&nb, quoted, template_args.as_slice());
-    parse_expr(st, n)
+    template_macro(&nb, quoted, template_args)
   }
   else {
-    let e = parse_expr(st, quoted);
-    literal_expr(n, Val::Expr(e))
+    expr(quoted.loc, ExprTag::LiteralExpr, ExprContent::LiteralVal(Val::Expr(quoted)))
   }
 }
