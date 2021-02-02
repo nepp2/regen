@@ -1,9 +1,8 @@
 
-use crate::{parse::{self, Expr, ExprShape}, perm_alloc, sexp, symbols};
-use parse::{ExprContent, ExprData, ExprTag};
+use crate::{parse::{self, Expr, ExprShape}, perm_alloc, symbols};
+use parse::{ExprContent, ExprData, ExprTag, SrcLocation, Node, NodeContent, NodeInfo};
 use perm_alloc::{perm, perm_slice, perm_slice_from_vec};
 use symbols::{SymbolTable};
-use sexp::{SrcLocation, Node, NodeContent, NodeInfo};
 
 pub fn template(e : Expr, args : &[Expr]) -> Expr {
   pub fn template_inner(e : Expr, args : &[Expr], next_arg : &mut usize) -> Expr {

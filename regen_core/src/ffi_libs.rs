@@ -1,9 +1,9 @@
 use std::hash::{Hash, Hasher};
 
-use crate::{env, event_loop::ffi::*, expr_macros::template, parse::Expr, perm_alloc, sexp, symbols::Symbol, types, types::{TypeHandle, c_function_type, function_type}};
+use crate::{env, event_loop::ffi::*, expr_macros::template, parse::Expr, perm_alloc, parse, symbols::Symbol, types, types::{TypeHandle, c_function_type, function_type}};
 
 use env::{Env, define_global};
-use sexp::{Node, NodeInfo, NodeContent, NodeLiteral, SrcLocation};
+use parse::{Node, NodeInfo, NodeContent, NodeLiteral, SrcLocation};
 use perm_alloc::{SlicePtr, perm_slice, perm_slice_from_vec, perm};
 
 #[derive(Copy, Clone)]

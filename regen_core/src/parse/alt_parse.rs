@@ -1,5 +1,17 @@
-use crate::{bytecode::Operator, error::error_raw, expr_macros, ffi_libs, lexer::{Token, TokenType}, parse::{ExprData, ExprShape, ExprTag, Val}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, sexp::{CodeModule, SrcLocation}, symbols::{Symbol, SymbolTable, to_symbol}};
-use crate::parse::{Expr, ExprContent};
+
+use crate::{
+  bytecode::Operator,
+  error::error_raw,
+  expr_macros,
+  ffi_libs,
+  perm_alloc::{Ptr, perm, perm_slice_from_vec},
+  symbols::{Symbol, SymbolTable, to_symbol}
+};
+use super::{
+  sexp::{CodeModule, SrcLocation},
+  lexer::{Token, TokenType},
+  parse::{Expr, ExprContent, ExprData, ExprShape, ExprTag, Val}
+};
 use crate::error::{Error, error};
 use std::collections::{HashSet, HashMap};
 use std::str::FromStr;

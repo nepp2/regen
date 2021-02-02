@@ -1,6 +1,6 @@
 /// Compiles core language into bytecode
 
-use crate::{bytecode, env, parse, perm_alloc, semantic::{ReferenceType, SemanticInfo}, sexp, symbols, types};
+use crate::{bytecode, env, parse, perm_alloc, semantic::{ReferenceType, SemanticInfo}, symbols, types};
 
 use bytecode::{
   SequenceHandle, SequenceInfo, InstrExpr, FunctionBytecode,
@@ -13,7 +13,7 @@ use perm_alloc::{Ptr, perm_slice_from_vec, perm_slice, perm};
 
 use symbols::Symbol;
 use env::Env;
-use sexp::SrcLocation;
+use parse::SrcLocation;
 use parse::{Expr, ExprShape, ExprTag, Val};
 
 struct LabelledExpr {

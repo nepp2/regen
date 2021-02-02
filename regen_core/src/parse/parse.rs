@@ -1,8 +1,9 @@
 
 use std::hash::{Hash, Hasher};
 
-use crate::{bytecode, ffi_libs, expr_macros, perm_alloc, sexp, symbols};
-use sexp::{
+use crate::{bytecode, ffi_libs, expr_macros, perm_alloc, symbols};
+use super::sexp::{
+  self,
   Node,
   NodeLiteral,
   NodeShape::*,

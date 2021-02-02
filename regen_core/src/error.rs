@@ -1,7 +1,7 @@
 
 use std::fmt;
 
-use crate::{perm_alloc::SlicePtr, sexp::SrcLocation};
+use crate::{perm_alloc::SlicePtr, parse::SrcLocation};
 
 /// Returns an error that isn't wrapped in Result::Err
 pub fn error_raw<L : Into<SrcLocation>, S : Into<ErrorContent>>(loc : L, message : S) -> Error {

@@ -13,10 +13,9 @@ use crate::{
   debug,
   env::{self, Env},
   ffi_ccall,
-  parse::{self, Expr},
+  parse::{self, Expr, Node},
   perm_alloc::{Ptr, SlicePtr},
   semantic::{self, SemanticInfo},
-  sexp::{Node},
   symbols::Symbol,
   types::{self, TypeHandle, Primitive}
 };

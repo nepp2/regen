@@ -1,8 +1,8 @@
 /// Bytecode data structure is defined here
 
-use crate::{symbols, types, perm_alloc, sexp};
+use crate::{symbols, types, perm_alloc, parse};
 use symbols::Symbol;
-use sexp::{SrcLocation};
+use parse::{SrcLocation};
 use types::TypeHandle;
 use perm_alloc::{SlicePtr, Ptr};
 
