@@ -1,8 +1,4 @@
 
-(def node_index (fun ((ns node_slice) (i u64)) node (do
-  (ptr_index (. ns data) i)
-)))
-
 (def tick_event (struct
   (tick_interval i64)
   (current_millisecond i64)

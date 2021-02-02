@@ -1,10 +1,9 @@
 use std::hash::{Hash, Hasher};
 
-use crate::{env, event_loop::ffi::*, expr_macros::template, parse::Expr, perm_alloc, parse, symbols::Symbol, types, types::{TypeHandle, c_function_type, function_type}};
+use crate::{env, event_loop::ffi::*, expr_macros::template, parse::Expr, perm_alloc, symbols::Symbol, types, types::{TypeHandle, c_function_type, function_type}};
 
 use env::{Env, define_global};
-use parse::{Node, NodeInfo, NodeContent, NodeLiteral, SrcLocation};
-use perm_alloc::{SlicePtr, perm_slice, perm_slice_from_vec, perm};
+use perm_alloc::{SlicePtr, perm_slice_from_vec};
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -62,44 +61,46 @@ pub extern "C" fn symbol_display(sym : Symbol) {
   println!("symbol: {}", sym)
 }
 
-pub extern "C" fn node_children(out : &mut SlicePtr<Node>, node : Node) {
-  let s = match node.content {
-    NodeContent::List(l) => l,
-    _ => perm_slice(&[]),
-  };
-  *out = s;
-}
+// TODO: fix these functions to work with Expr instead
 
-pub extern "C" fn node_from_list(list : &SlicePtr<Node>) -> Node {
-  let info = NodeInfo {
-    loc: SrcLocation::zero(),
-    content: NodeContent::List(perm_slice(list.as_slice())),
-  };
-  perm(info)
-}
+// pub extern "C" fn node_children(out : &mut SlicePtr<Node>, expr : Node) {
+//   let s = match expr.content {
+//     NodeContent::List(l) => l,
+//     _ => perm_slice(&[]),
+//   };
+//   *out = s;
+// }
 
-pub extern "C" fn node_from_symbol(s : Symbol) -> Node {
-  let info = NodeInfo {
-    loc: SrcLocation::zero(),
-    content: NodeContent::Sym(s),
-  };
-  perm(info)
-}
+// pub extern "C" fn node_from_list(list : &SlicePtr<Node>) -> Node {
+//   let info = NodeInfo {
+//     loc: SrcLocation::zero(),
+//     content: NodeContent::List(perm_slice(list.as_slice())),
+//   };
+//   perm(info)
+// }
 
-pub extern "C" fn node_from_literal(v : i64) -> Node {
-  let info = NodeInfo {
-    loc: SrcLocation::zero(),
-    content: NodeContent::Literal(NodeLiteral::I64(v)),
-  };
-  perm(info)
-}
+// pub extern "C" fn node_from_symbol(s : Symbol) -> Node {
+//   let info = NodeInfo {
+//     loc: SrcLocation::zero(),
+//     content: NodeContent::Sym(s),
+//   };
+//   perm(info)
+// }
 
-pub extern "C" fn node_as_symbol(n : Node) -> Symbol {
-  n.as_symbol()
-}
+// pub extern "C" fn node_from_literal(v : i64) -> Node {
+//   let info = NodeInfo {
+//     loc: SrcLocation::zero(),
+//     content: NodeContent::Literal(NodeLiteral::I64(v)),
+//   };
+//   perm(info)
+// }
 
-pub extern "C" fn node_display(node : Node) {
-  println!("{}", node.loc.src_snippet());
+// pub extern "C" fn node_as_symbol(n : Node) -> Symbol {
+//   n.as_symbol()
+// }
+
+pub extern "C" fn node_display(expr : Expr) {
+  println!("{}", expr.loc.src_snippet());
 }
 
 pub extern "C" fn calculate_packed_field_offsets(
@@ -135,7 +136,7 @@ pub fn load_ffi_libs(e : Env) {
   let stream_ptr = void_ptr;
   let env_ptr = void_ptr;
   let event_loop_ptr = void_ptr;
-  let node = e.c.node_tag;
+  let expr = e.c.expr_tag;
   let type_tag = e.c.type_tag;
 
   // ----------- Bind core system functions ------------
@@ -222,7 +223,7 @@ pub fn load_ffi_libs(e : Env) {
   //   c_function_type(&[u64], u64));
 
   define_global(e, "template_quote", template_quote as u64,
-    c_function_type(&[node, types::pointer_type(node), u64], node));
+    c_function_type(&[expr, types::pointer_type(expr), u64], expr));
 
   define_global(e, "calculate_packed_field_offsets", calculate_packed_field_offsets as u64,
     c_function_type(&[u64, u64], u64));

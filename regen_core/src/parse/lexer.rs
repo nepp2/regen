@@ -2,7 +2,7 @@
 use std::{fmt};
 
 use crate::{error::{Error, error_raw}, perm_alloc::{Ptr, perm}};
-use super::sexp::{CodeModule, SrcLocation};
+use super::expr::{CodeModule, SrcLocation};
 
 const SYNTAX : &'static [&'static str] =
   &["==", "!=", "<=", ">=", "=>", "+=", "-=", "*=", "/=", "||",

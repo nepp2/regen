@@ -7,6 +7,8 @@ use symbols::{Symbol, SymbolTable, to_symbol};
 use perm_alloc::{perm, perm_slice, Ptr, SlicePtr};
 use ffi_libs::RegenString;
 
+use super::expr::{SrcLocation, CodeModule};
+
 struct TokenStream<'l>{
   code : &'l str,
   st : SymbolTable,
@@ -36,19 +38,6 @@ use NodeContent::*;
 pub enum NodeLiteral {
   I64(i64),
   String(Ptr<RegenString>),
-}
-
-#[derive(Clone)]
-pub struct CodeModule {
-  pub name : String,
-  pub code : String,
-}
-
-#[derive(Clone, Copy)]
-pub struct SrcLocation {
-  pub start : usize,
-  pub end : usize,  
-  pub module : Ptr<CodeModule>,
 }
 
 fn trim_token(s : &str) -> Token {

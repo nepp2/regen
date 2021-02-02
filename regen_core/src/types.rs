@@ -30,7 +30,7 @@ pub enum Kind {
   Pointer = 5,
   Array = 6,
   Macro = 7,
-  Node = 8,
+  Expr = 8,
 }
 
 #[derive(Copy, Clone)]
@@ -46,7 +46,7 @@ impl PartialEq for TypeInfo {
     (self.kind == rhs.kind) && (self.size_of == rhs.size_of) && {
       match self.kind {
         Kind::Primitive => self.info == rhs.info,
-        Kind::Macro | Kind::Type | Kind::Node => true,
+        Kind::Macro | Kind::Type | Kind::Expr => true,
         Kind::Array => type_as_array(self) == type_as_array(rhs),
         Kind::Function => type_as_function(self) == type_as_function(rhs),
         Kind::Pointer =>
@@ -96,8 +96,8 @@ pub struct CoreTypes {
   pub void_tag : TypeHandle,
   pub bool_tag : TypeHandle,
   pub string_tag : TypeHandle,
-  pub node_tag : TypeHandle,
-  pub node_slice_tag : TypeHandle,
+  pub expr_tag : TypeHandle,
+  pub expr_slice_tag : TypeHandle,
 
   pub core_types : Vec<(&'static str, TypeHandle)>,
 }
@@ -247,10 +247,10 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
   let data_sym = to_symbol(st, "data");
   let len_sym = to_symbol(st, "len");
 
-  let node_tag = new_type(Kind::Node, 8, 0);
-  let node_slice_tag = struct_type(
+  let expr_tag = new_type(Kind::Expr, 8, 0);
+  let expr_slice_tag = struct_type(
     perm_slice(&[data_sym, len_sym]),
-    perm_slice(&[pointer_type(node_tag), u64_tag]),
+    perm_slice(&[pointer_type(expr_tag), u64_tag]),
   );
 
   let type_tag = new_type(Kind::Type, 8, 0);
@@ -268,7 +268,7 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
   CoreTypes {
     type_tag, u64_tag, u32_tag, u16_tag,
     u8_tag, void_tag, bool_tag, string_tag,
-    node_tag, node_slice_tag,
+    expr_tag, expr_slice_tag,
 
     core_types:
       vec![
@@ -283,8 +283,8 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
         ("i8", u8_tag), // TODO: fix
         ("void", void_tag),
         ("bool", bool_tag),
-        ("node", node_tag),
-        ("node_slice", node_slice_tag),
+        ("expr", expr_tag),
+        ("node_slice", expr_slice_tag),
         ("string", string_tag),
       ],
   }
@@ -328,8 +328,8 @@ impl fmt::Display for TypeInfo {
         let t = unsafe { &*(self.info as *const ArrayInfo) };
         write!(f, "(sized_array {} {})", t.inner, t.length)?;
       }
-      Kind::Node => {
-        write!(f, "node")?;
+      Kind::Expr => {
+        write!(f, "expr")?;
       }
       Kind::Macro => {
         write!(f, "macro")?;

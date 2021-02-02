@@ -1,162 +1,23 @@
 
-use std::hash::{Hash, Hasher};
-
-use crate::{bytecode, ffi_libs, expr_macros, perm_alloc, symbols};
-use super::sexp::{
-  self,
-  Node,
-  NodeLiteral,
-  NodeShape::*,
-  NodeContent,
-  SrcLocation,
+use crate::{bytecode, expr_macros, perm_alloc, symbols};
+use super::{
+  sexp::{
+    self,
+    Node,
+    NodeLiteral,
+    NodeShape::*,
+    NodeContent,
+  },
+  expr::*,
 };
-use expr_macros::{NodeBuilder, template_macro};
-use symbols::{Symbol, SymbolTable};
-use perm_alloc::{Ptr, SlicePtr, perm, perm_slice, perm_slice_from_vec};
-use ffi_libs::RegenString;
+use expr_macros::{ExprBuilder, template_macro};
+use symbols::SymbolTable;
+use perm_alloc::{SlicePtr, perm, perm_slice, perm_slice_from_vec};
 use bytecode::Operator;
 
-pub type Expr = Ptr<ExprData>;
-
-#[derive(Copy, Clone)]
-pub struct ExprData {
-  pub tag : ExprTag,
-  pub content : ExprContent,
-  pub loc : SrcLocation,
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
-pub enum ExprTag {
-  Def,
-  Let,
-  Reference,
-  StructInit,
-  ZeroInit,
-  ArrayInit,
-  ArrayIndex,
-  ArrayAsSlice,
-  PtrIndex,
-  FieldIndex,
-  LiteralExpr,
-  Call,
-  InstrinicOp,
-  Cast,
-  IfElse,
-  Debug,
-  Set,
-  Deref,
-  GetAddress,
-  Return,
-  Break,
-  Repeat,
-  LabelledBlock,
-  Do,
-  Fun,
-  ArrayLen,
-  TypeOf,
-  FnType,
-  CFunType,
-  StructType,
-  PtrType,
-  SizedArrayType,
-  TemplateHole,
-  Implicit, // was not specified
-  Syntax, // cannot be evaluated
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
-pub enum Val {
-  I64(i64), // TODO: rename
-  F64(u64),
-  String(Ptr<RegenString>),
-  Bool(bool),
-  Symbol(Symbol),
-  Expr(Expr),
-  Void,
-  Operator(Operator),
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
-pub enum ExprContent {
-  List(SlicePtr<Expr>),
-  LiteralVal(Val),
-}
-
-use ExprContent::*;
-
-impl ExprData {
-  pub fn shape(&self) -> ExprShape {
-    match self.content {
-      List(l) => ExprShape::List(self.tag, l.as_slice()),
-      LiteralVal(v) => {
-        if self.tag == ExprTag::Reference {
-          if let Val::Symbol(s) = v {
-            return ExprShape::Ref(s);
-          }
-        }
-        return ExprShape::Literal(v);
-      }
-    }
-  }
-
-  pub fn children(&self) -> &[Expr] {
-    if let List(es) = self.content {
-      return es.as_slice();
-    }
-    &[]
-  }
-
-  pub fn as_syntax(&self) -> Option<&[Expr]> {
-    if self.tag == Syntax {
-      if let List(es) = self.content {
-        return Some(es.as_slice());
-      }
-    }
-    None
-  }
-
-  pub fn as_symbol_literal(&self) -> Symbol {
-    if let LiteralVal(Val::Symbol(s)) = self.content {
-      return s;
-    }
-    panic!("expected symbol")
-  }
-
-  pub fn as_expr_literal(&self) -> Expr {
-    if let LiteralVal(Val::Expr(e)) = self.content {
-      return e;
-    }
-    panic!("expected expr")
-  }
-
-  pub fn as_operator_literal(&self) -> Operator {
-    if let LiteralVal(Val::Operator(op)) = self.content {
-      return op;
-    }
-    panic!("expected operator")
-  }
-}
-
-impl PartialEq for ExprData {
-  fn eq(&self, rhs : &Self) -> bool {
-    self.tag == rhs.tag && self.content == rhs.content
-  }
-}
-impl Eq for ExprData {}
-impl Hash for ExprData {
-  fn hash<H: Hasher>(&self, state: &mut H) {
-    self.tag.hash(state);
-    self.content.hash(state);
-  } 
-}
-
-pub enum ExprShape<'l> {
-  List(ExprTag, &'l [Expr]),
-  Literal(Val),
-  Ref(Symbol),
-}
 
 use ExprTag::*;
+use ExprContent::*;
 
 pub fn parse_module(st : SymbolTable, module_name : &str, code : &str) -> SlicePtr<Expr> {
   let root = sexp::sexp_list(st, module_name, code);
@@ -258,7 +119,7 @@ fn parse_expr(st : SymbolTable, n : Node) -> Expr {
     }
     // slice type
     Command("slice_index", &[v, index]) => {
-      let nb = NodeBuilder { loc: n.loc, st };
+      let nb = ExprBuilder { loc: n.loc, st };
       expr_macros::slice_index_macro(&nb,
         parse_expr(st, v),
         parse_expr(st, index),
@@ -292,7 +153,7 @@ fn parse_expr(st : SymbolTable, n : Node) -> Expr {
     }
     // for
     Command("for", &[loop_var, start, end, body]) => {
-      let nb = NodeBuilder { loc: n.loc, st };
+      let nb = ExprBuilder { loc: n.loc, st };
       expr_macros::for_macro(&nb,
         parse_expr(st, loop_var),
         parse_expr(st, start),
@@ -302,7 +163,7 @@ fn parse_expr(st : SymbolTable, n : Node) -> Expr {
     }
     // while
     Command("while", &[cond, body]) => {
-      let nb = NodeBuilder { loc: n.loc, st };
+      let nb = ExprBuilder { loc: n.loc, st };
       expr_macros::while_macro(&nb,
         parse_expr(st, cond),
         parse_expr(st, body),
@@ -431,7 +292,7 @@ fn parse_expr(st : SymbolTable, n : Node) -> Expr {
     }
     // slice type
     Command("slice", &[element_type]) => {
-      let nb = NodeBuilder { loc: n.loc, st };
+      let nb = ExprBuilder { loc: n.loc, st };
       expr_macros::slice_type_macro(&nb,
         parse_expr(st, element_type))
     }
@@ -569,7 +430,7 @@ fn to_template_expr(st : SymbolTable, quoted : Expr) -> Expr {
   let mut template_args = vec![];
   find_template_arguments(quoted, &mut template_args);
   if template_args.len() > 0 {
-    let nb = NodeBuilder { loc: quoted.loc, st };
+    let nb = ExprBuilder { loc: quoted.loc, st };
     template_macro(&nb, quoted, template_args)
   }
   else {

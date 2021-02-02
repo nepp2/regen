@@ -5,7 +5,7 @@ use crate::{types, parse};
 use types::{
   TypeHandle, Kind, Primitive
 };
-use parse::Node;
+use parse::Expr;
 
 pub struct DebugDisplay { p : *const (), t : TypeHandle }
 
@@ -51,8 +51,8 @@ impl fmt::Display for DebugDisplay {
         let v = unsafe{ *(self.p as *const TypeHandle) };
         write!(f, "{}", v)
       }
-      Kind::Node => {
-        let n = unsafe { *(self.p as *const Node) };
+      Kind::Expr => {
+        let n = unsafe { *(self.p as *const Expr) };
         write!(f, "{}", n.loc.src_snippet())
       }
     }

@@ -13,14 +13,14 @@ use crate::{
   debug,
   env::{self, Env},
   ffi_ccall,
-  parse::{self, Expr, Node},
+  parse::{self, Expr},
   perm_alloc::{Ptr, SlicePtr},
   semantic::{self, SemanticInfo},
   symbols::Symbol,
   types::{self, TypeHandle, Primitive}
 };
 
-pub type CompileExpression = fn(env : &Env, fun : Node) -> Function;
+pub type CompileExpression = fn(env : &Env, fun : Expr) -> Function;
 
 pub fn interpret_function(f : *const Function, args : &[u64], env : Env, return_addr : Option<*mut ()>) {
   let mut stack = [0 as u8 ; 16384];

@@ -963,6 +963,6 @@ fn compile_intrinic_op(b : &mut Builder, e : Expr, op : Operator, args : &[Expr]
 
 fn compile_quote(b : &mut Builder, quoted : Expr) -> Var {
   let e = InstrExpr::LiteralI64(Ptr::to_ptr(quoted) as i64);
-  let node_tag = b.env.c.node_tag;
-  push_expr(b, e, node_tag)
+  let expr_tag = b.env.c.expr_tag;
+  push_expr(b, e, expr_tag)
 }

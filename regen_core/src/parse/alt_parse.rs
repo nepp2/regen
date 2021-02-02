@@ -8,9 +8,8 @@ use crate::{
   symbols::{Symbol, SymbolTable, to_symbol}
 };
 use super::{
-  sexp::{CodeModule, SrcLocation},
+  expr::*,
   lexer::{Token, TokenType},
-  parse::{Expr, ExprContent, ExprData, ExprShape, ExprTag, Val}
 };
 use crate::error::{Error, error};
 use std::collections::{HashSet, HashMap};
@@ -124,7 +123,7 @@ struct ParseState<'l> {
 }
 
 use TokenType::*;
-use expr_macros::{NodeBuilder, template_macro};
+use expr_macros::{ExprBuilder, template_macro};
 
 fn match_symbol(t : &Token, s : &str) -> bool {
   t.symbol().map(|sym| sym == s).unwrap_or(false)
@@ -535,7 +534,7 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       ps.pop_type(TokenType::Symbol)?;
       let cond = pratt_parse(ps, kp)?;
       let body = parse_block_in_braces(ps)?;
-      let nb = NodeBuilder { loc: ps.loc(start), st: ps.st };
+      let nb = ExprBuilder { loc: ps.loc(start), st: ps.st };
       expr_macros::while_macro(&nb, cond, body)
     }
     "for" => {
@@ -546,7 +545,7 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       ps.pop_syntax("to")?;
       let end_val = pratt_parse(ps, kp)?;
       let body = parse_block_in_braces(ps)?;
-      let nb = NodeBuilder { loc: ps.loc(start), st: ps.st };
+      let nb = ExprBuilder { loc: ps.loc(start), st: ps.st };
       expr_macros::for_macro(&nb, loop_var, start_val, end_val, body)
     }
     "fun" => {
@@ -625,7 +624,7 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       let element_type = pratt_parse(ps, kp)?;
       ps.expect(")")?;
       let loc = ps.loc(start);
-      let nb = NodeBuilder { loc, st: ps.st };
+      let nb = ExprBuilder { loc, st: ps.st };
       expr_macros::slice_type_macro(&nb, element_type)
     }
     _ => return Ok(None),
@@ -759,7 +758,7 @@ fn to_template_expr(st : SymbolTable, quoted : Expr) -> Expr {
   let mut template_args = vec![];
   find_template_arguments(quoted, &mut template_args);
   if template_args.len() > 0 {
-    let nb = NodeBuilder { loc: quoted.loc, st };
+    let nb = ExprBuilder { loc: quoted.loc, st };
     template_macro(&nb, quoted, template_args)
   }
   else {
