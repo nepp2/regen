@@ -1,13 +1,6 @@
-use crate::{
-  env,
-  node_macros::template,
-  perm_alloc,
-  sexp,
-  symbols::Symbol,
-  types,
-  types::{TypeHandle, c_function_type, function_type},
-  event_loop::ffi::*,
-};
+use std::hash::{Hash, Hasher};
+
+use crate::{env, event_loop::ffi::*, expr_macros::template, parse::Expr, perm_alloc, sexp, symbols::Symbol, types, types::{TypeHandle, c_function_type, function_type}};
 
 use env::{Env, define_global};
 use sexp::{Node, NodeInfo, NodeContent, NodeLiteral, SrcLocation};
@@ -18,6 +11,18 @@ use perm_alloc::{SlicePtr, perm_slice, perm_slice_from_vec, perm};
 pub struct RegenString {
   pub ptr : *const u8,
   pub len : u64,
+}
+
+impl PartialEq for RegenString {
+  fn eq(&self, rhs : &Self) -> bool {
+    self.as_str() == rhs.as_str()
+  }
+}
+impl Eq for RegenString {}
+impl Hash for RegenString {
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    self.as_str().hash(state)
+  }
 }
 
 impl RegenString {
@@ -107,9 +112,9 @@ pub extern "C" fn calculate_packed_field_offsets(
   size_of
 }
 
-pub extern "C" fn template_quote(n : Node, args_ptr : *const Node, num_args : u64) -> Node {
+pub extern "C" fn template_quote(e : Expr, args_ptr : *const Expr, num_args : u64) -> Expr {
   let args = unsafe { std::slice::from_raw_parts(args_ptr, num_args as usize) };
-  template(n, args)
+  template(e, args)
 }
 
 pub extern "C" fn type_sizeof(t : TypeHandle) -> u64 {
@@ -196,23 +201,25 @@ pub fn load_ffi_libs(e : Env) {
   define_global(e, "symbol_display", symbol_display as u64,
     c_function_type(&[u64], void));
 
-  define_global(e, "node_children_c", node_children as u64,
-    c_function_type(&[u64, u64], void));
+  let TODO = (); // fix these functions
+  
+  // define_global(e, "node_children_c", node_children as u64,
+  //   c_function_type(&[u64, u64], void));
 
-  define_global(e, "node_display", node_display as u64,
-    c_function_type(&[u64], void));
+  // define_global(e, "node_display", node_display as u64,
+  //   c_function_type(&[u64], void));
 
-  define_global(e, "node_from_list", node_from_list as u64,
-    c_function_type(&[u64], u64));
+  // define_global(e, "node_from_list", node_from_list as u64,
+  //   c_function_type(&[u64], u64));
 
-  define_global(e, "node_from_symbol", node_from_symbol as u64,
-    c_function_type(&[u64], u64));
+  // define_global(e, "node_from_symbol", node_from_symbol as u64,
+  //   c_function_type(&[u64], u64));
 
-  define_global(e, "node_from_literal", node_from_literal as u64,
-    c_function_type(&[u64], u64));
+  // define_global(e, "node_from_literal", node_from_literal as u64,
+  //   c_function_type(&[u64], u64));
 
-  define_global(e, "node_as_symbol", node_as_symbol as u64,
-    c_function_type(&[u64], u64));
+  // define_global(e, "node_as_symbol", node_as_symbol as u64,
+  //   c_function_type(&[u64], u64));
 
   define_global(e, "template_quote", template_quote as u64,
     c_function_type(&[node, types::pointer_type(node), u64], node));

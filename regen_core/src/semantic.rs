@@ -14,7 +14,11 @@ pub struct SemanticInfo {
 
 impl SemanticInfo {
   fn push_ref(&mut self, e : Expr, r : ReferenceType) {
-    self.references.insert(Ptr::to_u64(e), (e, r));
+    let id = Ptr::to_u64(e);
+    if self.references.contains_key(&id) {
+      panic!("multiple instances of expression encountered")
+    }
+    self.references.insert(id, (e, r));
   }
 
   pub fn get_ref_type(&self, e : Expr) -> ReferenceType {

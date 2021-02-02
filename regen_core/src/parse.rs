@@ -1,5 +1,7 @@
 
-use crate::{bytecode, ffi_libs, node_macros, perm_alloc, sexp, symbols};
+use std::hash::{Hash, Hasher};
+
+use crate::{bytecode, ffi_libs, expr_macros, perm_alloc, sexp, symbols};
 use sexp::{
   Node,
   NodeLiteral,
@@ -7,7 +9,7 @@ use sexp::{
   NodeContent,
   SrcLocation,
 };
-use node_macros::{NodeBuilder, template_macro};
+use expr_macros::{NodeBuilder, template_macro};
 use symbols::{Symbol, SymbolTable};
 use perm_alloc::{Ptr, SlicePtr, perm, perm_slice, perm_slice_from_vec};
 use ffi_libs::RegenString;
@@ -22,8 +24,9 @@ pub struct ExprData {
   pub loc : SrcLocation,
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub enum ExprTag {
+  Def,
   Let,
   Reference,
   StructInit,
@@ -55,22 +58,23 @@ pub enum ExprTag {
   StructType,
   PtrType,
   SizedArrayType,
+  TemplateHole,
   Implicit, // was not specified
   Syntax, // cannot be evaluated
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Val {
   U64(u64),
   String(Ptr<RegenString>),
   Bool(bool),
   Symbol(Symbol),
-  Node(Node),
+  Expr(Expr),
   Void,
   Operator(Operator),
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub enum ExprContent {
   List(SlicePtr<Expr>),
   LiteralVal(Val),
@@ -116,11 +120,11 @@ impl ExprData {
     panic!("expected symbol")
   }
 
-  pub fn as_node_literal(&self) -> Node {
-    if let LiteralVal(Val::Node(n)) = self.content {
-      return n;
+  pub fn as_expr_literal(&self) -> Expr {
+    if let LiteralVal(Val::Expr(e)) = self.content {
+      return e;
     }
-    panic!("expected node")
+    panic!("expected expr")
   }
 
   pub fn as_operator_literal(&self) -> Operator {
@@ -131,6 +135,19 @@ impl ExprData {
   }
 }
 
+impl PartialEq for ExprData {
+  fn eq(&self, rhs : &Self) -> bool {
+    self.tag == rhs.tag && self.content == rhs.content
+  }
+}
+impl Eq for ExprData {}
+impl Hash for ExprData {
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    self.tag.hash(state);
+    self.content.hash(state);
+  } 
+}
+
 pub enum ExprShape<'l> {
   List(ExprTag, &'l [Expr]),
   Literal(Val),
@@ -139,13 +156,18 @@ pub enum ExprShape<'l> {
 
 use ExprTag::*;
 
-struct ParseState {
-  st : SymbolTable,
+pub fn parse_module(st : SymbolTable, module_name : &str, code : &str) -> SlicePtr<Expr> {
+  let root = sexp::sexp_list(st, module_name, code);
+  let mut es = vec![];
+  for &n in root.children() {
+    es.push(parse_expr(st, n));
+  }
+  perm_slice_from_vec(es)
 }
 
-pub fn parse_to_expr(st : SymbolTable, root : Node) -> Expr {
-  let mut ps = ParseState { st };
-  parse_expr(&mut ps, root)
+pub fn parse_expression(st : SymbolTable, module_name : &str, code : &str) -> Expr {
+  let n = sexp::sexp(st, module_name, code);
+  parse_expr(st, n)
 }
 
 fn list_expr(n : Node, tag : ExprTag, exprs : &[Expr]) -> Expr {
@@ -173,7 +195,7 @@ fn expr(n : Node, tag : ExprTag, content: ExprContent) -> Expr {
   perm(ed)
 }
 
-fn parse_expr(ps : &mut ParseState, n : Node) -> Expr {
+fn parse_expr(st : SymbolTable, n : Node) -> Expr {
   match sexp::node_shape(&n) {
     // symbol reference (local var or global def)
     Atom(s) => {
@@ -201,200 +223,220 @@ fn parse_expr(ps : &mut ParseState, n : Node) -> Expr {
       }
     }
     // break to label
-    Command("break", [label]) => {
-      let label_expr = symbol_literal(*label);
+    Command("break", &[label]) => {
+      let label_expr = symbol_literal(label);
       list_expr(n, Break, &[label_expr])
     }
     // repeat to label
-    Command("repeat", [label]) => {
-      let label_expr = symbol_literal(*label);
+    Command("repeat", &[label]) => {
+      let label_expr = symbol_literal(label);
       list_expr(n, Repeat, &[label_expr])
     }
     // array
     Command("array", elements) => {
-      let es = parse_expr_list(ps, elements);
+      let es = parse_expr_list(st, elements);
       expr(n, ArrayInit, List(es))
     }
     // array length
-    Command("array_len", [e]) => {
-      list_expr(n, ArrayLen, &[parse_expr(ps, *e)])
+    Command("array_len", &[e]) => {
+      list_expr(n, ArrayLen, &[parse_expr(st, e)])
     }
     // array to slice
-    Command("as_slice", [e]) => {
-      list_expr(n, ArrayAsSlice, &[parse_expr(ps, *e)])
+    Command("as_slice", &[e]) => {
+      list_expr(n, ArrayAsSlice, &[parse_expr(st, e)])
     }
     // array index
-    Command("index", [v, index]) => {
+    Command("index", &[v, index]) => {
       list_expr(n, ArrayIndex, &[
-        parse_expr(ps, *v), // array
-        parse_expr(ps, *index), // index
+        parse_expr(st, v), // array
+        parse_expr(st, index), // index
       ])
     }
     // ptr index
-    Command("ptr_index", [v, index]) => {
+    Command("ptr_index", &[v, index]) => {
       list_expr(n, PtrIndex, &[
-        parse_expr(ps, *v), // pointer
-        parse_expr(ps, *index), // index
+        parse_expr(st, v), // pointer
+        parse_expr(st, index), // index
       ])
     }
     // slice type
-    Command("slice_index", [v, index]) => {
-      let nb = NodeBuilder { loc: n.loc, st: ps.st };
-      let slice_node = node_macros::slice_index_macro(&nb, *v, *index);
-      parse_expr(ps, slice_node)
+    Command("slice_index", &[v, index]) => {
+      let nb = NodeBuilder { loc: n.loc, st };
+      expr_macros::slice_index_macro(&nb,
+        parse_expr(st, v),
+        parse_expr(st, index),
+      )
     }
     // init
-    Command("zero_init", [type_node]) => {
-      list_expr(n, ZeroInit, &[parse_expr(ps, *type_node)])
+    Command("zero_init", &[type_node]) => {
+      list_expr(n, ZeroInit, &[parse_expr(st, type_node)])
     }
     // init
     Command("init", ns) => {
-      let type_value = parse_expr(ps, ns[0]);
+      let type_value = parse_expr(st, ns[0]);
       let mut v = vec![type_value];
-      parse_to_vec(ps, &ns[1..], &mut v);
+      parse_to_vec(st, &ns[1..], &mut v);
       list_expr_from_vec(n, StructInit, v)
     }
     // field deref
-    Command(".", [v, field]) => {
-      let struct_val = parse_expr(ps, *v);
-      let field_name = symbol_literal(*field);
+    Command(".", &[v, field]) => {
+      let struct_val = parse_expr(st, v);
+      let field_name = symbol_literal(field);
       list_expr(n, FieldIndex, &[struct_val, field_name])
     }
     // template
-    Command("#", [quoted]) => {
-      to_template_expr(ps, n, *quoted)
+    Command("#", &[quoted]) => {
+      to_template_expr(st, n, quoted)
+    }
+    // template hole
+    Command("$", &[quoted]) => {
+      let e = parse_expr(st, quoted);
+      list_expr(n, TemplateHole, &[e])
     }
     // for
-    Command("for", [loop_var, start, end, body]) => {
-      let nb = NodeBuilder { loc: n.loc, st: ps.st };
-      let for_node = node_macros::for_macro(&nb, *loop_var, *start, *end, *body);
-      parse_expr(ps, for_node)
+    Command("for", &[loop_var, start, end, body]) => {
+      let nb = NodeBuilder { loc: n.loc, st };
+      expr_macros::for_macro(&nb,
+        parse_expr(st, loop_var),
+        parse_expr(st, start),
+        parse_expr(st, end),
+        parse_expr(st, body)
+      )
     }
     // while
-    Command("while", [cond, body]) => {
-      let nb = NodeBuilder { loc: n.loc, st: ps.st };
-      let while_node = node_macros::while_macro(&nb, *cond, *body);
-      parse_expr(ps, while_node)
+    Command("while", &[cond, body]) => {
+      let nb = NodeBuilder { loc: n.loc, st };
+      expr_macros::while_macro(&nb,
+        parse_expr(st, cond),
+        parse_expr(st, body),
+      )
     }
     // quotation
-    Command("quote", [quoted]) => {
-      literal_expr(n, Val::Node(*quoted))
+    Command("quote", &[quoted]) => {
+      let e = parse_expr(st, quoted);
+      literal_expr(n, Val::Expr(e))
     }
     // fun
-    Command("fun", [arg_nodes, body]) => {
-      let (args, body) = to_args_body(ps, *arg_nodes, *body);
+    Command("fun", &[arg_nodes, body]) => {
+      let (args, body) = to_args_body(st, arg_nodes, body);
       let ret = list_expr(n, Implicit, &[]);
       list_expr(n, Fun, &[args, ret, body])
     }
-    Command("fun", [arg_nodes, return_tag, body]) => {
-      let (args, body) = to_args_body(ps, *arg_nodes, *body);
-      let ret = parse_expr(ps, *return_tag);
+    Command("fun", &[arg_nodes, return_tag, body]) => {
+      let (args, body) = to_args_body(st, arg_nodes, body);
+      let ret = parse_expr(st, return_tag);
       list_expr(n, Fun, &[args, ret, body])
     }
     // set var
-    Command("set", [dest, value]) => {
-      let dest = parse_expr(ps, *dest);
-      let value = parse_expr(ps, *value);
+    Command("set", &[dest, value]) => {
+      let dest = parse_expr(st, dest);
+      let value = parse_expr(st, value);
       list_expr(n, Set, &[dest, value])
     }
     // let
-    Command("let", [var_name, value]) => {
-      let name = symbol_literal(*var_name);
-      let val_expr = parse_expr(ps, *value);
+    Command("let", &[var_name, value]) => {
+      let name = symbol_literal(var_name);
+      let val_expr = parse_expr(st, value);
       list_expr(n, Let, &[name, val_expr])
     }
+    // def
+    Command("def", &[name, initialiser]) => {
+      let name = symbol_literal(name);
+      let init_expr = parse_expr(st, initialiser);
+      list_expr(n, Def, &[name, init_expr])
+    }
     // if then
-    Command("if", [cond_node, then_expr]) => {
+    Command("if", &[cond_node, then_expr]) => {
       list_expr(n, IfElse, &[
-        parse_expr(ps, *cond_node),
-        parse_expr(ps, *then_expr),
+        parse_expr(st, cond_node),
+        parse_expr(st, then_expr),
       ])
     }
     // if then else
-    Command("if", [cond_node, then_expr, else_expr]) => {
+    Command("if", &[cond_node, then_expr, else_expr]) => {
       list_expr(n, IfElse, &[
-        parse_expr(ps, *cond_node),
-        parse_expr(ps, *then_expr),
-        parse_expr(ps, *else_expr),
+        parse_expr(st, cond_node),
+        parse_expr(st, then_expr),
+        parse_expr(st, else_expr),
       ])
     }
     // label expression
-    Command("label", [label, body]) => {
+    Command("label", &[label, body]) => {
       list_expr(n, LabelledBlock, &[
-        symbol_literal(*label),
-        parse_expr(ps, *body),
+        symbol_literal(label),
+        parse_expr(st, body),
       ])
     }
     Command("do", exprs) => {
-      let es = parse_expr_list(ps, exprs);
+      let es = parse_expr_list(st, exprs);
       expr(n, Do, List(es))
     }
   // Debug
-    Command("debug", [v]) => {
-      list_expr(n, Debug, &[parse_expr(ps, *v)])
+    Command("debug", &[v]) => {
+      list_expr(n, Debug, &[parse_expr(st, v)])
     }
     // Return
-    Command("return", [v]) => {
-      list_expr(n, Return, &[parse_expr(ps, *v)])
+    Command("return", &[v]) => {
+      list_expr(n, Return, &[parse_expr(st, v)])
     }
     // symbol
-    Command("sym", [v]) => {
-      symbol_literal(*v)
+    Command("sym", &[v]) => {
+      symbol_literal(v)
     }
     // typeof
-    Command("typeof", [v]) => {
-      list_expr(n, TypeOf, &[parse_expr(ps, *v)])
+    Command("typeof", &[v]) => {
+      list_expr(n, TypeOf, &[parse_expr(st, v)])
     }
     // load
-    Command("*", [pointer]) => {
-      list_expr(n, Deref, &[parse_expr(ps, *pointer)])
+    Command("*", &[pointer]) => {
+      list_expr(n, Deref, &[parse_expr(st, pointer)])
     }
     // ref
-    Command("ref", [locator]) => {
-      list_expr(n, GetAddress, &[parse_expr(ps, *locator)])
+    Command("ref", &[locator]) => {
+      list_expr(n, GetAddress, &[parse_expr(st, locator)])
     }
     // cast
-    Command("cast", [value, type_tag]) => {
+    Command("cast", &[value, type_tag]) => {
       list_expr(n, Cast, &[
-        parse_expr(ps, *value),
-        parse_expr(ps, *type_tag),
+        parse_expr(st, value),
+        parse_expr(st, type_tag),
       ])
     }
     // pointer type
-    Command("ptr", [inner_type]) => {
-      list_expr(n, PtrType, &[parse_expr(ps, *inner_type)])
+    Command("ptr", &[inner_type]) => {
+      list_expr(n, PtrType, &[parse_expr(st, inner_type)])
     }
     // function type
-    Command("fn", [args, ret]) => {
+    Command("fn", &[args, ret]) => {
       list_expr(n, FnType, &[
-        to_type_args_list(ps, *args),
-        parse_expr(ps, *ret),
+        to_type_args_list(st, args),
+        parse_expr(st, ret),
       ])
     }
     // c function type
-    Command("cfun", [args, ret]) => {
+    Command("cfun", &[args, ret]) => {
       list_expr(n, CFunType, &[
-        to_type_args_list(ps, *args),
-        parse_expr(ps, *ret),
+        to_type_args_list(st, args),
+        parse_expr(st, ret),
       ])
     }
     // array type
-    Command("sized_array", [element, length]) => {
+    Command("sized_array", &[element, length]) => {
       list_expr(n, SizedArrayType, &[
-        parse_expr(ps, *element),
-        parse_expr(ps, *length),
+        parse_expr(st, element),
+        parse_expr(st, length),
       ])
     }
     // struct type
     Command("struct", fields) => {
-      let fs = to_field_list(ps, fields);
+      let fs = to_field_list(st, fields);
       expr(n, StructType, List(fs))
     }
     // slice type
-    Command("slice", [element_type]) => {
-      let nb = NodeBuilder { loc: n.loc, st: ps.st };
-      let slice_node = node_macros::slice_type_macro(&nb, *element_type);
-      parse_expr(ps, slice_node)
+    Command("slice", &[element_type]) => {
+      let nb = NodeBuilder { loc: n.loc, st };
+      expr_macros::slice_type_macro(&nb,
+        parse_expr(st, element_type))
     }
     _ => {
       let ns = n.children();
@@ -404,8 +446,8 @@ fn parse_expr(ps : &mut ParseState, n : Node) -> Expr {
       if let [lit, tag] = ns {
         if let NodeContent::Literal(NodeLiteral::U64(_)) = lit.content {
           return list_expr(n, Cast, &[
-            parse_expr(ps, *lit),
-            parse_expr(ps, *tag),
+            parse_expr(st, *lit),
+            parse_expr(st, *tag),
           ]);
         }
       }
@@ -413,22 +455,22 @@ fn parse_expr(ps : &mut ParseState, n : Node) -> Expr {
         if let Some(op) = str_to_operator(sym.as_str()) {
           let op = literal_expr(ns[0], Val::Operator(op));
           let mut es = vec![op];
-          parse_to_vec(ps, &ns[1..], &mut es);
+          parse_to_vec(st, &ns[1..], &mut es);
           return list_expr_from_vec(n, InstrinicOp, es);
         }
       }
-      let es = parse_expr_list(ps, ns);
+      let es = parse_expr_list(st, ns);
       expr(n, Call, List(es))
     }
   }
 }
 
-fn to_args_body(ps : &mut ParseState, args_node : Node, body : Node) -> (Expr, Expr) {
+fn to_args_body(st : SymbolTable, args_node : Node, body : Node) -> (Expr, Expr) {
   let mut v = Vec::with_capacity(args_node.children().len());
   for &a in args_node.children() {
     if let [name, type_tag] = a.children() {
       let name_literal = symbol_literal(*name);
-      let type_expr = parse_expr(ps, *type_tag);
+      let type_expr = parse_expr(st, *type_tag);
       let arg = list_expr(a, Syntax, &[name_literal, type_expr]);
       v.push(arg);
     }
@@ -437,21 +479,21 @@ fn to_args_body(ps : &mut ParseState, args_node : Node, body : Node) -> (Expr, E
     }
   }
   let args = perm_slice_from_vec(v);
-  let body = parse_expr(ps, body);
+  let body = parse_expr(st, body);
   let args_expr = expr(args_node, Syntax, List(args));
   (args_expr, body)
 }
 
-fn to_type_args_list(ps : &mut ParseState, args : Node) -> Expr {
+fn to_type_args_list(st : SymbolTable, args : Node) -> Expr {
   let mut v = Vec::with_capacity(args.children().len());
   for a in args.children() {
     let arg = {
       if let [type_tag] = a.children() {
-        parse_expr(ps, *type_tag)
+        parse_expr(st, *type_tag)
       }
       else if let [name, type_tag] = a.children() {
         name.as_symbol();
-        parse_expr(ps, *type_tag)
+        parse_expr(st, *type_tag)
       }
       else {
         panic!("expected arg at ({})", a.loc)
@@ -462,14 +504,14 @@ fn to_type_args_list(ps : &mut ParseState, args : Node) -> Expr {
   expr(args, Syntax, List(perm_slice_from_vec(v)))
 }
 
-fn to_field_list(ps : &mut ParseState, fields : &[Node]) -> SlicePtr<Expr> {
+fn to_field_list(st : SymbolTable, fields : &[Node]) -> SlicePtr<Expr> {
   let mut v = Vec::with_capacity(fields.len());
   for f in fields {
     let field = {
       if let [name, type_tag] = f.children() {
         list_expr(*f, Syntax, &[
           symbol_literal(*name),
-          parse_expr(ps, *type_tag),
+          parse_expr(st, *type_tag),
         ])
       }
       else {
@@ -481,15 +523,15 @@ fn to_field_list(ps : &mut ParseState, fields : &[Node]) -> SlicePtr<Expr> {
   perm_slice_from_vec(v)
 }
 
-fn parse_expr_list(ps : &mut ParseState, ns : &[Node]) -> SlicePtr<Expr> {
+fn parse_expr_list(st : SymbolTable, ns : &[Node]) -> SlicePtr<Expr> {
   let mut v = Vec::with_capacity(ns.len());
-  parse_to_vec(ps, ns, &mut v);
+  parse_to_vec(st, ns, &mut v);
   perm_slice_from_vec(v)
 }
 
-fn parse_to_vec(ps : &mut ParseState, ns : &[Node], v : &mut Vec<Expr>) {
+fn parse_to_vec(st : SymbolTable, ns : &[Node], v : &mut Vec<Expr>) {
   for &n in ns {
-    v.push(parse_expr(ps, n));
+    v.push(parse_expr(st, n));
   }
 }
 
@@ -513,7 +555,7 @@ fn str_to_operator(s : &str) -> Option<Operator> {
   Some(op)
 }
 
-fn to_template_expr(ps : &mut ParseState, n : Node, quoted : Node) -> Expr {
+fn to_template_expr(st : SymbolTable, n : Node, quoted : Node) -> Expr {
   
   fn find_template_arguments(n : Node, args : &mut Vec<Node>) {
     match sexp::node_shape(&n) {
@@ -530,11 +572,12 @@ fn to_template_expr(ps : &mut ParseState, n : Node, quoted : Node) -> Expr {
   let mut template_args = vec![];
   find_template_arguments(quoted, &mut template_args);
   if template_args.len() > 0 {
-    let nb = NodeBuilder { loc: quoted.loc, st: ps.st };
+    let nb = NodeBuilder { loc: quoted.loc, st };
     let n = template_macro(&nb, quoted, template_args.as_slice());
-    parse_expr(ps, n)
+    parse_expr(st, n)
   }
   else {
-    literal_expr(n, Val::Node(quoted))
+    let e = parse_expr(st, quoted);
+    literal_expr(n, Val::Expr(e))
   }
 }

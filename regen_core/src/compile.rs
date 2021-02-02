@@ -13,7 +13,7 @@ use perm_alloc::{Ptr, perm_slice_from_vec, perm_slice, perm};
 
 use symbols::Symbol;
 use env::Env;
-use sexp::{Node, NodeLiteral, SrcLocation};
+use sexp::SrcLocation;
 use parse::{Expr, ExprShape, ExprTag, Val};
 
 struct LabelledExpr {
@@ -487,8 +487,8 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       return Some(push_expr(b, e, b.env.c.u64_tag).to_ref());
     }
     // literal node
-    Literal(Val::Node(n)) => {
-      Some(compile_quote(b, n).to_ref())
+    Literal(Val::Expr(e)) => {
+      Some(compile_quote(b, e).to_ref())
     }
     // literal void
     Literal(Val::Void) => {
@@ -740,21 +740,6 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
   }
 }
 
-fn compile_literal(b : &mut Builder, l : NodeLiteral) -> Ref {
-  match l {
-    NodeLiteral::U64(v) => {
-      let e = InstrExpr::LiteralU64(v);
-      push_expr(b, e, b.env.c.u64_tag).to_ref()
-    }
-    NodeLiteral::String(s) => {
-      let t = types::pointer_type(b.env.c.string_tag);
-      let e = InstrExpr::Literal(t, Ptr::to_ptr(s) as *const ());
-      let v = push_expr(b, e, t);
-      pointer_to_locator(v, false)
-    }
-  }
-}
-
 fn compile_array_len(b : &mut Builder, array : Expr) -> Var {
   let r = compile_expr_to_ref(b, array);
   let info = types::type_as_array(&r.t).expect("expected array");
@@ -976,7 +961,7 @@ fn compile_intrinic_op(b : &mut Builder, e : Expr, op : Operator, args : &[Expr]
   panic!("incorrect number of args to operator {} at ({})", op, e.loc)
 }
 
-fn compile_quote(b : &mut Builder, quoted : Node) -> Var {
+fn compile_quote(b : &mut Builder, quoted : Expr) -> Var {
   let e = InstrExpr::LiteralU64(Ptr::to_ptr(quoted) as u64);
   let node_tag = b.env.c.node_tag;
   push_expr(b, e, node_tag)

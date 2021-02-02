@@ -21,7 +21,7 @@ pub type LocalHandle = Ptr<LocalInfo>;
 
 pub type SequenceHandle = Ptr<SequenceInfo>;
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Operator {
   // arithmetic
   Add, Sub, Mul, Div, Rem,

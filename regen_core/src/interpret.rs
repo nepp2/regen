@@ -1,3 +1,5 @@
+use parse::{ExprShape, ExprTag};
+
 /// Bytecode interpreter
 ///
 /// Receives a sexp node tree and compiles/interprets the top level
@@ -14,7 +16,7 @@ use crate::{
   parse::{self, Expr},
   perm_alloc::{Ptr, SlicePtr},
   semantic::{self, SemanticInfo},
-  sexp::{self, Node, NodeShape},
+  sexp::{Node},
   symbols::Symbol,
   types::{self, TypeHandle, Primitive}
 };
@@ -46,16 +48,6 @@ pub fn interpret_function(f : *const Function, args : &[u64], env : Env, return_
     std::slice::from_raw_parts_mut(stack_ptr.mem as *mut u64, args.len())
   };
   stack_args.copy_from_slice(args);
-  // unsafe {
-  //   let t = (*f).t;
-  //   let fun = types::type_as_function(&t).unwrap();
-  //   if fun.returns.size_of == 8 {
-  //     *(stack_ptr.mem as *mut u64)
-  //   }
-  //   else {
-  //     0
-  //   }
-  // }
   let mut shadow_stack = vec![
     Frame {
       pc: 0,
@@ -67,8 +59,8 @@ pub fn interpret_function(f : *const Function, args : &[u64], env : Env, return_
   interpreter_loop(&mut shadow_stack, env);
 }
 
-pub fn interpret_def_expr(name : Symbol, expr : Expr, env : Env, info : Ptr<SemanticInfo>) {
-  let f = compile::compile_expr_to_function(env, info, expr);
+pub fn interpret_def_expr(name : Symbol, initialiser : Expr, env : Env, info : Ptr<SemanticInfo>) {
+  let f = compile::compile_expr_to_function(env, info, initialiser);
   let def_type = types::type_as_function(&f.t).unwrap().returns;
   let def_ptr = env::env_alloc_global(env, name, def_type);
   env::set_active_definition(env, Some(name));
@@ -76,29 +68,26 @@ pub fn interpret_def_expr(name : Symbol, expr : Expr, env : Env, info : Ptr<Sema
   env::set_active_definition(env, None);
 }
 
-pub fn interpret_def_node(name : Symbol, expr : Node, env : Env) {
-  let e = parse::parse_to_expr(env.st, expr);
-  let info = semantic::get_semantic_info(e);
-  interpret_def_expr(name, e, env, info)
+pub fn interpret_def(name : Symbol, initialiser : Expr, env : Env) {
+  let info = semantic::get_semantic_info(initialiser);
+  interpret_def_expr(name, initialiser, env, info)
 }
 
-pub fn interpret_node(expr : Node, env : Env) {
-  let e = parse::parse_to_expr(env.st, expr);
-  let info = semantic::get_semantic_info(e);
-  let f = compile::compile_expr_to_function(env, info, e);
+pub fn interpret_expr(expr : Expr, env : Env) {
+  let info = semantic::get_semantic_info(expr);
+  let f = compile::compile_expr_to_function(env, info, expr);
   interpret_function(&f, &[], env, None);
 }
 
 pub fn interpret_file(module_name : &str, code : &str, env : Env) {
-  let n = sexp::sexp_list(env.st, module_name, code);
-  for c in n.children() {
-    match sexp::node_shape(c) {
-      NodeShape::Command("def", [name, expr]) => {
-        let name = name.as_symbol();
-        interpret_def_node(name, *expr, env);
+  let es = parse::parse_module(env.st, module_name, code);
+  for &e in es {
+    match e.shape() {
+      ExprShape::List(ExprTag::Def, &[name, expr]) => {
+        interpret_def(name.as_symbol_literal(), expr, env);
       }
       _ => {
-        interpret_node(*c, env);
+        interpret_expr(e, env);
       }
     }
   }

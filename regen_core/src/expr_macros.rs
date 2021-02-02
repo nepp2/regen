@@ -1,31 +1,36 @@
 
-use crate::{perm_alloc, symbols, sexp};
+use crate::{parse::{self, Expr, ExprShape}, perm_alloc, sexp, symbols};
+use parse::{ExprContent, ExprData};
 use perm_alloc::{perm, perm_slice, perm_slice_from_vec};
 use symbols::{SymbolTable, to_symbol};
-use sexp::{SrcLocation, Node, NodeContent, NodeInfo, node_shape, NodeShape};
+use sexp::{SrcLocation, Node, NodeContent, NodeInfo};
 
-pub fn template(n : Node, args : &[Node]) -> Node {
-  pub fn template_inner(n : Node, args : &[Node], next_arg : &mut usize) -> Node {
-    use NodeShape::*;
-    match node_shape(&n) {
-      Atom(_) | Literal(_) => n,
-      Command("$", [_]) => {
+pub fn template(e : Expr, args : &[Expr]) -> Expr {
+  pub fn template_inner(e : Expr, args : &[Expr], next_arg : &mut usize) -> Expr {
+    use ExprShape::*;
+    match e.shape() {
+      Ref(_) | Literal(_) => e,
+      List(TemplateHole, &[_]) => {
         let new_e = args[*next_arg];
         *next_arg += 1;
         new_e
       }
-      _ => {
+      List(_, cs) => {
         let mut children = vec![];
-        for &c in n.children() {
+        for &c in cs {
           children.push(template_inner(c, args, next_arg));
         }
-        let loc = n.loc;
-        let content = NodeContent::List(perm_slice_from_vec(children));
-        perm(NodeInfo { loc, content })
+        let loc = e.loc;
+        let ed = ExprData {
+          tag: e.tag,
+          content: ExprContent::List(perm_slice_from_vec(children)),
+          loc: e.loc,
+        };
+        perm(ed)
       },
     }
   }
-  template_inner(n, args, &mut 0)
+  template_inner(e, args, &mut 0)
 }
 
 pub struct NodeBuilder {
@@ -48,8 +53,8 @@ impl NodeBuilder {
     })
   }
 
-  fn sexp(&self, s : &str) -> Node {
-    sexp::sexp_list(self.st, &self.loc.module.name, s).children()[0]
+  fn sexp(&self, s : &str) -> Expr {
+    parse::parse_expression(self.st, &self.loc.module.name, s)
   }
 
   fn sym(&self, s : &str) -> Node {
@@ -83,7 +88,7 @@ pub fn template_macro(nb : &NodeBuilder, n : Node, args : &[Node]) -> Node {
   ])
 }
 
-pub fn for_macro(nb : &NodeBuilder, loop_var : Node, start : Node, end : Node, body : Node) -> Node {
+pub fn for_macro(nb : &NodeBuilder, loop_var : Expr, start : Expr, end : Expr, body : Expr) -> Expr {
   let loop_template = nb.sexp("
     (do
       (let ($ loop_var) ($ start))
@@ -100,7 +105,7 @@ pub fn for_macro(nb : &NodeBuilder, loop_var : Node, start : Node, end : Node, b
   template(loop_template, &[loop_var, start, end, loop_var, body, loop_var, loop_var])
 }
 
-pub fn while_macro(nb : &NodeBuilder, cond : Node, body : Node) -> Node {
+pub fn while_macro(nb : &NodeBuilder, cond : Expr, body : Expr) -> Expr {
   let loop_template = nb.sexp("
     (label while_loop (do
       (if ($ cond) (do
@@ -112,22 +117,14 @@ pub fn while_macro(nb : &NodeBuilder, cond : Node, body : Node) -> Node {
   template(loop_template, &[cond, body])
 }
 
-pub fn slice_index_macro(nb : &NodeBuilder, slice : Node, index : Node) -> Node {
-  // (ptr_index (. slice data) index)
-  nb.list(
-    &[nb.sym("ptr_index"),
-      nb.list(&[nb.sym("."), slice, nb.sym("data")]),
-      index,
-  ])
+pub fn slice_index_macro(nb : &NodeBuilder, slice : Expr, index : Expr) -> Expr {
+  let slice_index_template =
+    nb.sexp("(ptr_index (. ($ slice) data) ($ index))");
+  template(slice_index_template, &[slice, index])
 }
 
-pub fn slice_type_macro(nb : &NodeBuilder, element_type : Node) -> Node {
-  nb.list(
-    &[nb.sym("struct"),
-      nb.list(&[
-        nb.sym("data"),
-        nb.list(&[nb.sym("ptr"), element_type]),
-      ]),
-      nb.list(&[nb.sym("len"), nb.sym("u64")]),
-  ])
+pub fn slice_type_macro(nb : &NodeBuilder, element_type : Expr) -> Expr {
+  let slice_type_template =
+    nb.sexp("(struct (data (ptr ($ element_type)) (len u64))");
+  template(slice_type_template, &[element_type])
 }

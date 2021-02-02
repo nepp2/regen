@@ -313,6 +313,14 @@ pub fn sexp_list(st : SymbolTable, module_name : &str, code : &str) -> Node {
   ns.pop().unwrap()
 }
 
+pub fn sexp(st : SymbolTable, module_name : &str, code : &str) -> Node {
+  let n = sexp_list(st, module_name, code);
+  if let &[n] = n.children() {
+    return n;
+  }
+  panic!("expected single expression")
+}
+
 use std::fmt;
 
 impl fmt::Display for SrcLocation {

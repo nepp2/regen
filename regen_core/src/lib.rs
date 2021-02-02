@@ -5,7 +5,7 @@ pub mod symbols;
 mod sexp;
 mod parse;
 mod semantic;
-mod node_macros;
+mod expr_macros;
 pub mod env;
 mod bytecode;
 mod compile;

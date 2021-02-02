@@ -57,8 +57,8 @@
   ;; handle tick events
   (let tick (. e tick))
   (if (!= (cast tick u64) 0) (do
-    (set (. state ticker) (+ (. state ticker) 1))
-    (if (> (. state ticker) 100) (set (. state ticker) 0))
+    (set (. state ticker) (+ (. state ticker) 4))
+    (if (> (. state ticker) 200) (set (. state ticker) 0))
   ))
 )))
 
