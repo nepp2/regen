@@ -1,9 +1,6 @@
 /// Compiles core language into bytecode
 
-use crate::{
-  bytecode, sexp, symbols, env, perm_alloc,
-  types, parse,
-};
+use crate::{bytecode, env, parse, perm_alloc, semantic::{ReferenceType, SemanticInfo}, sexp, symbols, types};
 
 use bytecode::{
   SequenceHandle, SequenceInfo, InstrExpr, FunctionBytecode,
@@ -48,10 +45,12 @@ struct Builder {
 
   /// the environment containing all visible symbols
   env : Env,
+
+  info : Ptr<SemanticInfo>,
 }
 
 impl Builder {
-  fn new(env : Env) -> Self {
+  fn new(env : Env, info : Ptr<SemanticInfo>) -> Self {
     Builder {
       bc: FunctionBytecode {
         sequence_info: vec![],
@@ -65,6 +64,7 @@ impl Builder {
       current_sequence: None,
       label_stack: vec![],
       env,
+      info,
     }
   }
 }
@@ -196,7 +196,7 @@ fn pointer_to_locator(v : Var, mutable : bool) -> Ref {
   }
 }
 
-fn find_label(b : &mut Builder, label : Symbol) -> &LabelledExpr {
+fn find_label<'a>(b : &'a mut Builder, label : Symbol) -> &'a LabelledExpr {
   b.label_stack.iter().rev()
   .find(|l| l.name == label)
   .expect("label not found")
@@ -263,8 +263,8 @@ fn function_to_var(b : &mut Builder, f : Function) -> Var {
   function_var
 }
 
-fn compile_function_def(env: Env, args : &[Expr], return_tag : Option<Expr>, body : Expr) -> Function {
-  let mut b = Builder::new(env);
+fn compile_function_def(env: Env, info : Ptr<SemanticInfo>, args : &[Expr], return_tag : Option<Expr>, body : Expr) -> Function {
+  let mut b = Builder::new(env, info);
   b.bc.args = args.len();
   let mut arg_types = vec![];
   for a in args {
@@ -312,8 +312,8 @@ fn compile_function(
 }
 
 /// Compile basic imperative language into bytecode
-pub fn compile_expr_to_function(env: Env, root : Expr) -> Function {
-  compile_function(Builder::new(env), root, &[], None)
+pub fn compile_expr_to_function(env: Env, info : Ptr<SemanticInfo>, root : Expr) -> Function {
+  compile_function(Builder::new(env, info), root, &[], None)
 }
 
 fn compile_if_else(b : &mut Builder, cond_expr : Expr, then_expr : Expr, else_expr : Expr) -> Option<Ref> {
@@ -446,24 +446,27 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       Some(compile_cast(b, v, b.env.c.bool_tag).to_ref())
     }
     // local reference
-    Symbol(LocalRef, sym) => {
-      // Look for variable in local scope
-      if let Some(v) = find_var_in_scope(b, sym) {
-        Some(v.to_ref())
-      }
-      else {
-        panic!("local var not found in codegen!")
-      }
-    }
-    // global reference
-    Symbol(GlobalRef, sym) => {
-      if let Some(tag) = env::get_global_type(b.env, sym) {
-        let e = InstrExpr::Def(sym);
-        let v = push_expr(b, e, types::pointer_type(tag));
-        Some(pointer_to_locator(v, true))
-      }
-      else {
-        panic!("symbol '{}' not defined ({})", sym, e.loc)
+    Ref(sym) => {
+      match b.info.get_ref_type(e) {
+        ReferenceType::Local => {
+          // Look for variable in local scope
+          if let Some(v) = find_var_in_scope(b, sym) {
+            Some(v.to_ref())
+          }
+          else {
+            panic!("local var not found in codegen!")
+          }
+        }
+        ReferenceType::Global => {
+          if let Some(tag) = env::get_global_type(b.env, sym) {
+            let e = InstrExpr::Def(sym);
+            let v = push_expr(b, e, types::pointer_type(tag));
+            Some(pointer_to_locator(v, true))
+          }
+          else {
+            panic!("symbol '{}' not defined ({})", sym, e.loc)
+          }
+        }
       }
     }
     // literal u64
@@ -602,15 +605,13 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     }
     // fun
     List(Fun, &[args, ret, body]) => {
-      let f = compile_function_def(b.env, args.children(), Some(ret), body);
+      let return_tag = {
+        if ret.tag == Implicit { None }
+        else { Some(ret) }
+      };
+      let f = compile_function_def(b.env, b.info, args.children(), return_tag, body);
       let v = function_to_var(b, f);
       Some(v.to_ref())
-    }
-    // fun
-    List(Fun, &[args, body]) => {
-      let f = compile_function_def(b.env, args.children(), None, body);
-      let v = function_to_var(b, f);
-      Some(v.to_ref())      
     }
     // set var
     List(Set, &[dest, value]) => {
@@ -765,14 +766,15 @@ fn symbol_to_type(b : &Builder, s : Symbol) -> Option<TypeHandle> {
   env::get_global_value(b.env, s, b.env.c.type_tag)
 }
 
-fn eval_literal_u64(env : Env, e : Expr) -> u64 {
-  use ExprShape::*;
-  use ExprTag::*;
+fn eval_literal_u64(b : &Builder, e : Expr) -> u64 {
+  let env = b.env;
   match e.shape() {
-    Literal(Val::U64(v)) => return v,
-    Symbol(GlobalRef, sym) => {
-      if let Some(v) = env::get_global_value(env, sym, env.c.u64_tag) {
-        return v;
+    ExprShape::Literal(Val::U64(v)) => return v,
+    ExprShape::Ref(sym) => {
+      if b.info.get_ref_type(e) == ReferenceType::Global {
+        if let Some(v) = env::get_global_value(env, sym, env.c.u64_tag) {
+          return v;
+        }
       }
     }
     _ => (),
@@ -799,9 +801,14 @@ fn try_expr_to_type(b: &Builder, e : Expr) -> Option<TypeHandle> {
   use ExprShape::*;
   use ExprTag::*;
   let t = match e.shape() {
-    Symbol(GlobalRef, sym) => {
-      symbol_to_type(b, sym)
-        .unwrap_or_else(|| panic!("expected type at ({})", e.loc))
+    Ref(sym) => {
+      if b.info.get_ref_type(e) == ReferenceType::Global {
+        symbol_to_type(b, sym)
+          .unwrap_or_else(|| panic!("expected type at ({})", e.loc))
+      }
+      else {
+        return None;
+      }
     }
     // pointer type
     List(PtrType, &[inner_type]) => {
@@ -825,7 +832,7 @@ fn try_expr_to_type(b: &Builder, e : Expr) -> Option<TypeHandle> {
     // array type
     List(SizedArrayType, &[element_type, length]) => {
       let element = expr_to_type(b, element_type);
-      let size = eval_literal_u64(b.env, length);
+      let size = eval_literal_u64(b, length);
       types::array_type(element, size)
     }
     // struct type
@@ -850,21 +857,6 @@ fn try_expr_to_type(b: &Builder, e : Expr) -> Option<TypeHandle> {
     },
   };
   Some(t)
-}
-
-fn compile_symbol_reference(b : &mut Builder, node : Node) -> Ref {
-  let sym = node.as_symbol();
-  // Look for variable in local scope
-  if let Some(r) = find_var_in_scope(b, sym) {
-    return r.to_ref();
-  }
-  // Assume global
-  if let Some(tag) = env::get_global_type(b.env, sym) {
-    let e = InstrExpr::Def(sym);
-    let v = push_expr(b, e, types::pointer_type(tag));
-    return pointer_to_locator(v, true);
-  }
-  panic!("symbol '{}' not defined ({})", sym, node.loc)
 }
 
 fn compile_function_call(b : &mut Builder, e : Expr, function : Expr, args : &[Expr]) -> Var {

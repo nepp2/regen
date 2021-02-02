@@ -94,7 +94,7 @@ pub extern "C" fn node_as_symbol(n : Node) -> Symbol {
 }
 
 pub extern "C" fn node_display(node : Node) {
-  println!("{}", node);
+  println!("{}", node.loc.src_snippet());
 }
 
 pub extern "C" fn calculate_packed_field_offsets(

@@ -3,17 +3,21 @@
 /// Receives a sexp node tree and compiles/interprets the top level
 /// nodes one at a time.
 
-use crate::{bytecode, compile, debug, env, ffi_ccall, parse, perm_alloc, sexp, symbols::Symbol, types};
-
-use env::{Env};
-use sexp::{Node, NodeShape};
-use parse::Expr;
-use bytecode::{
-  Instr, InstrExpr, Operator, LocalHandle,
+use crate::{
+  bytecode::{
+    Instr, InstrExpr, Operator, LocalHandle,
+  },
+  compile::{self, Function},
+  debug,
+  env::{self, Env},
+  ffi_ccall,
+  parse::{self, Expr},
+  perm_alloc::{Ptr, SlicePtr},
+  semantic::{self, SemanticInfo},
+  sexp::{self, Node, NodeShape},
+  symbols::Symbol,
+  types::{self, TypeHandle, Primitive}
 };
-use compile::Function;
-use perm_alloc::SlicePtr;
-use types::{TypeHandle, Primitive};
 
 pub type CompileExpression = fn(env : &Env, fun : Node) -> Function;
 
@@ -63,8 +67,8 @@ pub fn interpret_function(f : *const Function, args : &[u64], env : Env, return_
   interpreter_loop(&mut shadow_stack, env);
 }
 
-pub fn interpret_def_expr(name : Symbol, expr : Expr, env : Env) {
-  let f = compile::compile_expr_to_function(env, expr);
+pub fn interpret_def_expr(name : Symbol, expr : Expr, env : Env, info : Ptr<SemanticInfo>) {
+  let f = compile::compile_expr_to_function(env, info, expr);
   let def_type = types::type_as_function(&f.t).unwrap().returns;
   let def_ptr = env::env_alloc_global(env, name, def_type);
   env::set_active_definition(env, Some(name));
@@ -74,12 +78,14 @@ pub fn interpret_def_expr(name : Symbol, expr : Expr, env : Env) {
 
 pub fn interpret_def_node(name : Symbol, expr : Node, env : Env) {
   let e = parse::parse_to_expr(env.st, expr);
-  interpret_def_expr(name, e, env)
+  let info = semantic::get_semantic_info(e);
+  interpret_def_expr(name, e, env, info)
 }
 
 pub fn interpret_node(expr : Node, env : Env) {
   let e = parse::parse_to_expr(env.st, expr);
-  let f = compile::compile_expr_to_function(env, e);
+  let info = semantic::get_semantic_info(e);
+  let f = compile::compile_expr_to_function(env, info, e);
   interpret_function(&f, &[], env, None);
 }
 

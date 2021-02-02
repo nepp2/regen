@@ -1,5 +1,5 @@
 
-use crate::{sexp, symbols, node_macros, perm_alloc, ffi_libs, bytecode};
+use crate::{bytecode, ffi_libs, node_macros, perm_alloc, sexp, symbols};
 use sexp::{
   Node,
   NodeLiteral,
@@ -13,8 +13,6 @@ use perm_alloc::{Ptr, SlicePtr, perm, perm_slice, perm_slice_from_vec};
 use ffi_libs::RegenString;
 use bytecode::Operator;
 
-use std::collections::HashSet;
-
 pub type Expr = Ptr<ExprData>;
 
 #[derive(Copy, Clone)]
@@ -27,8 +25,7 @@ pub struct ExprData {
 #[derive(Copy, Clone, PartialEq)]
 pub enum ExprTag {
   Let,
-  LocalRef,
-  GlobalRef,
+  Reference,
   StructInit,
   ZeroInit,
   ArrayInit,
@@ -58,6 +55,7 @@ pub enum ExprTag {
   StructType,
   PtrType,
   SizedArrayType,
+  Implicit, // was not specified
   Syntax, // cannot be evaluated
 }
 
@@ -67,7 +65,7 @@ pub enum Val {
   String(Ptr<RegenString>),
   Bool(bool),
   Symbol(Symbol),
-  Node(Node), // TODO: this should be an expr, surely?
+  Node(Node),
   Void,
   Operator(Operator),
 }
@@ -75,7 +73,6 @@ pub enum Val {
 #[derive(Copy, Clone)]
 pub enum ExprContent {
   List(SlicePtr<Expr>),
-  Reference(Symbol),
   LiteralVal(Val),
 }
 
@@ -85,8 +82,14 @@ impl ExprData {
   pub fn shape(&self) -> ExprShape {
     match self.content {
       List(l) => ExprShape::List(self.tag, l.as_slice()),
-      LiteralVal(v) => ExprShape::Literal(v),
-      Reference(sym) => ExprShape::Symbol(self.tag, sym),
+      LiteralVal(v) => {
+        if self.tag == ExprTag::Reference {
+          if let Val::Symbol(s) = v {
+            return ExprShape::Ref(s);
+          }
+        }
+        return ExprShape::Literal(v);
+      }
     }
   }
 
@@ -131,44 +134,22 @@ impl ExprData {
 pub enum ExprShape<'l> {
   List(ExprTag, &'l [Expr]),
   Literal(Val),
-  Symbol(ExprTag, Symbol),
-}
-
-#[derive(Copy, Clone)]
-pub struct Field {
-  pub name : Option<Node>,
-  pub tag : Expr,
+  Ref(Symbol),
 }
 
 use ExprTag::*;
 
 struct ParseState {
-  locals : Vec<Symbol>,
   st : SymbolTable,
-  globals_referenced : HashSet<Symbol>,
 }
 
 pub fn parse_to_expr(st : SymbolTable, root : Node) -> Expr {
-  parse_to_expr_with_global_references(st, root).0
-}
-
-pub fn parse_to_expr_with_global_references(st : SymbolTable, root : Node) -> (Expr, HashSet<Symbol>) {
-  let mut ps = ParseState {
-    locals: vec![],
-    st,
-    globals_referenced: HashSet::new(),
-  };
-  let e = parse_expr(&mut ps, root);
-  (e, ps.globals_referenced)
+  let mut ps = ParseState { st };
+  parse_expr(&mut ps, root)
 }
 
 fn list_expr(n : Node, tag : ExprTag, exprs : &[Expr]) -> Expr {
-  let ed = ExprData {
-    tag,
-    content: List(perm_slice(exprs)),
-    loc: n.loc,
-  };
-  perm(ed)
+  expr(n, tag, List(perm_slice(exprs)))
 }
 
 fn list_expr_from_vec(n : Node, tag : ExprTag, exprs : Vec<Expr>) -> Expr {
@@ -176,25 +157,11 @@ fn list_expr_from_vec(n : Node, tag : ExprTag, exprs : Vec<Expr>) -> Expr {
 }
 
 fn literal_expr(n : Node, v : Val) -> Expr {
-  let ed = ExprData {
-    tag: LiteralExpr,
-    content: LiteralVal(v),
-    loc: n.loc,
-  };
-  perm(ed)
+  expr(n, LiteralExpr, LiteralVal(v))
 }
 
 fn symbol_literal(n : Node) -> Expr {
   literal_expr(n, Val::Symbol(n.as_symbol()))
-}
-
-fn symbol_expr(n : Node, tag : ExprTag, s : Symbol) -> Expr {
-  let ed = ExprData {
-    tag,
-    content: Reference(s),
-    loc: n.loc,
-  };
-  perm(ed)
 }
 
 fn expr(n : Node, tag : ExprTag, content: ExprContent) -> Expr {
@@ -218,13 +185,7 @@ fn parse_expr(ps : &mut ParseState, n : Node) -> Expr {
         "false" => literal_expr(n, Val::Bool(true)),
         _ => {
           let sym = n.as_symbol();
-          if ps.locals.contains(&sym) {
-            symbol_expr(n, LocalRef, sym)
-          }
-          else {
-            ps.globals_referenced.insert(sym);
-            symbol_expr(n, GlobalRef, sym)
-          }
+          expr(n, Reference, LiteralVal(Val::Symbol(sym)))
         }
       }
     }
@@ -322,7 +283,8 @@ fn parse_expr(ps : &mut ParseState, n : Node) -> Expr {
     // fun
     Command("fun", [arg_nodes, body]) => {
       let (args, body) = to_args_body(ps, *arg_nodes, *body);
-      list_expr(n, Fun, &[args, body])
+      let ret = list_expr(n, Implicit, &[]);
+      list_expr(n, Fun, &[args, ret, body])
     }
     Command("fun", [arg_nodes, return_tag, body]) => {
       let (args, body) = to_args_body(ps, *arg_nodes, *body);
@@ -337,7 +299,6 @@ fn parse_expr(ps : &mut ParseState, n : Node) -> Expr {
     }
     // let
     Command("let", [var_name, value]) => {
-      ps.locals.push(var_name.as_symbol());
       let name = symbol_literal(*var_name);
       let val_expr = parse_expr(ps, *value);
       list_expr(n, Let, &[name, val_expr])
@@ -365,11 +326,8 @@ fn parse_expr(ps : &mut ParseState, n : Node) -> Expr {
       ])
     }
     Command("do", exprs) => {
-      let locals = ps.locals.len();
       let es = parse_expr_list(ps, exprs);
-      let do_expr = expr(n, Do, List(es));
-      ps.locals.drain(locals..);
-      do_expr
+      expr(n, Do, List(es))
     }
   // Debug
     Command("debug", [v]) => {
@@ -469,7 +427,6 @@ fn to_args_body(ps : &mut ParseState, args_node : Node, body : Node) -> (Expr, E
   let mut v = Vec::with_capacity(args_node.children().len());
   for &a in args_node.children() {
     if let [name, type_tag] = a.children() {
-      ps.locals.push(name.as_symbol());
       let name_literal = symbol_literal(*name);
       let type_expr = parse_expr(ps, *type_tag);
       let arg = list_expr(a, Syntax, &[name_literal, type_expr]);
@@ -480,9 +437,7 @@ fn to_args_body(ps : &mut ParseState, args_node : Node, body : Node) -> (Expr, E
     }
   }
   let args = perm_slice_from_vec(v);
-  let locals = ps.locals.len();
   let body = parse_expr(ps, body);
-  ps.locals.drain(locals..);
   let args_expr = expr(args_node, Syntax, List(args));
   (args_expr, body)
 }

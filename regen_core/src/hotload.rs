@@ -1,15 +1,7 @@
 
-use crate::{
-  env,
-  env::Env,
-  sexp,
-  sexp::{
+use crate::{env, env::Env, interpret, parse, semantic, sexp, sexp::{
     Node, NodeShape, NodeContent, NodeLiteral::*,
-  },
-  parse,
-  symbols::{Symbol, to_symbol},
-  interpret,
-};
+  }, symbols::{Symbol, to_symbol}};
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -120,8 +112,9 @@ fn load_def(
 {
   let TODO = (); // using catch unwind is very ugly. Replace with proper error handling.
   let global_references = std::panic::catch_unwind(|| {
-    let (expr, global_references) =
-      parse::parse_to_expr_with_global_references(env.st, value_expr.n);
+    let expr = parse::parse_to_expr(env.st, value_expr.n);
+    let info = semantic::get_semantic_info(expr);
+    let global_references = info.global_set();
     // check dependencies are available
     for n in global_references.iter() {
       match new_defs.get(n) {
@@ -136,7 +129,7 @@ fn load_def(
         _ => (),
       }
     }
-    interpret::interpret_def_expr(name, expr, env);
+    interpret::interpret_def_expr(name, expr, env, info);
     global_references
   }).map_err(|_| ())?;
   hs.defs.insert(name, value_expr);

@@ -52,7 +52,8 @@ impl fmt::Display for DebugDisplay {
         write!(f, "{}", v)
       }
       Kind::Node => {
-        write!(f, "{}", unsafe { *(self.p as *const Node) })
+        let n = unsafe { *(self.p as *const Node) };
+        write!(f, "{}", n.loc.src_snippet())
       }
     }
   }

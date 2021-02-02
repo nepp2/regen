@@ -1,11 +1,10 @@
 /// Defines the an extensible TypeInfo data structure to be used by the
 /// compiler & interpreter.
 
-use crate::{symbols, perm_alloc, sexp};
+use crate::{symbols, perm_alloc};
 
 use symbols::{Symbol, SymbolTable, to_symbol};
 use perm_alloc::{Ptr, SlicePtr, perm, perm_slice, perm_slice_from_vec};
-use sexp::Node;
 use std::fmt;
 
 pub type TypeHandle = Ptr<TypeInfo>;
@@ -77,13 +76,6 @@ pub struct StructInfo {
 #[repr(C)]
 pub struct PointerInfo {
   pub points_to : TypeHandle,
-}
-
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct NominalInfo {
-  pub name : Node,
-  pub t : TypeHandle,
 }
 
 #[derive(Copy, Clone, PartialEq)]

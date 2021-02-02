@@ -138,6 +138,10 @@ impl SrcLocation {
       start: 0, end: 0, module: Ptr { p : std::ptr::null_mut() },
     }
   }
+
+  pub fn src_snippet(&self) -> &str {
+    &self.module.code.as_str()[self.start..self.end]
+  }
 }
 
 #[derive(Clone, Copy)]
@@ -168,7 +172,7 @@ impl NodeInfo {
   pub fn as_symbol(&self) -> Symbol {
     match self.content {
       Sym(s) => s,
-      _ => panic!("expected symbol, found {}", self),
+      _ => panic!("expected symbol, found '{}'", self.loc.src_snippet()),
     }
   }
 
@@ -327,64 +331,4 @@ impl fmt::Display for SrcLocation {
       self.start - line_start,
       self.end - line_start)
   }
-}
-
-impl fmt::Display for NodeInfo {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    display_node(f, 0, self, &mut false)
-  }
-}
-
-fn display_node(f: &mut fmt::Formatter<'_>, depth: usize, n : &NodeInfo, newline : &mut bool) -> fmt::Result {
-  match n.content {
-    List(children) => display_list(f, depth, children.as_slice(), newline),
-    Sym(s) => write!(f, "{}", s),
-    Literal(l) => display_literal(f, &l),
-  }
-}
-
-fn display_literal(f: &mut fmt::Formatter<'_>, l : &NodeLiteral) -> fmt::Result {
-  match l {
-    NodeLiteral::U64(v) => write!(f, "{}", v),
-    NodeLiteral::String(s) => write!(f, "\"{}\"", s.as_str()),
-  }
-}
-
-fn display_list(f: &mut fmt::Formatter<'_>, depth: usize, ns : &[Node], newline : &mut bool) -> fmt::Result {
-  write!(f, "(")?;
-  for i in 0..ns.len() {
-    let n = ns[i];
-    if n.children().len() > 0 && (ns.len() > 3 || i == 0) {
-      display_list_newline(f, depth + 1, ns, i, true)?;
-      *newline = true;
-      return Ok(());
-    }
-    if i > 0 {
-      write!(f, " ")?;
-    }
-    display_node(f, depth, &*n, newline)?;
-    if *newline {
-      return display_list_newline(f, depth + 1, ns, i + 1, false);
-    }
-  }
-  write!(f, ")")
-}
-
-fn display_list_newline(f: &mut fmt::Formatter<'_>, depth: usize, ns : &[Node], mut i : usize, indent_newline : bool) -> fmt::Result {
-  while i < ns.len() {
-    writeln!(f)?;
-    print_indent(f, depth * 2)?;
-    display_node(f, depth, &*ns[i], &mut false)?;
-    i += 1;
-  }
-  if indent_newline {
-    writeln!(f)?;
-    print_indent(f, (depth-1) * 2)?;
-  }
-  write!(f, ")")
-}
-
-fn print_indent(f: &mut fmt::Formatter<'_>, indent : usize) -> fmt::Result {
-  for _ in 0..indent { write!(f, " ")? }
-  Ok(())
 }
