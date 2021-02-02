@@ -79,8 +79,8 @@ pub fn interpret_expr(expr : Expr, env : Env) {
 }
 
 pub fn interpret_file(module_name : &str, code : &str, env : Env) {
-  let es = parse::parse_module(env.st, module_name, code);
-  for &e in es {
+  let es = parse::parse_module(env.st, module_name, code).unwrap();
+  for e in es {
     match e.shape() {
       ExprShape::List(ExprTag::Def, &[name, expr]) => {
         interpret_def(name.as_symbol_literal(), expr, env);

@@ -1,21 +1,28 @@
 
-use crate::{
-  bytecode::Operator,
-  error::error_raw,
-  expr_macros,
-  ffi_libs,
-  perm_alloc::{Ptr, perm, perm_slice_from_vec},
-  symbols::{Symbol, SymbolTable, to_symbol}
-};
-use super::{
-  expr::*,
-  lexer::{Token, TokenType},
-};
+use crate::{bytecode::Operator, error::{error_raw}, expr_macros, ffi_libs, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, SymbolTable, to_symbol}};
+use super::{expr::*, lexer::{Token, TokenType, lex}};
 use crate::error::{Error, error};
 use std::collections::{HashSet, HashMap};
 use std::str::FromStr;
 
 use ExprTag::*;
+
+pub fn parse_module(st : SymbolTable, module_name : &str, code : &str) -> Result<Vec<Expr>, Error> {
+  let module = perm(CodeModule { name: module_name.into(), code: code.into() });
+  let tokens = lex(&module)?;
+  parse_top_level(module, tokens, st)
+}
+
+pub fn parse_expression(st : SymbolTable, module_name : &str, code : &str) -> Result<Expr, Error> {
+  let module = perm(CodeModule { name: module_name.into(), code: code.into() });
+  let tokens = lex(&module)?;
+  let es = parse_top_level(module, tokens, st)?;
+  if let &[e] = es.as_slice() {
+    return Ok(e);
+  }
+  let loc = SrcLocation { start: 0, end: code.len(), module };
+  error(loc, "expected a single expression")
+}
 
 pub static EXPECTED_TOKEN_ERROR : &str = "Expected token. Found nothing.";
 
@@ -726,19 +733,16 @@ fn parse_expression_term(ps : &mut ParseState) -> Result<Expr, Error> {
   }
 }
 
-fn parse_top_level(ps : &mut ParseState) -> Result<Expr, Error> {
-  parse_list(ps, vec![], ";", Do)
-}
-
-pub fn parse(module : Ptr<CodeModule>, tokens : Vec<Token>, st : SymbolTable) -> Result<Expr, Error> {
+fn parse_top_level(module : Ptr<CodeModule>, tokens : Vec<Token>, st : SymbolTable) -> Result<Vec<Expr>, Error> {
   let config = parse_config();
   let mut ps = ParseState::new(module, tokens, &config, st);
-  let e = parse_top_level(&mut ps)?;
+  let mut es = vec![];
+  parse_into_list(&mut ps, &mut es, ";")?;
   if ps.has_tokens() {
     let t = ps.peek()?;
     return error(t.loc, format!("Unexpected token '{}' of type '{:?}'", t.to_string(), t.token_type));
   }
-  return Ok(e);
+  return Ok(es);
 }
 
 fn to_template_expr(st : SymbolTable, quoted : Expr) -> Expr {

@@ -44,7 +44,7 @@ impl ExprBuilder {
   }
 
   fn sexp(&self, s : &str) -> Expr {
-    let e = parse::parse_expression(self.st, &self.loc.module.name, s);
+    let e = parse::parse_expression(self.st, &self.loc.module.name, s).unwrap();
     self.set_loc(e);
     e
   }

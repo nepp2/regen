@@ -140,7 +140,7 @@ pub fn hotload_changes(module_name : &str, code : &str, env : Env, hs : &mut Hot
   // Parse file
   let exprs = {
     let r = std::panic::catch_unwind(|| {
-      parse::parse_module(env.st, module_name, &code)
+      parse::parse_module(env.st, module_name, &code).unwrap()
     });
     if let Ok(n) = r { n } else { return }
   };
@@ -148,7 +148,7 @@ pub fn hotload_changes(module_name : &str, code : &str, env : Env, hs : &mut Hot
   // Find new and unchanged defs
   let mut symbol_buffer = "".to_string();
   let mut new_defs = HashMap::new();
-  for &e in exprs {
+  for e in exprs {
     match e.shape() {
       ExprShape::List(ExprTag::Def, &[name, value_expr]) => {
         let name = name.as_symbol_literal();

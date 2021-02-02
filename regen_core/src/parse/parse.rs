@@ -1,5 +1,5 @@
 
-use crate::{bytecode, expr_macros, perm_alloc, symbols};
+use crate::{bytecode, error::Error, expr_macros, perm_alloc, symbols};
 use super::{
   sexp::{
     self,
@@ -19,18 +19,18 @@ use bytecode::Operator;
 use ExprTag::*;
 use ExprContent::*;
 
-pub fn parse_module(st : SymbolTable, module_name : &str, code : &str) -> SlicePtr<Expr> {
+pub fn parse_module(st : SymbolTable, module_name : &str, code : &str) -> Result<Vec<Expr>, Error> {
   let root = sexp::sexp_list(st, module_name, code);
   let mut es = vec![];
   for &n in root.children() {
     es.push(parse_expr(st, n));
   }
-  perm_slice_from_vec(es)
+  Ok(es)
 }
 
-pub fn parse_expression(st : SymbolTable, module_name : &str, code : &str) -> Expr {
+pub fn parse_expression(st : SymbolTable, module_name : &str, code : &str) -> Result<Expr, Error> {
   let n = sexp::sexp(st, module_name, code);
-  parse_expr(st, n)
+  Ok(parse_expr(st, n))
 }
 
 fn list_expr(n : Node, tag : ExprTag, exprs : &[Expr]) -> Expr {

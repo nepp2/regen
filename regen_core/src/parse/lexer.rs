@@ -1,7 +1,7 @@
 
 use std::{fmt};
 
-use crate::{error::{Error, error_raw}, perm_alloc::{Ptr, perm}};
+use crate::{error::{Error, error_raw}, perm_alloc::Ptr};
 use super::expr::{CodeModule, SrcLocation};
 
 const SYNTAX : &'static [&'static str] =
@@ -331,9 +331,9 @@ pub fn token_iter<'l>(code_module : &'l Ptr<CodeModule>) -> TokenIterator<'l> {
   TokenIterator::new(&code_module.code, *code_module)
 }
 
-pub fn lex<'l>(module_name : &str, code : &'l str) -> Result<Vec<Token<'l>>, Error> {
-  let module = perm(CodeModule { name: module_name.into(), code: code.into() });
-  let ti = TokenIterator::new(code, module);
+pub fn lex<'l>(module : &'l Ptr<CodeModule>) -> Result<Vec<Token<'l>>, Error> {
+  let code = module.code.as_str();
+  let ti = TokenIterator::new(code, *module);
   let mut tokens = vec![];
   for rt in ti {
     let t = rt?;
@@ -342,18 +342,4 @@ pub fn lex<'l>(module_name : &str, code : &'l str) -> Result<Vec<Token<'l>>, Err
     }
   }
   Ok(tokens)
-}
-
-#[test]
-fn test_lex() {
-  use std::fs;
-  let path = "../examples/new_syntax/scratchpad.gen";
-  let code =
-    fs::read_to_string(path)
-    .expect("Something went wrong reading the file");
-  println!("{}", code);
-  let tokens = lex(path, &code).unwrap();
-  println!();
-  println!("Tokens:");
-  for t in tokens { println!("   {}", t)}
 }
