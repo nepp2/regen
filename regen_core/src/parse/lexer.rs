@@ -32,12 +32,6 @@ impl <'l> fmt::Display for Token<'l> {
 }
 
 impl <'l> Token<'l> {
-  pub fn symbol(&self) -> Option<&str> {
-    match self.token_type {
-      Symbol => Some(&self.string), _ => None
-    }
-  }
-
   pub fn literal(&self) -> Option<&str> {
     match self.token_type {
       Symbol | Whitespace | Newline | Comment => None,
@@ -117,9 +111,13 @@ impl <'l> TokenIterator<'l> {
   }
 
   fn complete_token(&mut self, token_type : TokenType) -> Token<'l> {
+    self.complete_token_with_string_range(token_type, self.start_pos, self.pos)
+  }
+
+  fn complete_token_with_string_range(&mut self, token_type : TokenType, start : usize, end : usize) -> Token<'l> {
     let loc = self.get_src_location();
     let t = Token {
-      string: &self.code[self.start_pos..self.pos],
+      string: &self.code[start..end],
       token_type: token_type,
       loc : loc,
     };
@@ -281,7 +279,10 @@ impl <'l> TokenIterator<'l> {
     if self.peek() != '"' {
       return None;
     }
+    // carefully includes the quotes in the src location, but not in the string itself
     self.append_char();
+    let string_start = self.pos;
+    let mut string_end;
     loop {
       if !self.has_chars() {
         return Some(Err(self.raise_error("malformed string literal".to_string())));
@@ -301,10 +302,11 @@ impl <'l> TokenIterator<'l> {
       //   }
       //   self.skip_char();
       // }
+      string_end = self.pos;
       self.append_char();
       if c == '"' { break; }
     }
-    Some(Ok(self.complete_token(StringLiteral)))
+    Some(Ok(self.complete_token_with_string_range(StringLiteral, string_start, string_end)))
   }
 }
 

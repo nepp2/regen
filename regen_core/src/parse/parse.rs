@@ -176,12 +176,14 @@ fn parse_expr(st : SymbolTable, n : Node) -> Expr {
     }
     // fun
     Command("fun", &[arg_nodes, body]) => {
-      let (args, body) = to_args_body(st, arg_nodes, body);
-      let ret = list_expr(n, Implicit, &[]);
+      let args = parse_function_args(st, arg_nodes);
+      let body = parse_expr(st, body);
+      let ret = list_expr(n, Omitted, &[]);
       list_expr(n, Fun, &[args, ret, body])
     }
     Command("fun", &[arg_nodes, return_tag, body]) => {
-      let (args, body) = to_args_body(st, arg_nodes, body);
+      let args = parse_function_args(st, arg_nodes);
+      let body = parse_expr(st, body);
       let ret = parse_expr(st, return_tag);
       list_expr(n, Fun, &[args, ret, body])
     }
@@ -267,14 +269,14 @@ fn parse_expr(st : SymbolTable, n : Node) -> Expr {
     // function type
     Command("fn", &[args, ret]) => {
       list_expr(n, FnType, &[
-        to_type_args_list(st, args),
+        parse_function_args(st, args),
         parse_expr(st, ret),
       ])
     }
     // c function type
     Command("cfun", &[args, ret]) => {
       list_expr(n, CFunType, &[
-        to_type_args_list(st, args),
+        parse_function_args(st, args),
         parse_expr(st, ret),
       ])
     }
@@ -323,7 +325,7 @@ fn parse_expr(st : SymbolTable, n : Node) -> Expr {
   }
 }
 
-fn to_args_body(st : SymbolTable, args_node : Node, body : Node) -> (Expr, Expr) {
+fn parse_function_args(st : SymbolTable, args_node : Node) -> Expr {
   let mut v = Vec::with_capacity(args_node.children().len());
   for &a in args_node.children() {
     if let [name, type_tag] = a.children() {
@@ -337,29 +339,7 @@ fn to_args_body(st : SymbolTable, args_node : Node, body : Node) -> (Expr, Expr)
     }
   }
   let args = perm_slice_from_vec(v);
-  let body = parse_expr(st, body);
-  let args_expr = expr(args_node.loc, Syntax, List(args));
-  (args_expr, body)
-}
-
-fn to_type_args_list(st : SymbolTable, args : Node) -> Expr {
-  let mut v = Vec::with_capacity(args.children().len());
-  for a in args.children() {
-    let arg = {
-      if let [type_tag] = a.children() {
-        parse_expr(st, *type_tag)
-      }
-      else if let [name, type_tag] = a.children() {
-        name.as_symbol();
-        parse_expr(st, *type_tag)
-      }
-      else {
-        panic!("expected arg at ({})", a.loc)
-      }
-    };
-    v.push(arg);
-  }
-  expr(args.loc, Syntax, List(perm_slice_from_vec(v)))
+  expr(args_node.loc, Syntax, List(args))
 }
 
 fn to_field_list(st : SymbolTable, fields : &[Node]) -> SlicePtr<Expr> {

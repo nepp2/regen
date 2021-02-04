@@ -18,6 +18,10 @@ impl fmt::Display for DebugDisplay {
     match self.t.kind {
       Kind::Primitive => {
         match types::type_as_primitive(&self.t).unwrap() {
+          Primitive::I64 =>
+            write!(f, "{}", unsafe { *(self.p as *const i64) }),
+          Primitive::I32 =>
+            write!(f, "{}", unsafe { *(self.p as *const i32) }),
           Primitive::U64 =>
             write!(f, "{}", unsafe { *(self.p as *const u64) }),
           Primitive::U32 =>

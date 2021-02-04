@@ -124,6 +124,7 @@ fn hotload_def(
     }
   }) ();
   if new_def_state == DefState::Changed {
+    println!("def '{}' changed", name);
     let r = load_def(hs, env, new_defs, value_expr, name);
     if r.is_err() {
       new_def_state = DefState::Broken;

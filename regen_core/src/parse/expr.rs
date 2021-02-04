@@ -64,13 +64,13 @@ pub enum ExprTag {
   PtrType,
   SizedArrayType,
   TemplateHole,
-  Implicit, // was not specified
+  Omitted, // was not specified
   Syntax, // cannot be evaluated
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Val {
-  I64(i64), // TODO: rename
+  I64(i64),
   F64(u64),
   String(Ptr<RegenString>),
   Bool(bool),

@@ -129,7 +129,7 @@ pub extern "C" fn type_display(t : TypeHandle) {
 pub fn load_ffi_libs(e : Env) {
   let bool_type = e.c.bool_tag;
   let u64 = e.c.u64_tag;
-  let i64 = u64;
+  let i64 = e.c.i64_tag;
   let u32 = e.c.u32_tag;
   let void = e.c.void_tag;
   let void_ptr = types::pointer_type(void);

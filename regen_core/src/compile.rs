@@ -472,7 +472,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     // literal i64
     Literal(Val::I64(v)) => {
       let e = InstrExpr::LiteralI64(v);
-      Some(push_expr(b, e, b.env.c.u64_tag).to_ref())
+      Some(push_expr(b, e, b.env.c.i64_tag).to_ref())
     }
     // literal string
     Literal(Val::String(s)) => {
@@ -606,7 +606,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     // fun
     List(Fun, &[args, ret, body]) => {
       let return_tag = {
-        if ret.tag == Implicit { None }
+        if ret.tag == Omitted { None }
         else { Some(ret) }
       };
       let f = compile_function_def(b.env, b.info, args.children(), return_tag, body);
@@ -735,7 +735,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       Some(compile_type_expr(b, e).to_ref())
     }
     _ => {
-      panic!("encountered invalid expression at ({})", e.loc)
+      panic!("encountered invalid expression '{}' at ({})", e.loc.src_snippet(), e.loc)
     }
   }
 }
@@ -757,14 +757,14 @@ fn eval_literal_i64(b : &Builder, e : Expr) -> i64 {
     ExprShape::Literal(Val::I64(v)) => return v,
     ExprShape::Ref(sym) => {
       if b.info.get_ref_type(e) == ReferenceType::Global {
-        if let Some(v) = env::get_global_value(env, sym, env.c.u64_tag) {
+        if let Some(v) = env::get_global_value(env, sym, env.c.i64_tag) {
           return v;
         }
       }
     }
     _ => (),
   }
-  panic!("expected literal u64 at ({})", e.loc)
+  panic!("expected literal i64 at ({})", e.loc)
 }
 
 fn compile_type_expr(b : &mut Builder, e : Expr) -> Var {
@@ -778,7 +778,7 @@ fn expr_to_type(b: &Builder, e : Expr) -> TypeHandle {
     t
   }
   else {
-    panic!("invalid type expression at ({})", e.loc);
+    panic!("invalid type expression '{}' at ({})", e.loc.src_snippet(), e.loc);
   }
 }
 
@@ -802,15 +802,13 @@ fn try_expr_to_type(b: &Builder, e : Expr) -> Option<TypeHandle> {
     }
     // function type
     List(FnType, &[args, ret]) => {
-      let arg_types : Vec<TypeHandle> =
-        args.children().iter().map(|&e| expr_to_type(b, e)).collect();
+      let arg_types = fun_arg_types(b, args);
       let returns = expr_to_type(b, ret);
       types::function_type(&arg_types, returns)
     }
     // c function type
     List(CFunType, &[args, ret]) => {
-      let arg_types : Vec<TypeHandle> =
-        args.children().iter().map(|&e| expr_to_type(b, e)).collect();
+      let arg_types = fun_arg_types(b, args);
       let returns = expr_to_type(b, ret);
       types::c_function_type(&arg_types, returns)
     }
@@ -842,6 +840,16 @@ fn try_expr_to_type(b: &Builder, e : Expr) -> Option<TypeHandle> {
     },
   };
   Some(t)
+}
+
+fn fun_arg_types(b : &Builder, args_node : Expr) -> Vec<TypeHandle> {
+  let mut args = vec![];
+  for e in args_node.children() {
+    if let ExprShape::List(ExprTag::Syntax, &[_name, tag]) = e.shape() {
+      args.push(expr_to_type(b, tag));
+    }
+  }
+  args
 }
 
 fn compile_function_call(b : &mut Builder, e : Expr, function : Expr, args : &[Expr]) -> Var {

@@ -1,0 +1,69 @@
+
+def tick_event = struct {
+  tick_interval : i64,
+  current_millisecond : i64,
+};
+
+def tick_stream = fun(millisecond_interval : i64) {
+  register_tick_stream(env, event_loop, millisecond_interval);
+};
+
+def stream_ptr = ptr void;
+
+def update_fn_type = fn(state : ptr void, event : ptr void) => void;
+
+def state_stream = fun(
+  input_stream : stream_ptr,
+  state_type : type,
+  initial_state : (ptr void),
+  update_function : update_fn_type)
+{
+  register_state_stream(
+    env, event_loop, input_stream,
+    state_type, initial_state,
+    update_function)
+};
+
+
+def poll_fn_type =
+  fn(event_source : ptr void, output_event : ptr void, input_event : ptr void) => bool;
+
+def poll_stream = fun(
+  input_stream : stream_ptr,
+  event_source_type : type,
+  event_source : ptr void,
+  event_type : type,
+  poll_function : poll_fn_type)
+{
+  register_poll_stream(
+    env, event_loop, input_stream,
+    event_source_type, event_source,
+    event_type, poll_function)
+};
+
+def map_fn_type =
+  fn (output : ptr void, event : ptr void) => void;
+
+def map_stream = fun (
+  input_stream : stream_ptr,
+  output_type : type,
+  map_function : map_fn_type)
+{
+  register_map_stream(env, event_loop, input_stream, output_type, map_function)
+};
+
+def merge_stream = fun(
+  a : stream_ptr,
+  b : stream_ptr,
+  output_type : type)
+{
+  register_merge_stream(env, event_loop, a, b, output_type)
+};
+
+def sample_stream = fun(
+  trigger_stream : stream_ptr,
+  state_stream : stream_ptr,
+  output_type : type)
+{
+  register_sample_stream(env, event_loop, trigger_stream, state_stream, output_type)
+};

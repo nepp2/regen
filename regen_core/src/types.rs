@@ -12,12 +12,14 @@ pub type TypeHandle = Ptr<TypeInfo>;
 #[derive(Copy, Clone, PartialEq)]
 #[repr(u64)]
 pub enum Primitive {
-  U64 = 0,
-  U32 = 1,
-  U16 = 2,
-  U8 = 3,
-  Void = 4,
-  Bool = 5,
+  I64 = 0,
+  I32 = 1,
+  U64 = 2,
+  U32 = 3,
+  U16 = 4,
+  U8 = 5,
+  Void = 6,
+  Bool = 7,
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -89,6 +91,8 @@ pub struct FunctionInfo {
 #[derive(Clone)]
 pub struct CoreTypes {
   pub type_tag : TypeHandle,
+  pub i64_tag : TypeHandle,
+  pub i32_tag : TypeHandle,
   pub u64_tag : TypeHandle,
   pub u32_tag : TypeHandle,
   pub u16_tag : TypeHandle,
@@ -106,7 +110,7 @@ pub fn is_number(t : TypeHandle) -> bool {
   use Primitive::*;
   if let Some(p) = type_as_primitive(&t) {
     match p {
-      U64 | U32 | U16 | U8 => return true,
+      I64 | I32 | U64 | U32 | U16 | U8 => return true,
       _ => (),
     }
   }
@@ -237,6 +241,8 @@ pub fn c_function_type(args : &[TypeHandle], returns : TypeHandle) -> TypeHandle
 
 pub fn core_types(st : SymbolTable) -> CoreTypes {
 
+  let i64_tag = new_type(Kind::Primitive, 8, Primitive::I64 as u64);
+  let i32_tag = new_type(Kind::Primitive, 4, Primitive::I32 as u64);
   let u64_tag = new_type(Kind::Primitive, 8, Primitive::U64 as u64);
   let u32_tag = new_type(Kind::Primitive, 4, Primitive::U32 as u64);
   let u16_tag = new_type(Kind::Primitive, 2, Primitive::U16 as u64);
@@ -266,7 +272,7 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
   }
 
   CoreTypes {
-    type_tag, u64_tag, u32_tag, u16_tag,
+    type_tag, i64_tag, i32_tag, u64_tag, u32_tag, u16_tag,
     u8_tag, void_tag, bool_tag, string_tag,
     expr_tag, expr_slice_tag,
 
@@ -277,8 +283,8 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
         ("u32", u32_tag),
         ("u16", u16_tag),
         ("u8", u8_tag),
-        ("i64", u64_tag), // TODO: fix
-        ("i32", u32_tag), // TODO: fix
+        ("i64", i64_tag),
+        ("i32", i32_tag),
         ("i16", u16_tag), // TODO: fix
         ("i8", u8_tag), // TODO: fix
         ("void", void_tag),
@@ -295,6 +301,8 @@ impl fmt::Display for TypeInfo {
     match self.kind {
       Kind::Primitive => {
         let s = match type_as_primitive(self).unwrap() {
+          Primitive::I64 => "i64",
+          Primitive::I32 => "i32",
           Primitive::U64 => "u64",
           Primitive::U32 => "u32",
           Primitive::U16 => "u16",

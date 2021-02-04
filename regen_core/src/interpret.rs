@@ -112,20 +112,74 @@ macro_rules! binop {
     let a : $t = $frame.get_local($a);
     let b : $t = $frame.get_local($b);
     match $op {
-      Add => $frame.set_local(var, &(a + b)),
-      Sub => $frame.set_local(var, &(a - b)),
-      Mul => $frame.set_local(var, &(a * b)),
-      Div => $frame.set_local(var, &(a / b)),
-      Rem => $frame.set_local(var, &(a % b)),
-      Eq => $frame.set_local(var, &(a == b)),
-      NEq => $frame.set_local(var, &(a != b)),
-      LT => $frame.set_local(var, &(a < b)),
-      GT => $frame.set_local(var, &(a > b)),
-      LTE => $frame.set_local(var, &(a <= b)),
-      GTE => $frame.set_local(var, &(a >= b)),
-      _ => panic!("op not binary"),
+      Add => { $frame.set_local(var, &(a + b)) ; return },
+      Sub => { $frame.set_local(var, &(a - b)) ; return },
+      Mul => { $frame.set_local(var, &(a * b)) ; return },
+      Div => { $frame.set_local(var, &(a / b)) ; return },
+      Rem => { $frame.set_local(var, &(a % b)) ; return },
+      Eq => { $frame.set_local(var, &(a == b)) ; return },
+      NEq => { $frame.set_local(var, &(a != b)) ; return },
+      LT => { $frame.set_local(var, &(a < b)) ; return },
+      GT => { $frame.set_local(var, &(a > b)) ; return },
+      LTE => { $frame.set_local(var, &(a <= b)) ; return },
+      GTE => { $frame.set_local(var, &(a >= b)) ; return },
+      _ => (),
     };
   }};
+}
+
+fn execute_binary_op(
+  frame : &mut Frame, var : LocalHandle, op : Operator,
+  a : LocalHandle, b : LocalHandle,
+) 
+{
+  use Operator::*;
+  use Primitive::*;
+  let t = types::type_as_primitive(&a.t).unwrap();
+  match t {
+    I64 => binop!(frame, var, op, a, b, i64),
+    I32 => binop!(frame, var, op, a, b, i32),
+    U64 => binop!(frame, var, op, a, b, u64),
+    U32 => binop!(frame, var, op, a, b, u32),
+    U16 => binop!(frame, var, op, a, b, u16),
+    U8 => binop!(frame, var, op, a, b, u8),
+    _ => (),
+  }
+  panic!("binary op {} not supported for operands of type {}", op, a.t)
+}
+
+macro_rules! signed_unary_op {
+  ($frame:ident, $var:ident, $op:ident, $v:expr, $t:ty) => {{
+    let var = $var;
+    let v : $t = $frame.get_local($v);
+    match $op {
+      Sub => { $frame.set_local(var, &(-v)) ; return },
+      _ => (),
+    };
+  }};
+}
+
+fn execute_unary_op(
+  frame : &mut Frame, var : LocalHandle,
+  op : Operator, a : LocalHandle)
+{
+  use Operator::*;
+  use Primitive::*;
+  let t = types::type_as_primitive(&a.t).unwrap();
+  match t {
+    I64 => signed_unary_op!(frame, var, op, a, i64),
+    I32 => signed_unary_op!(frame, var, op, a, i32),
+    Bool => {
+      if op == Not {
+        let mut v : bool = frame.get_local(a);
+        v = !v;
+        frame.set_local(var, &v);
+        return;
+      }
+    }
+    _ => (),
+  }
+  panic!("unary op {} not supported for operands of type {}", op, a.t)
 }
 
 fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
@@ -137,7 +191,6 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
       // println!("   {}", instr);
       match instr {
         Instr::Expr(var, e) => {
-          use Operator::*;
           use InstrExpr::*;
           match e {
             LocalAddr(l) => {
@@ -181,27 +234,10 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
               frame.set_local(var, &p);
             }
             BinaryOp(op, a, b) => {
-              use Primitive::*;
-              let t = types::type_as_primitive(&a.t).unwrap();
-              match t {
-                U64 => binop!(frame, var, op, a, b, u64),
-                U32 => binop!(frame, var, op, a, b, u32),
-                U16 => binop!(frame, var, op, a, b, u16),
-                U8 => binop!(frame, var, op, a, b, u8),
-                _ => panic!("binary op {} not supported for operands of type {}", op, a.t),
-              }
-              
+              execute_binary_op(&mut frame, var, op, a, b);
             }
             UnaryOp(op, a) => {
-              match op {
-                Sub => panic!("signed types not yet supported"),
-                Not => {
-                  let mut v : bool = frame.get_local(a);
-                  v = !v;
-                  frame.set_local(var, &v);
-                }
-                _ => panic!("op not unary"),
-              }
+              execute_unary_op(&mut frame, var, op, a);
             }
             Invoke(f, args) => {
               frame.push_args(args);
@@ -275,9 +311,10 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
           frame.pc = seq.start_instruction;
           continue;
         }
-        Instr::Debug(sym, l, t) => {
+        Instr::Debug(loc, l, t) => {
           let p = frame.local_addr(l);
-          println!("debug {}: {}", sym, debug::display(p as *const (), t));
+          println!("printing '{}': {}", loc.src_snippet(), debug::display(p as *const (), t));
+          println!("  ({})", loc);
         }
         Instr::Return(val) => {
           if let Some(val) = val {
@@ -406,6 +443,30 @@ impl Frame {
   }
 }
 
+macro_rules! cast {
+  ($src:ident, $SRC:ident, $dest:ident, $DEST:ident) => {{
+    let src_val = *($src as *mut $SRC);
+    let dest_val = src_val as $DEST;
+    *($dest as *mut $DEST) = dest_val;
+    return;
+  }};
+}
+
+macro_rules! cast_to_any {
+  ($src:ident, $SRC:ident, $dest:ident, $dest_prim:ident) => {
+    match $dest_prim {
+      I64 => cast!($src, $SRC, $dest, i64),
+      I32 => cast!($src, $SRC, $dest, i32),
+      U64 => cast!($src, $SRC, $dest, u64),
+      U32 => cast!($src, $SRC, $dest, u32),
+      U16 => cast!($src, $SRC, $dest, u16),
+      U8 => cast!($src, $SRC, $dest, u8),
+      Bool => cast!($src, $SRC, $dest, u8),
+      Void => return,
+    }
+  };
+}
+
 unsafe fn cast_and_store(src : *const (), dest : *mut (), src_type : TypeHandle, dest_type : TypeHandle) {
   if src_type.size_of == dest_type.size_of {
     store(
@@ -417,18 +478,28 @@ unsafe fn cast_and_store(src : *const (), dest : *mut (), src_type : TypeHandle,
     use Primitive::*;
     let src_prim = types::type_as_primitive(&src_type).unwrap();
     let dest_prim = types::type_as_primitive(&dest_type).unwrap();
-    match (src_prim, dest_prim) {
-      (U64, U32) => *(dest as *mut u64) = (*(src as *mut u32)) as u64,
-      (U64, U16) => *(dest as *mut u64) = (*(src as *mut u16)) as u64,
-      (U64, U8) => *(dest as *mut u64) = (*(src as *mut u8)) as u64,
-      (U64, Bool) => *(dest as *mut u64) = (*(src as *mut u8)) as u64,
-      (U64, Void) => (),
-
-      (U32, U64) => *(dest as *mut u32) = (*(src as *mut u64)) as u32,
-      (U16, U64) => *(dest as *mut u16) = (*(src as *mut u64)) as u16,
-      (U8, U64) => *(dest as *mut u8) = (*(src as *mut u64)) as u8,
-      _ => panic!("unsupported cast between {} and {}", src_type, dest_type)
+    match src_prim {
+      I64 => cast_to_any!(src, i64, dest, dest_prim),
+      I32 => cast_to_any!(src, i32, dest, dest_prim),
+      U64 => cast_to_any!(src, u64, dest, dest_prim),
+      U32 => cast_to_any!(src, u32, dest, dest_prim),
+      U16 => cast_to_any!(src, u16, dest, dest_prim),
+      U8 => cast_to_any!(src, u8, dest, dest_prim),
+      Bool => cast_to_any!(src, u8, dest, dest_prim),
+      Void => (),
     }
+    let TODO = (); // remove this?
+    // (U64, U32) => *(dest as *mut u64) = (*(src as *mut u32)) as u64,
+    // (U64, U16) => *(dest as *mut u64) = (*(src as *mut u16)) as u64,
+    // (U64, U8) => *(dest as *mut u64) = (*(src as *mut u8)) as u64,
+    // (U64, Bool) => *(dest as *mut u64) = (*(src as *mut u8)) as u64,
+    // (U64, Void) => (),
+
+    // (U32, U64) => *(dest as *mut u32) = (*(src as *mut u64)) as u32,
+    // (U16, U64) => *(dest as *mut u16) = (*(src as *mut u64)) as u16,
+    // (U8, U64) => *(dest as *mut u8) = (*(src as *mut u64)) as u8,
+
+    panic!("unsupported cast between {} and {}", src_type, dest_type)
   }
 }
 

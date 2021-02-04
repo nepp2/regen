@@ -1,0 +1,126 @@
+
+def SDL_INIT_VIDEO = 32 as u32;
+def SDL_WINDOWPOS_UNDEFINED = 536805376 as i32;
+def SDL_WINDOW_SHOWN = 4 as u32;
+def SDL_WINDOW_ALWAYS_ON_TOP = 32768 as u32;
+def SDL_RENDERER_ACCELERATED = 2 as u32;
+
+def SDL_DEFAULT_RENDER_INDEX = -1 as i32;
+
+def sdl2 = load_library(sym SDL2);
+
+def sdl_init =
+  load_library_symbol(sdl2, sym SDL_Init)
+    as cfun(flags : u32) => i32;
+
+def sdl_window_handle = u64;
+def sdl_renderer_handle = u64;
+
+// Event type codes
+def SDL_QUIT = 256 as u32;
+def SDL_WINDOWEVENT = 512 as u32;
+def SDL_KEYDOWN = 768 as u32;
+def SDL_KEYUP = 769 as u32;
+def SDL_TEXTEDITING = 770 as u32;
+def SDL_TEXTINPUT = 771 as u32;
+
+
+// https://wiki.libsdl.org/SDL_Keysym
+def sdl_keysym = struct {
+  scancode : u32,
+  keycode : u32,
+  mod : u16,
+  unused : u32,
+};
+
+def sdl_window_event = struct {
+  window_id : u32,
+  event : u8,
+  data1 : i32,
+  data2 : i32,
+};
+
+def sdl_keyboard_event = struct {
+  window_id : u32,
+  state : u8,
+  repeat : u8,
+  keysym : sdl_keysym,
+};
+
+def sdl_event = struct {
+  event_type : u32,
+  timestamp : u32,
+  content : sized_array(u64, 20),
+};
+
+def sdl_create_window =
+  load_library_symbol(sdl2, sym SDL_CreateWindow)
+    as cfun(
+      title : (ptr u8), x : i32, y : i32,
+      w : i32, h : i32, flags : u32
+    ) => sdl_window_handle;
+
+def sdl_destroy_window =
+  load_library_symbol(sdl2, sym SDL_DestroyWindow)
+    as cfun(win : sdl_window_handle) => void;
+
+def sdl_get_window_id =
+  load_library_symbol(sdl2, sym SDL_GetWindowID)
+    as cfun (win : sdl_window_handle) => u32;
+
+def sdl_set_window_position =
+  load_library_symbol(sdl2, sym SDL_SetWindowPosition)
+    as cfun(window : sdl_window_handle, x : i32, y : i32) => void;
+
+def sdl_raise_window =
+  load_library_symbol(sdl2, sym SDL_RaiseWindow)
+    as cfun(window : sdl_window_handle) => void;
+
+def sdl_poll_event =
+  load_library_symbol(sdl2, sym SDL_PollEvent)
+    as cfun(event : ptr sdl_event) => i32;
+
+def sdl_create_renderer =
+  load_library_symbol(sdl2, sym SDL_CreateRenderer)
+    as cfun(
+      window : sdl_window_handle,
+      driver_index : i32,
+      flags : u32,
+    ) => sdl_renderer_handle;
+
+def sdl_clear =
+  load_library_symbol(sdl2, sym SDL_RenderClear)
+    as cfun(r : sdl_renderer_handle) => i32;
+
+def sdl_set_draw_color =
+  load_library_symbol(sdl2, sym SDL_SetRenderDrawColor)
+    as cfun(
+      renderer : sdl_renderer_handle,
+      r : u8, g : u8, b : u8, a : u8
+    ) => i32;
+
+def sdl_present =
+  load_library_symbol(sdl2, sym SDL_RenderPresent)
+    as cfun(r : sdl_renderer_handle) => void;
+
+def sdl_rect = struct {
+  x : i32, y : i32, w : i32, h : i32
+};
+
+def sdl_draw_rect =
+  load_library_symbol(sdl2, sym SDL_RenderDrawRect)
+    as cfun(renderer : sdl_renderer_handle, rect : ptr sdl_rect) => void;
+
+def sdl_fill_rect =
+  load_library_symbol(sdl2, sym SDL_RenderFillRect)
+    as cfun(renderer : sdl_renderer_handle, rect : ptr sdl_rect) => void;
+
+// convenience functions for event handling
+
+def to_keyboard_event = fun(e : ptr sdl_event) {
+  (ref e.content) as (ptr sdl_keyboard_event)
+};
+
+def to_window_event = fun(e : ptr sdl_event) {
+  (ref e.content) as (ptr sdl_window_event)
+};
