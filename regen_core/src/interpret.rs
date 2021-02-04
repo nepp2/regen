@@ -2,8 +2,8 @@ use parse::{ExprShape, ExprTag};
 
 /// Bytecode interpreter
 ///
-/// Receives a sexp node tree and compiles/interprets the top level
-/// nodes one at a time.
+/// Uses a low-level format which is not safe.
+/// Will probably replace with web assembly at some point.
 
 use crate::{
   bytecode::{
@@ -488,17 +488,6 @@ unsafe fn cast_and_store(src : *const (), dest : *mut (), src_type : TypeHandle,
       Bool => cast_to_any!(src, u8, dest, dest_prim),
       Void => (),
     }
-    let TODO = (); // remove this?
-    // (U64, U32) => *(dest as *mut u64) = (*(src as *mut u32)) as u64,
-    // (U64, U16) => *(dest as *mut u64) = (*(src as *mut u16)) as u64,
-    // (U64, U8) => *(dest as *mut u64) = (*(src as *mut u8)) as u64,
-    // (U64, Bool) => *(dest as *mut u64) = (*(src as *mut u8)) as u64,
-    // (U64, Void) => (),
-
-    // (U32, U64) => *(dest as *mut u32) = (*(src as *mut u64)) as u32,
-    // (U16, U64) => *(dest as *mut u16) = (*(src as *mut u64)) as u16,
-    // (U8, U64) => *(dest as *mut u8) = (*(src as *mut u64)) as u8,
-
     panic!("unsupported cast between {} and {}", src_type, dest_type)
   }
 }

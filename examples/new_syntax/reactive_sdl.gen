@@ -19,7 +19,6 @@ def poll_input = fun(window : ptr sdl_window_handle, e : ptr sdl_event, tick : p
   sdl_poll_event(e) == (1 as i32)
 };
 
-
 def input_stream = {
   // the `poll_stream` function defines a new event source
   poll_stream(
