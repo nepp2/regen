@@ -1,210 +1,539 @@
+// This code is partially translated to newer syntax, and doesn't work.
 
-(include env (ref "examples/lib/prelude.gen"))
-(include env (ref "examples/lib/sdl2.gen"))
+struct color {
+  r : i64,
+  g : i64,
+  b : i64,
+  a : i64,
+}
 
-(def title (array (65 u8) (65 u8) (65 u8) (0 u8)))
+struct tetronimo {
+  tiles : array(list(i64)),
+  color : color,
+}
 
-(sdl_init SDL_INIT_VIDEO)
+struct grid {
+  cells : list(option(color)),
+}
 
-(def win
-  (sdl_create_window
-    (ref (index title 0))
-    SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED
-    (800 u32) (600 u32)
-    SDL_WINDOW_SHOWN))
+struct palette {
+  red: color,
+  green: color,
+  blue: color,
+  sky_blue: color,
+  orange: color,
+  yellow: color,
+  magenta: color,
+}
 
-(def renderer
-  (sdl_create_renderer win u32_max SDL_RENDERER_ACCELERATED))
+struct game {
+  config: config,
+  orientation: i64,
+  tet_index: i64,
+  pos_x: i64,
+  pos_y: i64,
+  ticks_per_drop: i64,
+  tick_count: i64,
+  grid: grid,
+  tetronimos: list(tetronimo),
+  tetronimo_bag: list(i64),
+  rng: rng_handle,
+  palette: palette,
+}
 
-(def color (struct (r u8) (g u8) (b u8)))
+struct config {
+  tile_size : i64,
+  rx : i64,
+  ry : i64,
+  grid_height : i64,
+  grid_width : i64,   
+}
 
-(def to_color (fun ((r u64) (g u64) (b u64))
-  (init color (cast r u8) (cast g u8) (cast b u8))
-))
+def set_draw_color = fun(view : view, r : i64, g : i64, b : i64, a : i64) {
+  view.render.sdl_set_draw_color(r as u8, g as u8, b as u8, a as u8);
+}
 
-(def red (to_color 255 0 50))
-(def green (to_color 0 255 0))
-(def blue (to_color 50 100 255))
-(def sky_blue (to_color 50 200 255))
-(def orange (to_color 255 150 50))
-(def yellow (to_color 255 200 0))
-(def magenta (to_color 255 80 255))
+def fill_rect = fun(view : view, x, y, w, h) {
+  let r = sdl_rect.new(x, y, w, h)
+  view.render.sdl_fill_rect(&r);
+}
 
-(def shape (struct
-  (data (ptr u64))
-  (len u64)
-  (c color)
-))
+def set_color = fun(view : view, c : color) {
+  view.set_draw_color(c.r, c.g, c.b, c.a);
+}
 
-(def to_shape (fun ((s (slice u64)) (len u64) (c color)) (do
-  (init shape (ref (slice_index s 0)) len c)
-)))
+def next_tetronimo = fun(game : ptr(game), grid_width : i64){
+  if game.tetronimo_bag.len() == 0 {
+    for i in range(0, 2) {
+      for i in range(0, game.tetronimos.len() as i64) {
+        game.tetronimo_bag.add(i);
+      }
+    }
+  }
+  let tets = game.tetronimo_bag.len();
+  let i = (game.rng.rand_f64() * (tets as f64)) as i64;
+  let next_tet = game.tetronimo_bag[i];
+  game.tetronimo_bag[i] = game.tetronimo_bag[tets-1];
+  game.tetronimo_bag.pop();
+  game.tet_index = next_tet;
+  game.init_tetronimo_state(grid_width);
+}
 
-(def shape_l1 (array
-  0 1 0
-  0 1 0
-  0 1 1
-))
+def shape_size = fun(shape : list(i64)){
+  sqrt(shape.len() as f64) as i64;
+}
 
-(def shape_l2 (array
-  0 1 0
-  0 1 0
-  1 1 0
-))
+def rotate_90 = fun(shape){
+  let size = shape_size(shape);
+  let s = list();
+  for i in range(0, size * size) {
+    let y = i / size;
+    let x = i % size;
+    let i = (size - 1 - x) * size + y;
+    s.add(shape[i]);
+  }
+  s
+}
 
-(def shape_bar (array
-  0 1 0 0
-  0 1 0 0
-  0 1 0 0
-  0 1 0 0
-))
+def init = fun(view : view, width : i64, height : i64) {
+  let shape_l1 =
+    [ 0, 1, 0,
+      0, 1, 0,
+      0, 1, 1 ];
 
-(def shape_z (array
-  0 0 0
-  1 1 0
-  0 1 1
-))
+  let shape_l2 =
+    [ 0, 1, 0,
+      0, 1, 0,
+      1, 1, 0 ];
 
-(def shape_s (array
-  0 0 0
-  0 1 1
-  1 1 0
-))
+  let shape_bar =
+    [ 0, 1, 0, 0,
+      0, 1, 0, 0,
+      0, 1, 0, 0,
+      0, 1, 0, 0 ];
 
-(def shape_square (array
-  1 1
-  1 1
-))
+  let shape_z =
+    [ 0, 0, 0,
+      1, 1, 0,
+      0, 1, 1 ];
 
-(def shape_t (array
-  0 1 0
-  1 1 1
-  0 0 0
-))
+  let shape_s =
+    [ 0, 0, 0,
+      0, 1, 1,
+      1, 1, 0 ];
 
-(def shapes (array
-  (to_shape (as_slice shape_l1) 3 orange)
-  (to_shape (as_slice shape_l2) 3 blue)
-  (to_shape (as_slice shape_bar) 4 sky_blue)
-  (to_shape (as_slice shape_z) 3 red)
-  (to_shape (as_slice shape_s) 3 green)
-  (to_shape (as_slice shape_square) 2 yellow)
-  (to_shape (as_slice shape_t) 3 magenta)
-))
+  let shape_square =
+    [ 1, 1,
+      1, 1 ];
 
-(def tile_size 30)
+  let shape_T =
+    [ 0, 1, 0,
+      1, 1, 1,
+      0, 0, 0 ];
 
-(def cell (struct
-  (c color)
-  (filled bool)
-))
+  let p = palette.new(
+    red: color.new(255, 0, 50, 255),
+    green: color.new(0, 255, 0, 255),
+    blue: color.new(50, 100, 255, 255),
+    sky_blue: color.new(50, 200, 255, 255),
+    orange: color.new(255, 150, 50, 255),
+    yellow: color.new(255, 200, 0, 255),
+    magenta: color.new(255, 80, 255, 255),
+  );
 
-(def grid_width 10)
-(def grid_height 24)
-(def grid_size (* grid_width grid_height))
+  let shape_color_pairs : array(tup2(array(i64), color)) = [
+    tup(shape_l1, p.orange),
+    tup(shape_l2, p.blue),
+    tup(shape_bar, p.sky_blue),
+    tup(shape_z, p.red),
+    tup(shape_s, p.green),
+    tup(shape_square, p.yellow),
+    tup(shape_T, p.magenta),
+  ];
 
-(def grid (sized_array cell grid_size))
+  let tetronimos = {
+    let ts = list()
+    for i in range(0, shape_color_pairs.len() as i64) {
+      let pair = shape_color_pairs[i]
+      let c = pair.v1
+      let s1 = pair.v0.list()
+      let s2 = s1.rotate_90()
+      let s3 = s2.rotate_90()
+      let s4 = s3.rotate_90()
+      let t = tetronimo.new(
+        tiles: [s1, s2, s3, s4],
+        color: c)
+      ts.add(t)
+    }
+    ts
+  };
 
-(def blit (fun ((g (ptr grid)) (s (ptr shape)) (off_x u64) (off_y u64)) (do
-  (let len (. s len))
-  (let c (. s c))
-  (for y 0 len (do
-    (for x 0 len (do
-      (let v (ptr_index (. s data) (+ x (* y len))))
-      (if (== v 1) (do
-        (let xpos (+ x off_x))
-        (let ypos (+ y off_y))
-        (let i (+ xpos (* ypos grid_width)))
-        (set (index (* g) i) (init cell c true))
-      ))
-    ))
-  ))
-)))
+  let config = config.new(
+    tile_size: 25,
+    rx: 40,
+    ry: 40,
+    grid_height: 20,
+    grid_width: 10,       
+  );
 
-(def set_draw_color (fun ((c color)) (do
-  (sdl_set_draw_color renderer (. c r) (. c g) (. c b) (255 u8))
-)))
+  let grid = grid.new(list())
+  for i in range(0, config.grid_width * config.grid_height) {
+    grid.cells.add(none())
+  };
 
-(def draw_grid (fun ((x_offset u64) (y_offset u64) (g (ptr grid))) (do
-  (let ts tile_size)
-  (for y 0 grid_height (do
-    (for x 0 grid_width (do
-      (let cell (index (* g) (+ x (* y grid_width))))
-      (if (. cell filled) (do
-        (set_draw_color (. cell c))
-        (let r (init sdl_rect
-          (+ (* x ts) x_offset)
-          (+ (* y ts) y_offset)
-          ts ts)
-        )
-        (sdl_fill_rect renderer (ref r))
-      ))
-    ))
-  ))
-)))
+  let game =
+    game.new(
+      config: config,
+      orientation: 0,
+      tet_index: 0,
+      pos_x: 0,
+      pos_y: 0,
+      ticks_per_drop: 50,
+      tick_count: 0,
+      grid,
+      tetronimos: tetronimos,
+      tetronimo_bag: list(),
+      rng: seeded_rng(0),
+      palette: p,
+    );
+  next_tetronimo(&game, config.grid_width);
+  game;
+}
 
-(def draw_tetronimo (fun ((x_offset u64) (y_offset u64) (s shape)) (do
-  (let len (. s len))
-  (let ts tile_size)
-  (for y 0 len (do
-    (for x 0 len (do
-      (let v (ptr_index (. s data) (+ x (* y len))))
-      (if (== v 1) (do
-        (set_draw_color (. s c))
-        (let r (init sdl_rect
-          (+ (* x ts) x_offset)
-          (+ (* y ts) y_offset)
-          ts ts
-        ))
-        (sdl_fill_rect renderer (ref r))
-      ))
-    ))
-  ))
-)))
+def draw_tetronimo = fun(
+  view : view, shape : list(i64), color : color, size : i64,
+  xpos : i64, ypos : i64, xoffset : i64, yoffset : i64)
+{
+  view.set_color(color);
+  let shape_size = shape.shape_size();
+  for y in range(0, shape_size) {
+    for x in range(0, shape_size) {
+      let v = shape[x + y * shape_size];
+      if v == 1 {
+        view.render.sdl_fill_rect(&rect(
+          size * (x + xpos) + xoffset,
+          size * (y + ypos) + yoffset,
+          size, size));
+      }
+    }    
+  }
+};
 
-(def state (struct
-  (g grid)
-))
+static CONTACT_NONE = 0;
+static CONTACT_LEFT = 1;
+static CONTACT_RIGHT = 2;
+static CONTACT_BOTTOM = 3;
+static CONTACT_TOP = 4;
+static CONTACT_OVERLAP = 5;
 
-(def initial_state (fun () (do 
-  (init state (zero_init grid))
-)))
+def contact_type = fun(grid : grid, grid_width : i64, grid_height : i64, shape : list(i64), pos_x : i64, pos_y : i64) {
+  let shape_size = shape.shape_size();
+  for y in range(0, shape_size) {
+    for x in range(0, shape_size) {
+      if shape[x + y * shape_size] == 1 {
+        let xpos = x + pos_x;
+        let ypos = y + pos_y;
+        if xpos < 0 {
+          return CONTACT_LEFT;
+        }
+        if xpos >= grid_width {
+          return CONTACT_RIGHT;
+        }
+        if ypos >= grid_height {
+          return CONTACT_BOTTOM;
+        }
+        if ypos >= 0 {
+          let i = xpos + ypos * grid_width;
+          if grid.cells[i].is_some {
+            return CONTACT_OVERLAP;
+          }
+        }
+      }
+    }
+  }
+  CONTACT_NONE;
+}
 
-(def update (fun ((e (ptr sdl_event))) (do
-  (if (== (. e event_type) SDL_KEYDOWN) (do
-    (debug (. e event_type))
-    (let ke (to_keyboard_event e))
-    (debug (. (. ke keysym) sym))
-  ))
-)))
+def check_contact = fun(grid, grid_width, grid_height, shape, pos_x, pos_y){
+  let c = contact_type(grid, grid_width, grid_height, shape, pos_x, pos_y);
+  c != CONTACT_NONE
+}
 
-(do
-  (let s (initial_state))
+// TODO: old debug function. delete?
+// def draw_all_shapes = fun(){
+//   for i in range(0, all_shapes.len() as i64) {
+//     for j in range(0, 4) {
+//       let s = all_shapes[i]
+//       draw_tetronimo(
+//         view, s.tiles[j], s.color,
+//         20, 1 + j * 4, 1 + i * 5)
+//     }
+//   }
+// }
 
-  (blit (ref (. s g)) (ref (index shapes 4)) 4 5)
+// TODO: old debug function. delete?
+// def draw_background_grid = fun(view, width, height, gap){
+//   for x in range(0, width/gap) {
+//     draw_line(view, x * gap, 0, x * gap, height)
+//   }
+//   for y in range(0, height/gap) {
+//     draw_line(view, 0, y * gap, width, y * gap)
+//   }
+// }
 
-  (label loop (do
-    (let e (zero_init sdl_event))
+def init_tetronimo_state = fun(game : ptr(game), grid_width : i64) {
+  game.pos_y = 0;
+  game.tick_count = 0;
+  game.orientation = 0;
+  let tet = game.tetronimos[game.tet_index];
+  let shape = tet.tiles[game.orientation];
+  let half_size = shape_size(shape) / 2;
+  game.pos_x = grid_width/2 - half_size;
+}
 
-    ;; handle events
-    (if (== (1 u32) (sdl_poll_event (ref e))) (do
-      (if (== (. e event_type) SDL_QUIT)
-        (break loop)
-      )
-      (update (ref e))
-    ))
+def blit = fun(game : ptr(game), shape, color : color, grid_width) {
+  let shape_size = shape_size(shape);
+  for y in range(0, shape_size) {
+    for x in range(0, shape_size) {
+      if shape[x + y * shape_size] == 1 {
+        let xpos = x + game.pos_x;
+        let ypos = y + game.pos_y;
+        let i = xpos + ypos * grid_width;
+        game.grid.cells[i] = some(color);
+      }
+    }
+  }
+}
 
-    ;; render
-    (sdl_set_draw_color renderer (0 u8) (0 u8) (0 u8) (0 u8))
-    (sdl_clear renderer)
-    
-    (for i 0 (array_len shapes) (do
-      (draw_tetronimo (* i 110) 30 (index shapes i))
-    ))
+def check_line = fun(grid : grid, y : i64, grid_width) {
+  let i = y * grid_width;
+  for i in range(i, i + grid_width) {
+    if !grid.cells[i].is_some {
+      return false;
+    }
+  }
+  true
+}
 
-    (draw_grid 30 30 (ref (. s g)))
+def erase_lines = fun(grid : grid, y, shape_size, grid_width, grid_height) {
+  for y in range(y, min(y + shape_size, grid_height)) {
+    if check_line(grid, y, grid_width) {
+      let end = (y + 1) * grid_width;
+      for i in range(1, (end + 1) - grid_width) {
+        grid.cells[end - i] = grid.cells[(end - i) - grid_width];
+      }
+      for i in range(0, grid_width) {
+        grid.cells[i] = none();
+      }
+    }
+  }
+}
 
-    (sdl_present renderer)
-    (repeat loop)
-  ))
-)
+def move_horizontal = fun(game : ptr(game), grid_width, grid_height, shape, offset) {
+  let new_x = game.pos_x + offset;
+  let c = check_contact(
+    game.grid, grid_width, grid_height,
+    shape, new_x, game.pos_y);
+  if !c {
+    game.pos_x = new_x;
+  }
+}
+
+def move_down = fun(game, shape, color, grid_width, grid_height) {
+  let new_y = game.pos_y + 1;
+  game.tick_count = 0;
+  let c = check_contact(
+    game.grid, grid_width, grid_height,
+    shape, game.pos_x, new_y);
+  if c {
+    blit(game, shape, color, grid_width);
+    erase_lines(
+      game.grid, game.pos_y, shape_size(shape),
+      grid_width, grid_height);
+    game.pos_x = grid_width/2 - 2;
+    game.pos_y = 0;
+    game.tick_count = 0;
+    game.orientation = 0;
+    next_tetronimo(game, grid_width);
+    true
+  }
+  else {
+    game.pos_y = new_y;
+    false
+  }
+}
+
+def rotate = fun(game : ptr(game), grid_width, grid_height) {
+  game.orientation = (game.orientation + 1) % 4;
+  let tet = game.tetronimos[game.tet_index];
+  let shape = tet.tiles[game.orientation];
+  while true {
+    let c = contact_type(
+      game.grid, grid_width, grid_height,
+      shape, game.pos_x, game.pos_y);
+    if c == CONTACT_NONE {
+      break;
+    }
+    else if c == CONTACT_LEFT {
+      game.pos_x = game.pos_x + 1;
+    }
+    else if c == CONTACT_RIGHT {
+      game.pos_x = game.pos_x - 1;
+    }
+    else {
+      // overlap or bottom
+      game.pos_y = game.pos_y - 1;
+    }
+  }
+}
+
+def handle_game_event = fun(game : ptr(game), e : ptr(game_event)) {
+  let tet = game.tetronimos[game.tet_index];
+  let shape = tet.tiles[game.orientation];
+  let c = &game.config;
+  let grid_width = c.grid_width;
+  let grid_height = c.grid_height;
+
+  if e.is_tick_event() {
+    game.tick_count = game.tick_count + 1;
+    if game.tick_count >= game.ticks_per_drop {
+      let c = &game.config;;
+      move_down(game, shape, tet.color, c.grid_width, c.grid_height);
+    }
+  }
+  let key = e.get_key_down()
+  if key.is_some {
+    let c = key.val;
+    if c == SDL_KEYCODE_UP {
+      rotate(game, grid_width, grid_height);
+    }
+    if c == SDL_KEYCODE_LEFT {
+      move_horizontal(
+        game, grid_width, grid_height, shape, -1);
+    }
+    if c == SDL_KEYCODE_RIGHT {
+      move_horizontal(
+        game, grid_width, grid_height, shape, 1);
+    }
+    if c == SDL_KEYCODE_DOWN {
+      move_down(game, shape, tet.color, grid_width, grid_height);
+    }
+    if c == SDL_KEYCODE_SPACE {
+      while true {
+        if move_down(game, shape, tet.color, grid_width, grid_height) {
+          break;
+        }
+      }
+    }
+  }
+}
+
+def rect = fun(x : i64, y : i64, w : i64, h : i64) {
+  sdl_rect.new(x as i32, y as i32, w as i32, h as i32);
+}
+
+def render = fun(view, game : ptr(game)) {
+  set_draw_color(view, 40, 40, 40, 255);
+  sdl_clear(view.render);
+  set_draw_color(view, 120, 120, 120, 255);
+  let c = game.config;
+  let rx : i64 = c.rx;
+  let ry : i64 = c.ry;
+  let tile_size : i64 = c.tile_size;
+  let grid_width = c.grid_width;
+  let grid_height = c.grid_height;
+  sdl_draw_rect(view.render,
+    &rect(
+      rx, ry,
+      tile_size * grid_width,
+      tile_size * grid_height));
+
+  let tet = game.tetronimos[game.tet_index];
+  let shape = tet.tiles[game.orientation];
+
+  for y in range(0, grid_height) {
+    for x in range(0, grid_width) {
+      let i = y * grid_width + x;
+      let color = game.grid.cells[i];
+      if color.is_some {
+        set_color(view, color.val);
+        sdl_fill_rect(
+          view.render,
+          &rect(
+            tile_size * x + rx,
+            tile_size * y + ry,
+            tile_size, tile_size));
+      }
+    }
+  }
+
+  let ghost_y = game.pos_y;
+  while true {
+    let new_y = ghost_y + 1;
+    let c = check_contact(
+      game.grid, grid_width, grid_height,
+      shape, game.pos_x, new_y);
+    if c {
+      break;
+    }
+    ghost_y = new_y;
+  }
+
+  // draw ghost
+  draw_tetronimo(
+    view, shape, color.new(60, 60, 60, 255),
+    tile_size, game.pos_x, ghost_y,
+    rx, ry);
+
+  // draw real tetronimo
+  draw_tetronimo(
+    view, shape, tet.color,
+    tile_size, game.pos_x, game.pos_y,
+    rx, ry);
+
+  sdl_present(view.render);
+}
+
+static state = init(get_view(), initial_width, initial_height);
+
+static active = true;
+
+for i in range(0, event_log.len() as i64) {
+  let e = event_log[i];
+  handle_game_event(&state, &e);
+}
+
+def update = fun() {
+  if !active {
+    return;
+  }
+
+  // Update the game
+  while true {
+    let event = poll_game_event();
+    if is_quit_event(&event) {
+      close_view();
+      active = false;
+      return;
+    }
+    let key = get_key_down(&event);
+    if key.is_some {
+      let c = key.val;
+      if c == SDL_KEYCODE_ENTER {
+        event_log.clear();
+        state = init(get_view(), initial_width, initial_height);
+        break;
+      }
+    }
+    event_log.add(event);
+    handle_game_event(&state, &event);
+    if is_tick_event(&event) {
+      break;
+    }
+  }
+
+  // draw the game
+  let view = get_view();
+  render(view, &state);
+}
+
