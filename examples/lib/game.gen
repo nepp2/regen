@@ -1,0 +1,54 @@
+
+include(env, ref "examples/lib/sdl2.gen");
+
+def create_game_window = fun(title : string, width : i64, height : i64) {
+  sdl_init(SDL_INIT_VIDEO);
+  sdl_create_window(
+    title.data, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+    width as i32, height as i32, SDL_WINDOW_SHOWN)
+};
+
+
+def create_renderer = fun(window : sdl_window_handle) {
+  sdl_create_renderer(window, -1 as i32, SDL_RENDERER_ACCELERATED)
+}
+
+def poll_input = fun(source : ptr void, e : ptr sdl_event, tick : ptr void) {
+  // TODO: polling the SDL input does not use a window reference, but it should!
+  sdl_poll_event(e) == (1 as i32)
+};
+
+def sdl_input_stream = fun() {
+  // the `poll_stream` function defines a new event source
+  poll_stream(
+    tick_stream(1),                    // the sample rate
+    i64,                               // event source type
+    (ref 0) as (ptr void),             // event source
+    sdl_event,                         // event type
+    poll_input as poll_fn_type,        // the polling function
+  )
+};
+
+// one of these pointers will be null
+def game_event = struct {
+  input : ptr sdl_event,
+  tick : ptr tick_event,
+};
+
+def input_to_game_event = fun(output : ptr game_event, input_event : ptr sdl_event) {
+  let e =
+    init game_event(input_event, 0 as ptr tick_event);
+  *output = e;
+};
+
+def tick_to_game_event = fun(output : ptr game_event, tick : ptr tick_event) {
+  let e  =
+    init game_event(0 as ptr sdl_event, tick);
+  *output = e;
+};
+
+def game_input_stream = fun(input_stream : stream, tick_stream : stream) {
+  let input = map_stream(input_stream, game_event, input_to_game_event as map_fn_type);
+  let ticks = map_stream(tick_stream, game_event, tick_to_game_event as map_fn_type);
+  merge_stream(input, ticks, game_event)
+};

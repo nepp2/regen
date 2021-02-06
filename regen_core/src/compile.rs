@@ -596,7 +596,9 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
         let sym = field_name.as_symbol_literal();
         info.field_names.as_slice().iter()
           .position(|n| *n == sym)
-          .expect("no such field") as u64
+          .unwrap_or_else(||
+            panic!("no such field '{}' at ({})", sym, field_name.loc)
+          ) as u64
       };
       let field_type = info.field_types[i as usize];
       let e = InstrExpr::FieldIndex{ struct_addr, index: i };
