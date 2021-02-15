@@ -41,16 +41,16 @@ fn list_expr_from_vec(n : Node, tag : ExprTag, exprs : Vec<Expr>) -> Expr {
   expr(n.loc, tag, List(perm_slice_from_vec(exprs)))
 }
 
+fn symbol_expr(n : Node) -> Expr {
+  expr(n.loc, Name, Sym(n.as_symbol()))
+}
+
 fn literal_expr(n : Node, v : Val) -> Expr {
   expr(n.loc, LiteralExpr, LiteralVal(v))
 }
 
-fn symbol_literal(n : Node) -> Expr {
-  literal_expr(n, Val::Symbol(n.as_symbol()))
-}
-
 fn expr(loc : SrcLocation, tag : ExprTag, content: ExprContent) -> Expr {
-  perm(ExprData { tag, content, loc })
+  perm(ExprData { tag, content, loc, ignore_symbol: false })
 }
 
 fn parse_expr(st : SymbolTable, n : Node) -> Expr {
@@ -64,8 +64,7 @@ fn parse_expr(st : SymbolTable, n : Node) -> Expr {
         "true" => literal_expr(n, Val::Bool(true)),
         "false" => literal_expr(n, Val::Bool(true)),
         _ => {
-          let sym = n.as_symbol();
-          expr(n.loc, Reference, LiteralVal(Val::Symbol(sym)))
+          symbol_expr(n)
         }
       }
     }
@@ -82,12 +81,12 @@ fn parse_expr(st : SymbolTable, n : Node) -> Expr {
     }
     // break to label
     Command("break", &[label]) => {
-      let label_expr = symbol_literal(label);
+      let label_expr = symbol_expr(label);
       list_expr(n, Break, &[label_expr])
     }
     // repeat to label
     Command("repeat", &[label]) => {
-      let label_expr = symbol_literal(label);
+      let label_expr = symbol_expr(label);
       list_expr(n, Repeat, &[label_expr])
     }
     // array
@@ -139,7 +138,7 @@ fn parse_expr(st : SymbolTable, n : Node) -> Expr {
     // field deref
     Command(".", &[v, field]) => {
       let struct_val = parse_expr(st, v);
-      let field_name = symbol_literal(field);
+      let field_name = symbol_expr(field);
       list_expr(n, FieldIndex, &[struct_val, field_name])
     }
     // template
@@ -195,13 +194,13 @@ fn parse_expr(st : SymbolTable, n : Node) -> Expr {
     }
     // let
     Command("let", &[var_name, value]) => {
-      let name = symbol_literal(var_name);
+      let name = symbol_expr(var_name);
       let val_expr = parse_expr(st, value);
       list_expr(n, Let, &[name, val_expr])
     }
     // def
     Command("def", &[name, initialiser]) => {
-      let name = symbol_literal(name);
+      let name = symbol_expr(name);
       let init_expr = parse_expr(st, initialiser);
       list_expr(n, Def, &[name, init_expr])
     }
@@ -223,7 +222,7 @@ fn parse_expr(st : SymbolTable, n : Node) -> Expr {
     // label expression
     Command("label", &[label, body]) => {
       list_expr(n, LabelledBlock, &[
-        symbol_literal(label),
+        symbol_expr(label),
         parse_expr(st, body),
       ])
     }
@@ -241,7 +240,7 @@ fn parse_expr(st : SymbolTable, n : Node) -> Expr {
     }
     // symbol
     Command("sym", &[v]) => {
-      symbol_literal(v)
+      literal_expr(v, Val::Symbol(v.as_symbol()))
     }
     // typeof
     Command("typeof", &[v]) => {
@@ -329,7 +328,7 @@ fn parse_function_args(st : SymbolTable, args_node : Node) -> Expr {
   let mut v = Vec::with_capacity(args_node.children().len());
   for &a in args_node.children() {
     if let [name, type_tag] = a.children() {
-      let name_literal = symbol_literal(*name);
+      let name_literal = symbol_expr(*name);
       let type_expr = parse_expr(st, *type_tag);
       let arg = list_expr(a, Syntax, &[name_literal, type_expr]);
       v.push(arg);
@@ -348,7 +347,7 @@ fn to_field_list(st : SymbolTable, fields : &[Node]) -> SlicePtr<Expr> {
     let field = {
       if let [name, type_tag] = f.children() {
         list_expr(*f, Syntax, &[
-          symbol_literal(*name),
+          symbol_expr(*name),
           parse_expr(st, *type_tag),
         ])
       }

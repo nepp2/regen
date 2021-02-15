@@ -29,7 +29,7 @@ impl SemanticInfo {
     let mut globals = HashSet::new();
     for &(e, t) in self.references.values() {
       if t == ReferenceType::Global {
-        globals.insert(e.as_symbol_literal());
+        globals.insert(e.as_symbol());
       }
     }
     globals
@@ -48,25 +48,24 @@ fn search_expr(info : &mut SemanticInfo, locals : &mut Vec<Symbol>, expr : Expr)
   use ExprShape::*;
   use ReferenceType::*;
   match expr.shape() {
-    // reference
     Ref(name) => {
-      if locals.iter().find(|&&n| n == name).is_some() {
-        info.push_ref(expr, Local);
-      }
-      else {
-        info.push_ref(expr, Global);
+      if !expr.ignore_symbol {
+        if locals.iter().find(|&&n| n == name).is_some() {
+          info.push_ref(expr, Local);
+        }
+        else {
+          info.push_ref(expr, Global);
+        }
       }
     }
-    // let
     List(Let, &[name, _value]) => {
-      locals.push(name.as_symbol_literal());
+      locals.push(name.as_symbol());
     }
-    // fun
     List(Fun, &[args, _ret, _body]) => {
       let mut function_locals = vec![];
       for a in args.children() {
         if let List(Syntax, &[name, _type_tag]) = a.shape() {
-          let n = name.as_symbol_literal();
+          let n = name.as_symbol();
           function_locals.push(n);
         }
         else { panic!() }
@@ -76,7 +75,6 @@ fn search_expr(info : &mut SemanticInfo, locals : &mut Vec<Symbol>, expr : Expr)
       }
       return;
     }
-    // do
     List(Do, exprs) => {
       let local_count = locals.len();
       for &c in exprs {

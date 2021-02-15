@@ -309,23 +309,3 @@ pub fn sexp(st : SymbolTable, module_name : &str, code : &str) -> Node {
   }
   panic!("expected single expression")
 }
-
-use std::fmt;
-
-impl fmt::Display for SrcLocation {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    let mut line_start = 0;
-    let mut line_number = 1;
-    for (i, c) in self.module.code.as_str()[0..self.start].char_indices() {
-      if c == '\n' {
-        line_start = i;
-        line_number += 1;
-      }
-    }
-    write!(f, "'{}', line {}, {} to {}",
-      self.module.name,
-      line_number,
-      self.start - line_start,
-      self.end - line_start)
-  }
-}

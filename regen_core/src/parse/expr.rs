@@ -1,11 +1,6 @@
 use std::hash::{Hash, Hasher};
 
-use crate::{
-  bytecode::Operator,
-  ffi_libs::RegenString,
-  perm_alloc::{Ptr, SlicePtr},
-  symbols::Symbol,
-};
+use crate::{bytecode::Operator, ffi_libs::RegenString, perm_alloc::{Ptr, SlicePtr, perm, perm_slice_from_vec}, symbols::Symbol};
 
 #[derive(Clone)]
 pub struct CodeModule {
@@ -27,13 +22,17 @@ pub struct ExprData {
   pub tag : ExprTag,
   pub content : ExprContent,
   pub loc : SrcLocation,
+
+  /// Indicates that, if this is a symbol, it is not a local or global reference.
+  /// It may be something like a field name or a new variable definition.
+  pub ignore_symbol : bool,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub enum ExprTag {
   Def,
   Let,
-  Reference,
+  Name,
   StructInit,
   ZeroInit,
   ArrayInit,
@@ -74,8 +73,8 @@ pub enum Val {
   F64(u64),
   String(Ptr<RegenString>),
   Bool(bool),
-  Symbol(Symbol),
   Expr(Expr),
+  Symbol(Symbol),
   Void,
   Operator(Operator),
 }
@@ -83,6 +82,7 @@ pub enum Val {
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub enum ExprContent {
   List(SlicePtr<Expr>),
+  Sym(Symbol),
   LiteralVal(Val),
 }
 
@@ -93,14 +93,8 @@ impl ExprData {
   pub fn shape(&self) -> ExprShape {
     match self.content {
       List(l) => ExprShape::List(self.tag, l.as_slice()),
-      LiteralVal(v) => {
-        if self.tag == ExprTag::Reference {
-          if let Val::Symbol(s) = v {
-            return ExprShape::Ref(s);
-          }
-        }
-        return ExprShape::Literal(v);
-      }
+      Sym(s) => ExprShape::Ref(s),
+      LiteralVal(v) => ExprShape::Literal(v),
     }
   }
 
@@ -120,8 +114,8 @@ impl ExprData {
     None
   }
 
-  pub fn as_symbol_literal(&self) -> Symbol {
-    if let LiteralVal(Val::Symbol(s)) = self.content {
+  pub fn as_symbol(&self) -> Symbol {
+    if let Sym(s) = self.content {
       return s;
     }
     panic!("expected symbol")
@@ -139,6 +133,27 @@ impl ExprData {
       return op;
     }
     panic!("expected operator")
+  }
+
+  pub fn deep_clone(&self) -> Expr {
+    let content = match self.content {
+      List(es) => {
+        let mut children = vec![];
+        for e in es {
+          children.push(e.deep_clone());
+        }
+        List(perm_slice_from_vec(children))
+      }
+      Sym(s) => Sym(s),
+      LiteralVal(v) => LiteralVal(v),
+    };
+    let ed = ExprData {
+      tag: self.tag,
+      content,
+      loc: self.loc,
+      ignore_symbol: self.ignore_symbol,
+    };
+    perm(ed)
   }
 }
 
@@ -159,4 +174,24 @@ pub enum ExprShape<'l> {
   List(ExprTag, &'l [Expr]),
   Literal(Val),
   Ref(Symbol),
+}
+
+use std::fmt;
+
+impl fmt::Display for SrcLocation {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    let mut line_start = 0;
+    let mut line_number = 1;
+    for (i, c) in self.module.code.as_str()[0..self.start].char_indices() {
+      if c == '\n' {
+        line_start = i;
+        line_number += 1;
+      }
+    }
+    write!(f, "'{}', line {}, col {} to {}",
+      self.module.name,
+      line_number,
+      self.start - line_start,
+      self.end - line_start)
+  }
 }

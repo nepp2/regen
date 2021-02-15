@@ -10,8 +10,10 @@ pub fn template(e : Expr, args : &[Expr]) -> Expr {
     match e.shape() {
       Ref(_) | Literal(_) => e,
       List(ExprTag::TemplateHole, &[_]) => {
-        let new_e = args[*next_arg];
+        let mut new_e = args[*next_arg].deep_clone();
         *next_arg += 1;
+        // preserve semantic information from the template expression
+        new_e.ignore_symbol = e.ignore_symbol;
         new_e
       }
       List(_, cs) => {
@@ -23,6 +25,7 @@ pub fn template(e : Expr, args : &[Expr]) -> Expr {
           tag: e.tag,
           content: ExprContent::List(perm_slice_from_vec(children)),
           loc: e.loc,
+          ignore_symbol: e.ignore_symbol,
         };
         perm(ed)
       },
@@ -43,14 +46,14 @@ impl ExprBuilder {
     for &c in e.children() { self.set_loc(c) }
   }
 
-  fn sexp(&self, s : &str) -> Expr {
+  fn parse(&self, s : &str) -> Expr {
     let e = parse::parse_expression(self.st, &self.loc.module.name, s).unwrap();
     self.set_loc(e);
     e
   }
 
   fn expr(&self, tag : ExprTag, content : ExprContent) -> Expr {
-    perm(ExprData { tag, content, loc: self.loc })
+    perm(ExprData { tag, content, loc: self.loc, ignore_symbol: false })
   }
 }
 
@@ -63,55 +66,54 @@ pub fn template_macro(nb : &ExprBuilder, e : Expr, args : Vec<Expr>) -> Expr {
     let c = ExprContent::List(perm_slice_from_vec(args));
     nb.expr(ExprTag::ArrayInit, c)
   };
-  let template_call = nb.sexp("
-    (do
-      (let args ($ array)
-      (template_quote
-        (quote ($ e))
-        (cast (ref args) (ptr node))
-        (array_len args))
-    )
+  let template_call = nb.parse("
+    {
+      let args = $array;
+      template_quote(quote $e,
+        ref args as ptr node,
+        array_len(args))
+    }
   ");
   template(template_call, &[array, e])
 }
 
 pub fn for_macro(nb : &ExprBuilder, loop_var : Expr, start : Expr, end : Expr, body : Expr) -> Expr {
-  let loop_template = nb.sexp("
-    (do
-      (let ($ loop_var) ($ start))
-      (let _end ($ end))
-      (label for_loop (do
-        (if (< ($ loop_var) _end) (do
-          ($ body)
-          (set ($ loop_var) (+ ($ loop_var) 1))
-          repeat
-        ))
-      ))
-    )
+  let loop_template = nb.parse("
+    {
+      let $loop_var = $start;
+      let _end = $end;
+      label for_loop {
+        if $loop_var < _end {
+          $body;
+          $loop_var = $loop_var + 1;
+          repeat;
+        }
+      }
+    }
   ");
   template(loop_template, &[loop_var, start, end, loop_var, body, loop_var, loop_var])
 }
 
 pub fn while_macro(nb : &ExprBuilder, cond : Expr, body : Expr) -> Expr {
-  let loop_template = nb.sexp("
-    (label while_loop (do
-      (if ($ cond) (do
-        ($ body)
-        repeat
-      ))
-    ))
+  let loop_template = nb.parse("
+    label while_loop {
+      if $cond {
+        $body;
+        repeat;
+      }
+    }
   ");
   template(loop_template, &[cond, body])
 }
 
 pub fn slice_index_macro(nb : &ExprBuilder, slice : Expr, index : Expr) -> Expr {
   let slice_index_template =
-    nb.sexp("(ptr_index (. ($ slice) data) ($ index))");
+    nb.parse("(ptr_index (. ($ slice) data) ($ index))");
   template(slice_index_template, &[slice, index])
 }
 
 pub fn slice_type_macro(nb : &ExprBuilder, element_type : Expr) -> Expr {
   let slice_type_template =
-    nb.sexp("(struct (data (ptr ($ element_type)) (len u64))");
+    nb.parse("(struct (data (ptr ($ element_type)) (len u64))");
   template(slice_type_template, &[element_type])
 }

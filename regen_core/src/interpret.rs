@@ -83,7 +83,7 @@ pub fn interpret_file(module_name : &str, code : &str, env : Env) {
   for e in es {
     match e.shape() {
       ExprShape::List(ExprTag::Def, &[name, expr]) => {
-        interpret_def(name.as_symbol_literal(), expr, env);
+        interpret_def(name.as_symbol(), expr, env);
       }
       _ => {
         interpret_expr(e, env);
@@ -313,8 +313,7 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
         }
         Instr::Debug(loc, l, t) => {
           let p = frame.local_addr(l);
-          println!("printing '{}': {}", loc.src_snippet(), debug::display(p as *const (), t));
-          println!("  ({})", loc);
+          debug::print_command(loc, debug::display(p as *const (), t));
         }
         Instr::Return(val) => {
           if let Some(val) = val {

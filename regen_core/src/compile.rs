@@ -270,7 +270,7 @@ fn compile_function_def(env: Env, info : Ptr<SemanticInfo>, args : &[Expr], retu
   for a in args {
     if let Some(&[name, tag]) = a.as_syntax() {
       let t = expr_to_type(&b, tag);
-      new_local_variable(&mut b, name.as_symbol_literal(), t);
+      new_local_variable(&mut b, name.as_symbol(), t);
       arg_types.push(t);
     }
     else {
@@ -423,7 +423,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     }
     // break to label
     List(Break, &[label]) => {
-      let break_to = find_label(b, label.as_symbol_literal()).exit_seq;
+      let break_to = find_label(b, label.as_symbol()).exit_seq;
       b.bc.instrs.push(Instr::Jump(break_to));
       None
     }
@@ -435,7 +435,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     }
     // repeat to label
     List(Repeat, &[label]) => {
-      let repeat_to = find_label(b, label.as_symbol_literal()).entry_seq;
+      let repeat_to = find_label(b, label.as_symbol()).entry_seq;
       b.bc.instrs.push(Instr::Jump(repeat_to));
       None
     }
@@ -593,7 +593,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
         types::type_as_struct(&struct_ref.t)
         .unwrap_or_else(|| panic!("expected struct, found {} at ({})", struct_ref.t, e.loc));
       let i = {
-        let sym = field_name.as_symbol_literal();
+        let sym = field_name.as_symbol();
         info.field_names.as_slice().iter()
           .position(|n| *n == sym)
           .unwrap_or_else(||
@@ -626,7 +626,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     List(Let, &[var_name, value]) => {
       // TODO: this generates redundant bytecode. If the value is a
       // locator, it should just generate a load, rather than a load and a store.
-      let name = var_name.as_symbol_literal();
+      let name = var_name.as_symbol();
       // evaluate the expression
       let value = compile_expr_to_var(b, value);
       let local_var = new_local_variable(b, name, value.t);
@@ -657,7 +657,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       b.bc.instrs.push(Instr::Jump(entry_seq));
       set_current_sequence(b, entry_seq);
       b.label_stack.push(
-        LabelledExpr{ name: label.as_symbol_literal(), entry_seq, exit_seq }
+        LabelledExpr{ name: label.as_symbol(), entry_seq, exit_seq }
       );
       let result = compile_expr(b, body);
       b.label_stack.pop();
@@ -746,7 +746,7 @@ fn compile_array_len(b : &mut Builder, array : Expr) -> Var {
   let r = compile_expr_to_ref(b, array);
   let info = types::type_as_array(&r.t).expect("expected array");
   let e = InstrExpr::LiteralI64(info.length as i64);
-  push_expr(b, e, b.env.c.u64_tag)
+  push_expr(b, e, b.env.c.i64_tag)
 }
 
 fn symbol_to_type(b : &Builder, s : Symbol) -> Option<TypeHandle> {
@@ -826,7 +826,7 @@ fn try_expr_to_type(b: &Builder, e : Expr) -> Option<TypeHandle> {
       let mut field_types = vec![];
       for f in fields {
         if let Some(&[name, tag]) = f.as_syntax() {
-          field_names.push(name.as_symbol_literal());
+          field_names.push(name.as_symbol());
           field_types.push(expr_to_type(b, tag));
         }
         else {

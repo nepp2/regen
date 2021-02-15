@@ -5,9 +5,20 @@ use crate::{types, parse};
 use types::{
   TypeHandle, Kind, Primitive
 };
-use parse::Expr;
+use parse::{Expr, SrcLocation};
 
 pub struct DebugDisplay { p : *const (), t : TypeHandle }
+
+pub fn print_command(loc : SrcLocation, d : DebugDisplay) {
+  use ansi_term::{Colour::{Cyan, Yellow, RGB}};
+  println!("{}{}{}{}",
+    Yellow.paint("printing expr ("),
+    Yellow.paint(format!("{}", loc.src_snippet())),
+    Yellow.paint("): "),
+    Cyan.paint(format!("{}", d)),
+  );
+  println!("  {}", RGB(130, 130, 0).paint(format!("({})", loc)));
+}
 
 pub fn display(p : *const (), t : TypeHandle) -> DebugDisplay {
   DebugDisplay { p, t }

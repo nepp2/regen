@@ -1,0 +1,108 @@
+// primitives
+
+print 5; // 5
+print (typeof 5); // u64
+print (typeof u32); // type
+
+// pointers
+
+print (ptr u64); // (ptr u64)
+print (typeof (ptr u64)); // type
+
+{
+  let p = malloc(8 as u64) as ptr u64;
+  *p = 500;
+  print *p; // 500
+  let local = 1000;
+  print *(ref local); // 1000
+}
+
+// structs
+
+def pos2 = struct { x : i64, y : i64 };
+print pos2; // type
+
+{
+  let v = init pos2(40, 50);
+  print v.x; // 40
+  print v.y; // 50
+
+  // field assignment
+  v.y = 300;
+  print v.y; // 300
+}
+
+// strings
+
+print (typeof "hello"); // (struct (ptr u8) u64)
+
+// arrays
+
+{
+  let a = [1, 2, 3, 4];
+  print (typeof a); // (sized_array i64 4)
+  print a[0]; // 1
+  print a[3]; // 4
+  let p = ref a[2];
+  *p = 300;
+  print a[2]; // 300
+}
+
+// conditions
+
+print (if 3 > 5 { 3 } else { 5 }); // 5
+
+// functions
+
+def add = fun(a : i64, b : i64) => i64 {
+  a + b
+};
+
+print (typeof add); // (fn (i64 i64) i64)
+
+print add(6, 7); // 13
+
+// // labelled blocks (and loops)
+
+{
+  let v = 0;
+  label loop {
+    if v > 10 {
+      break loop;
+    }
+    v = v + 1;
+    repeat loop;
+  }
+  print v; // 11
+}
+
+// quotes
+
+// (do
+//   (let n (node_from_literal 300))
+//   (print (# (+ 500 ($ n))))
+// )
+
+// include
+
+include(env, ref "examples/lib/prelude.gen");
+
+// while loops
+
+print {
+  let i = 0;
+  while i < 10 { i = i + 1 };
+  i
+}; // 10
+
+
+// for loops
+
+print {
+  let total = 0;
+  let vs = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+  for i in 0 to array_len(vs) {
+    total = total + vs[i];
+  }
+  total
+}; // ???

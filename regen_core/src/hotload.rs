@@ -152,7 +152,7 @@ pub fn hotload_changes(module_name : &str, code : &str, env : Env, hs : &mut Hot
   for e in exprs {
     match e.shape() {
       ExprShape::List(ExprTag::Def, &[name, value_expr]) => {
-        let name = name.as_symbol_literal();
+        let name = name.as_symbol();
         hotload_def(hs, env, name, value_expr, &mut new_defs);
       }
       _ => {
