@@ -2,139 +2,38 @@
 include(env, ref "examples/lib/prelude.gen");
 include(env, ref "examples/lib/game.gen");
 
-def width = 800;
-def height = 600;
+// indicates whether the game is paused
+def paused = false;
 
-def paddle_height = 50;
-def paddle_speed = 10;
-def ball_size = 10;
+// indicates the current time
+def timer = tick_stream(1000 / 30);
 
-def window = create_game_window("SDL Example", width, height);
+// the input game events
+def event_stream =
+  game_input_stream(sdl_input_stream(), tick_stream(1000 / 30));
 
-def vec2 = struct { x : i64, y : i64 };
+def buffer_size = 2000;
 
-def ball = struct { pos : vec2, vel : vec2 };
-
-def paddle = struct { pos : i64, vel : i64 };
-
-def game = struct {
-  p1 : paddle,
-  p2 : paddle,
-  b : ball,
+def game_event_log = struct {
+  events : sized_array(game_event, buffer_size),
+  len : i64,
 };
 
-def initial_game_state = {
-  let ypos = (height - paddle_height) / 2;
-  let b = init ball(
-    init vec2((width - ball_size) / 2, (height - ball_size) / 2),
-    init vec2(5, 5),
-  );
-  init game(
-    init paddle(ypos, 0),
-    init paddle(ypos, 0),
-    b,
-  )
-};
-
-def ARROW_RIGHT = 79 as u32;
-def ARROW_LEFT = 80 as u32;
-def ARROW_DOWN = 81 as u32;
-def ARROW_UP = 82 as u32;
-
-def game_update = fun(state : ptr game, e : ptr game_event) {
-  // handle input events
-  let input = e.input;
-  if input as i64 != 0 {
-    if input.event_type == SDL_QUIT {
-      sdl_destroy_window(window);
-    }
-    if input.event_type == SDL_KEYDOWN {
-      let k = to_keyboard_event(input);
-      if k.keysym.scancode == ARROW_DOWN {
-        state.p1.vel = paddle_speed;
-      }
-      if k.keysym.scancode == ARROW_UP {
-        state.p1.vel = -paddle_speed;
-      }
-    }
-    if input.event_type == SDL_KEYUP {
-      let k = to_keyboard_event(input);
-      if k.keysym.scancode == ARROW_DOWN {
-        state.p1.vel = 0;
-      }
-      if k.keysym.scancode == ARROW_UP {
-        state.p1.vel = 0;
-      }
-    }
-  }
-  // handle tick events
-  let tick = e.tick;
-  if e.tick as i64 != 0 {
-    state.p1.pos = state.p1.pos + state.p1.vel;
-    state.p2.pos = state.p2.pos + state.p2.vel;
-
-    let b = ref state.b;
-    b.pos.x = b.pos.x + b.vel.x;
-    b.pos.y = b.pos.y + b.vel.y;
-    if b.pos.x > width - ball_size {
-      b.pos.x = width - ball_size;
-      b.vel.x = -b.vel.x;
-    }
-    if b.pos.x < 0 {
-      b.pos.x = 0;
-      b.vel.x = -b.vel.x;
-    }
-    if b.pos.y > height - ball_size {
-      b.pos.y = height - ball_size;
-      b.vel.y = -b.vel.y;
-    }
-    if b.pos.y < 0 {
-      b.pos.y = 0;
-      b.vel.y = -b.vel.y;
+def new_game_event = fun(log : ptr game_event_log, e : ptr game_event) {
+  if !paused {
+    if log.len < buffer_size {
+      log.events[log.len] = *e;
+      log.len = log.len + 1;
     }
   }
 };
 
-def render_game = fun(renderer : ptr sdl_renderer_handle, state : ptr game) {
-  // render
-  let r = *renderer;
-  sdl_set_draw_color(r, 0 as u8, 0 as u8, 0 as u8, 0 as u8);
-  sdl_clear(r);
+// state node holding a history of game events (only adds events when not paused)
+def event_log = 0;
 
-  sdl_set_draw_color(r, 255 as u8, 0 as u8, 0 as u8, 255 as u8);
+// updates based on the event log and the timer
+def game_state = 0;
 
-  // paddle p1
-  let rect = init sdl_rect(50 as i32, state.p1.pos as i32, 10 as i32, 50 as i32);
-  sdl_fill_rect(r, ref rect);
+// draws the game state
+def renderer = 0;
 
-  // paddle p2
-  let rect = init sdl_rect(740 as i32, state.p2.pos as i32, 10 as i32, 50 as i32);
-  sdl_fill_rect(r, ref rect);
-
-  // ball
-  let rect = init sdl_rect(state.b.pos.x as i32, state.b.pos.y as i32, ball_size as i32, ball_size as i32);
-  sdl_fill_rect(r, ref rect);
-
-  sdl_present(r);
-};
-
-def timer = tick_stream(1000 / 60);
-
-def game_events =
-  game_input_stream(sdl_input_stream(), tick_stream(1000 / 60));
-
-def game_state = {
-  state_stream(game_events, game,
-    (ref initial_game_state) as (ptr void),
-    game_update as update_fn_type)
-};
-
-def renderer = create_renderer(window);
-
-def render_stream = {
-  let game_sample = sample_stream(tick_stream(1000 / 60), game_state, game);
-  state_stream(
-    game_sample,
-    sdl_renderer_handle, (ref renderer) as ptr void,
-    render_game as update_fn_type);
-}

@@ -1,0 +1,28 @@
+
+// TODO: unclear how merging streams is handled
+
+def paused = false;
+
+def window = effect {
+  init: new_sdl_window(),
+  update: next_sdl_event(ref this),
+  trigger: timer_ms(1000/60),
+};
+
+def event_log = effect {
+  init: new_log(),
+  update: log_event(next_sdl_event),
+  trigger: timer_ms(10),
+};
+
+def game_state = effect {
+  init: log_processor(new_game),
+  update: update_from_log(ref event_log, ref this, update_game),
+  trigger: timer_ms(1000/30),
+};
+
+def render = effect {
+  init: new_renderer(),
+  update: render_game(ref this, ref game_state),
+  trigger: timer_ms(1000/60),
+};
