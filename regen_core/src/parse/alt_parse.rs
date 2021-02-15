@@ -345,7 +345,7 @@ fn parse_paren_infix(ps : &mut ParseState, left_expr : Expr, first_arg : Option<
   let t = ps.peek()?;
   let (operation, start_paren) = match t.string {
     "(" => (Call, "("),
-    "[" => (ArrayIndex, "]"),
+    "[" => (ArrayIndex, "["),
     _ => return error(t.loc, "unexpected token"),
   };
   let end_paren = ps.config.paren_pairs.get(start_paren).unwrap().clone();
