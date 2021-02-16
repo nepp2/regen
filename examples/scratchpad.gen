@@ -6,11 +6,11 @@ include(env, ref "examples/lib/game.gen");
 def paused = false;
 
 // indicates the current time
-def timer = tick_stream(1000 / 30);
+def timer = tick_signal(1000 / 30);
 
 // the input game events
-def event_stream =
-  game_input_stream(sdl_input_stream(), tick_stream(1000 / 30));
+def event_signal =
+  game_input_signal(sdl_input_signal(), tick_signal(1000 / 30));
 
 def buffer_size = 2000;
 

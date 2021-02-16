@@ -19,10 +19,10 @@ def poll_input = fun(window : ptr sdl_window_handle, e : ptr sdl_event, tick : p
   sdl_poll_event(e) == (1 as i32)
 };
 
-def input_stream = {
-  // the `poll_stream` function defines a new event source
-  poll_stream(
-    tick_stream(1),                    // the sample rate
+def input_signal = {
+  // the `poll_signal` function defines a new event source
+  poll_signal(
+    tick_signal(1),                    // the sample rate
     sdl_window_handle,                 // event source type
     (ref window) as (ptr void),        // event source
     sdl_event,                         // event type
@@ -84,9 +84,9 @@ def window_update = fun(e : ptr sdl_event, window : sdl_window_handle) {
 
 // ------------ Define the event graph --------------
 
-def update_timer = tick_stream(1000 / 30);
+def update_timer = tick_signal(1000 / 30);
 
-def render_timer = tick_stream(1000 / 60);
+def render_timer = tick_signal(1000 / 60);
 
 def input_to_game_event = fun(output : ptr game_event, input_event : ptr sdl_event) {
   let e =
@@ -100,19 +100,19 @@ def tick_to_game_event = fun(output : ptr game_event, tick : ptr tick_event) {
   *output = e;
 };
 
-def game_input_stream =
-  map_stream(input_stream, game_event, input_to_game_event as map_fn_type);
+def game_input_signal =
+  map_signal(input_signal, game_event, input_to_game_event as map_fn_type);
 
-def game_tick_stream =
-  map_stream(update_timer, game_event, tick_to_game_event as map_fn_type);
+def game_tick_signal =
+  map_signal(update_timer, game_event, tick_to_game_event as map_fn_type);
 
 // The game must respond to both input events and game ticks
 def game_events =
-  merge_stream(game_input_stream, game_tick_stream, game_event);
+  merge_signal(game_input_signal, game_tick_signal, game_event);
 
-// Game state is represented as a state stream
+// Game state is represented as a state signal
 def game_state =
-  state_stream(
+  state_signal(
     game_events, game,
     (ref initial_game_state) as (ptr void),
     game_update as update_fn_type);
@@ -120,10 +120,10 @@ def game_state =
 def renderer =
   sdl_create_renderer(window, -1 as i32, SDL_RENDERER_ACCELERATED);
 
-// Renderer is represented as a state stream (it's an output buffer)
-def render_stream = {
-  let game_sample = sample_stream(render_timer, game_state, game);
-  state_stream(
+// Renderer is represented as a state signal (it's an output buffer)
+def render_signal = {
+  let game_sample = sample_signal(render_timer, game_state, game);
+  state_signal(
     game_sample,
     sdl_renderer_handle, (ref renderer) as ptr void,
     render_game as update_fn_type);

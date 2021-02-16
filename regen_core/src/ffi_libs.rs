@@ -133,7 +133,7 @@ pub fn load_ffi_libs(e : Env) {
   let u32 = e.c.u32_tag;
   let void = e.c.void_tag;
   let void_ptr = types::pointer_type(void);
-  let stream_ptr = void_ptr;
+  let signal_ptr = void_ptr;
   let env_ptr = void_ptr;
   let event_loop_ptr = void_ptr;
   let expr = e.c.expr_tag;
@@ -159,43 +159,43 @@ pub fn load_ffi_libs(e : Env) {
   define_global(e, "env_get_global_ptr", env_get_global_ptr as u64,
     c_function_type(&[void_ptr, u64], void_ptr));
 
-  // ----------- Bind stream functions ------------
+  // ----------- Bind signal functions ------------
 
-  define_global(e, "register_tick_stream", register_tick_stream as u64,
+  define_global(e, "register_tick_signal", register_tick_signal as u64,
     c_function_type(
       &[env_ptr, event_loop_ptr, i64],
-        stream_ptr));
+        signal_ptr));
 
   let update_fn_type =
     function_type(&[void_ptr, void_ptr], void);
-  define_global(e, "register_state_stream", register_state_stream as u64,
+  define_global(e, "register_state_signal", register_state_signal as u64,
     c_function_type(
-      &[env_ptr, event_loop_ptr, stream_ptr, type_tag, void_ptr, update_fn_type],
-        stream_ptr));
+      &[env_ptr, event_loop_ptr, signal_ptr, type_tag, void_ptr, update_fn_type],
+        signal_ptr));
 
   let poll_fn_type =
     function_type(&[void_ptr, void_ptr, void_ptr], bool_type);
-  define_global(e, "register_poll_stream", register_poll_stream as u64,
+  define_global(e, "register_poll_signal", register_poll_signal as u64,
     c_function_type(
-      &[env_ptr, event_loop_ptr, stream_ptr, type_tag, void_ptr, type_tag, poll_fn_type],
-        stream_ptr));
+      &[env_ptr, event_loop_ptr, signal_ptr, type_tag, void_ptr, type_tag, poll_fn_type],
+        signal_ptr));
 
   let map_fn_type =
     function_type(&[void_ptr, void_ptr], void);
-  define_global(e, "register_map_stream", register_map_stream as u64,
+  define_global(e, "register_map_signal", register_map_signal as u64,
     c_function_type(
-      &[env_ptr, event_loop_ptr, stream_ptr, type_tag, map_fn_type],
-        stream_ptr));
+      &[env_ptr, event_loop_ptr, signal_ptr, type_tag, map_fn_type],
+        signal_ptr));
 
-  define_global(e, "register_merge_stream", register_merge_stream as u64,
+  define_global(e, "register_merge_signal", register_merge_signal as u64,
     c_function_type(
-      &[env_ptr, event_loop_ptr, stream_ptr, stream_ptr, type_tag],
-        stream_ptr));
+      &[env_ptr, event_loop_ptr, signal_ptr, signal_ptr, type_tag],
+        signal_ptr));
 
-  define_global(e, "register_sample_stream", register_sample_stream as u64,
+  define_global(e, "register_sample_signal", register_sample_signal as u64,
     c_function_type(
-      &[env_ptr, event_loop_ptr, stream_ptr, stream_ptr, type_tag],
-        stream_ptr));
+      &[env_ptr, event_loop_ptr, signal_ptr, signal_ptr, type_tag],
+        signal_ptr));
 
   // ----------- Bind language introspection functions ------------
 

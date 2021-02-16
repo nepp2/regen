@@ -1,7 +1,7 @@
 /// Defines the environment (the global hashmap that defs are added to)
 
 use crate::{
-  event_loop::{self, EventLoop, StreamId},
+  event_loop::{self, EventLoop, SignalId},
   symbols::{Symbol, SymbolTable, to_symbol},
   types::{self, TypeHandle, CoreTypes, core_types },
   ffi_libs::*,
@@ -25,14 +25,14 @@ pub type Env = Ptr<Environment>;
 pub struct EnvEntry {
   pub ptr : *mut (),
   pub tag : TypeHandle,
-  pub streams : Vec<StreamId>,
+  pub signals : Vec<SignalId>,
 }
 
 pub fn unload_def(mut env : Env, name : Symbol) {
   let entry = env.values.get(&name).unwrap();
   let el = get_event_loop(env);
-  for &id in &entry.streams {
-    event_loop::destroy_stream(el, id);
+  for &id in &entry.signals {
+    event_loop::destroy_signal(el, id);
   }
   env.values.remove(&name);
 }
@@ -47,7 +47,7 @@ pub fn env_alloc_global(mut env : Env, name : Symbol, tag : TypeHandle) -> *mut 
   }
   let layout = std::alloc::Layout::from_size_align(tag.size_of as usize, 8).unwrap();
   let ptr = unsafe { std::alloc::alloc(layout) as *mut () };
-  env.values.insert(name, EnvEntry { ptr, tag, streams: vec![] });
+  env.values.insert(name, EnvEntry { ptr, tag, signals: vec![] });
   ptr
 }
 
@@ -67,10 +67,10 @@ pub fn set_active_definition(mut env : Env, def : Option<Symbol>) {
   env.active_definition = def;
 }
 
-pub fn register_stream(mut env : Env, id : StreamId) {
-  let name = env.active_definition.expect("can't register a stream; no active definition");
+pub fn register_signal(mut env : Env, id : SignalId) {
+  let name = env.active_definition.expect("can't register a signal; no active definition");
   let entry = env.values.get_mut(&name).unwrap();
-  entry.streams.push(id);
+  entry.signals.push(id);
 }
 
 pub fn get_global<T : Copy>(e : Env, sym : Symbol, t : TypeHandle) -> Option<Ptr<T>> {

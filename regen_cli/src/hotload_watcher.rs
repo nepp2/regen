@@ -11,8 +11,8 @@ use regen_core::{
   hotload::{self, HotloadState},
   event_loop::{
     self, TimerState,
-    native_poll_stream,
-    native_state_stream,
+    native_poll_signal,
+    native_state_signal,
   },
 };
 use std::fs;
@@ -53,7 +53,7 @@ pub fn watch_file(path : &str) {
   let event_loop = get_event_loop(env);
 
   let timer = event_loop::create_timer(event_loop, 0, 10);
-  let file_changes = native_poll_stream(event_loop, timer, watch_state,
+  let file_changes = native_poll_signal(event_loop, timer, watch_state,
     |ws : &mut WatchState, _output : &mut i64, _input : &TimerState| {
       match ws.rx.try_recv() {
         Ok(event) => {
@@ -79,7 +79,7 @@ pub fn watch_file(path : &str) {
   hotload_file(env, &mut hs, path);
   let cs = CompilerState { env, hs, path: path.to_string() };
 
-  native_state_stream(event_loop, file_changes, cs,
+  native_state_signal(event_loop, file_changes, cs,
     |cs : &mut CompilerState, _ : &WatchState| {
       hotload_file(cs.env, &mut cs.hs, &cs.path);
     }

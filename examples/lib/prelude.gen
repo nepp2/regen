@@ -4,22 +4,22 @@ def tick_event = struct {
   current_millisecond : i64,
 };
 
-def tick_stream = fun(millisecond_interval : i64) {
-  register_tick_stream(env, event_loop, millisecond_interval);
+def tick_signal = fun(millisecond_interval : i64) {
+  register_tick_signal(env, event_loop, millisecond_interval);
 };
 
-def stream = ptr void;
+def signal = ptr void;
 
 def update_fn_type = fn(state : ptr void, event : ptr void) => void;
 
-def state_stream = fun(
-  input_stream : stream,
+def state_signal = fun(
+  input_signal : signal,
   state_type : type,
   initial_state : (ptr void),
   update_function : update_fn_type)
 {
-  register_state_stream(
-    env, event_loop, input_stream,
+  register_state_signal(
+    env, event_loop, input_signal,
     state_type, initial_state,
     update_function)
 };
@@ -28,15 +28,15 @@ def state_stream = fun(
 def poll_fn_type =
   fn(event_source : ptr void, output_event : ptr void, input_event : ptr void) => bool;
 
-def poll_stream = fun(
-  input_stream : stream,
+def poll_signal = fun(
+  input_signal : signal,
   event_source_type : type,
   event_source : ptr void,
   event_type : type,
   poll_function : poll_fn_type)
 {
-  register_poll_stream(
-    env, event_loop, input_stream,
+  register_poll_signal(
+    env, event_loop, input_signal,
     event_source_type, event_source,
     event_type, poll_function)
 };
@@ -44,26 +44,26 @@ def poll_stream = fun(
 def map_fn_type =
   fn (output : ptr void, event : ptr void) => void;
 
-def map_stream = fun (
-  input_stream : stream,
+def map_signal = fun (
+  input_signal : signal,
   output_type : type,
   map_function : map_fn_type)
 {
-  register_map_stream(env, event_loop, input_stream, output_type, map_function)
+  register_map_signal(env, event_loop, input_signal, output_type, map_function)
 };
 
-def merge_stream = fun(
-  a : stream,
-  b : stream,
+def merge_signal = fun(
+  a : signal,
+  b : signal,
   output_type : type)
 {
-  register_merge_stream(env, event_loop, a, b, output_type)
+  register_merge_signal(env, event_loop, a, b, output_type)
 };
 
-def sample_stream = fun(
-  trigger_stream : stream,
-  state_stream : stream,
+def sample_signal = fun(
+  trigger_signal : signal,
+  state_signal : signal,
   output_type : type)
 {
-  register_sample_stream(env, event_loop, trigger_stream, state_stream, output_type)
+  register_sample_signal(env, event_loop, trigger_signal, state_signal, output_type)
 };
