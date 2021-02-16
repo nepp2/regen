@@ -43,7 +43,7 @@ def sdl_window_event = struct {
 def sdl_keyboard_event = struct {
   window_id : u32,
   state : u8,
-  repeat : u8,
+  is_repeat : u8,
   keysym : sdl_keysym,
 };
 

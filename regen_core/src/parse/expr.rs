@@ -178,6 +178,18 @@ pub enum ExprShape<'l> {
 
 use std::fmt;
 
+impl SrcLocation {
+  pub fn zero() -> Self {
+    SrcLocation {
+      start: 0, end: 0, module: Ptr { p : std::ptr::null_mut() },
+    }
+  }
+
+  pub fn src_snippet(&self) -> &str {
+    &self.module.code.as_str()[self.start..self.end]
+  }
+}
+
 impl fmt::Display for SrcLocation {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let mut line_start = 0;
