@@ -1,9 +1,10 @@
+use core::panic;
 use std::hash::{Hash, Hasher};
 
-use crate::{env, event_loop::ffi::*, expr_macros::template, parse::Expr, perm_alloc, symbols::Symbol, types, types::{TypeHandle, c_function_type, function_type}};
+use crate::{env, event_loop::ffi::*, parse::templates::template, parse::Expr, perm_alloc, symbols::Symbol, types, types::{TypeHandle, c_function_type, function_type}};
 
 use env::{Env, define_global};
-use perm_alloc::{SlicePtr, perm_slice_from_vec};
+use perm_alloc::{SlicePtr, perm_slice_from_vec, perm_slice};
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -99,8 +100,41 @@ pub extern "C" fn symbol_display(sym : Symbol) {
 //   n.as_symbol()
 // }
 
-pub extern "C" fn node_display(expr : Expr) {
-  println!("{}", expr.loc.src_snippet());
+pub extern "C" fn ptr_type(t : TypeHandle) -> TypeHandle{
+  types::pointer_type(t)
+}
+
+pub extern "C" fn fun_type(
+  args_ptr : *const TypeHandle,
+  num_args : i64,
+  return_type : TypeHandle,
+  c_fun : bool,
+) -> TypeHandle{
+  let args = unsafe { std::slice::from_raw_parts(args_ptr, num_args as usize) };
+  if c_fun {
+    types::c_function_type(args, return_type)
+  }
+  else {
+    types::function_type(args, return_type)
+  }
+}
+
+pub extern "C" fn sized_array_type(t : TypeHandle, length : i64) -> TypeHandle{
+  types::array_type(t, length)
+}
+
+pub extern "C" fn struct_type(
+  num_fields : u64,
+  names_ptr : *const Symbol,
+  types_ptr : *const TypeHandle,
+) -> TypeHandle{
+  let field_names = unsafe { std::slice::from_raw_parts(names_ptr, num_fields as usize) };
+  let field_types = unsafe { std::slice::from_raw_parts(types_ptr, num_fields as usize) };
+  types::struct_type(perm_slice(field_names), perm_slice(field_types))
+}
+
+pub extern "C" fn expr_display(expr : Expr) {
+  println!("{}", expr);
 }
 
 pub extern "C" fn calculate_packed_field_offsets(
@@ -138,6 +172,23 @@ pub fn load_ffi_libs(e : Env) {
   let event_loop_ptr = void_ptr;
   let expr = e.c.expr_tag;
   let type_tag = e.c.type_tag;
+  let type_tag_ptr = types::pointer_type(type_tag);
+  let symbol = e.c.symbol_tag;
+  let symbol_ptr = types::pointer_type(symbol);
+
+  // ----------- Bind type constructor functions
+
+  define_global(e, "ptr_type", ptr_type as u64,
+    c_function_type(&[type_tag], type_tag));
+
+  define_global(e, "fun_type", fun_type as u64,
+    c_function_type(&[type_tag_ptr, i64, type_tag, bool_type], type_tag));
+  
+  define_global(e, "sized_array_type", sized_array_type as u64,
+    c_function_type(&[type_tag, i64], type_tag));
+
+  define_global(e, "struct_type", struct_type as u64,
+    c_function_type(&[i64, symbol_ptr, type_tag_ptr], type_tag));
 
   // ----------- Bind core system functions ------------
 
@@ -157,7 +208,7 @@ pub fn load_ffi_libs(e : Env) {
     c_function_type(&[void_ptr, u32, u64], void_ptr));
 
   define_global(e, "env_get_global_ptr", env_get_global_ptr as u64,
-    c_function_type(&[void_ptr, u64], void_ptr));
+    c_function_type(&[void_ptr, symbol], void_ptr));
 
   // ----------- Bind signal functions ------------
 
@@ -223,7 +274,7 @@ pub fn load_ffi_libs(e : Env) {
   //   c_function_type(&[u64], u64));
 
   define_global(e, "template_quote", template_quote as u64,
-    c_function_type(&[expr, types::pointer_type(expr), u64], expr));
+    c_function_type(&[expr, types::pointer_type(expr), i64], expr));
 
   define_global(e, "calculate_packed_field_offsets", calculate_packed_field_offsets as u64,
     c_function_type(&[u64, u64], u64));

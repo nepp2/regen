@@ -2,27 +2,26 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{parse::{Expr, ExprShape, ExprTag}, perm_alloc::{Ptr, perm}, symbols::Symbol};
 
+use ExprTag::*;
+use ExprShape::*;
+use ReferenceType::*;
+
 #[derive(Copy, Clone, PartialEq)]
 pub enum ReferenceType {
   Global, Local,
 }
 
 #[derive(Clone)]
-pub struct SemanticInfo {
+pub struct ReferenceInfo {
   references : HashMap<u64, (Expr, ReferenceType)>,
 }
 
-impl SemanticInfo {
-  fn push_ref(&mut self, e : Expr, r : ReferenceType) {
-    let id = Ptr::to_u64(e);
-    if self.references.contains_key(&id) {
-      panic!("multiple instances of expression encountered")
-    }
-    self.references.insert(id, (e, r));
-  }
+impl ReferenceInfo {
 
   pub fn get_ref_type(&self, e : Expr) -> ReferenceType {
-    self.references[&Ptr::to_u64(e)].1
+    self.references.get(&Ptr::to_u64(e))
+      .unwrap_or_else(|| panic!("no type found for {}", e))
+      .1
   }
 
   pub fn global_set(&self) -> HashSet<Symbol> {
@@ -36,25 +35,36 @@ impl SemanticInfo {
   }
 }
 
-pub fn get_semantic_info(expr : Expr) -> Ptr<SemanticInfo> {
-  let mut info = SemanticInfo { references: HashMap::new() };
+pub fn get_semantic_info(expr : Expr) -> Ptr<ReferenceInfo> {
+  let mut references = HashMap::new();
   let mut locals = vec![];
-  search_expr(&mut info, &mut locals, expr);
+  find_refs(&mut references, &mut locals, expr);
+  let info = ReferenceInfo { references };
   perm(info)
 }
 
-fn search_expr(info : &mut SemanticInfo, locals : &mut Vec<Symbol>, expr : Expr) {
-  use ExprTag::*;
-  use ExprShape::*;
-  use ReferenceType::*;
+fn push_ref(refs : &mut HashMap<u64, (Expr, ReferenceType)>, e : Expr, r : ReferenceType) {
+  let id = Ptr::to_u64(e);
+  if refs.contains_key(&id) {
+    panic!("multiple instances of expression encountered")
+  }
+  refs.insert(id, (e, r));
+}
+
+fn find_refs(
+  refs : &mut HashMap<u64, (Expr, ReferenceType)>,
+  locals : &mut Vec<Symbol>,
+  expr : Expr
+)
+{
   match expr.shape() {
-    Ref(name) => {
+    Sym(name) => {
       if !expr.ignore_symbol {
         if locals.iter().find(|&&n| n == name).is_some() {
-          info.push_ref(expr, Local);
+          push_ref(refs, expr, Local);
         }
         else {
-          info.push_ref(expr, Global);
+          push_ref(refs, expr, Global);
         }
       }
     }
@@ -71,14 +81,14 @@ fn search_expr(info : &mut SemanticInfo, locals : &mut Vec<Symbol>, expr : Expr)
         else { panic!() }
       }
       for &c in expr.children() {
-        search_expr(info, &mut function_locals, c);
+        find_refs(refs, &mut function_locals, c);
       }
       return;
     }
     List(Do, exprs) => {
       let local_count = locals.len();
       for &c in exprs {
-        search_expr(info, locals, c);
+        find_refs(refs, locals, c);
       }
       locals.drain(local_count..);
       return;
@@ -86,6 +96,26 @@ fn search_expr(info : &mut SemanticInfo, locals : &mut Vec<Symbol>, expr : Expr)
     _ => (),
   }
   for &c in expr.children() {
-    search_expr(info, locals, c);
+    find_refs(refs, locals, c);
+  }
+}
+
+/// All of the const expressions in the expr, in topological order
+pub fn get_const_exprs(expr : Expr) -> Vec<Expr> {
+  let mut const_exprs = vec![];
+  find_const_exprs(&mut const_exprs, expr);
+  const_exprs
+}
+
+fn find_const_exprs(const_exprs : &mut Vec<Expr>, expr : Expr) {
+  match expr.shape() {
+    List(ConstExpr, &[c]) => {
+      const_exprs.push(c);
+      return;
+    }
+    _ => (),
+  }
+  for &c in expr.children() {
+    find_const_exprs(const_exprs, c);
   }
 }

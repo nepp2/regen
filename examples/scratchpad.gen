@@ -1,39 +1,44 @@
 
-include(env, ref "examples/lib/prelude.gen");
-include(env, ref "examples/lib/game.gen");
+print 5;
 
-// indicates whether the game is paused
-def paused = false;
-
-// indicates the current time
-def timer = tick_signal(1000 / 30);
-
-// the input game events
-def event_signal =
-  game_input_signal(sdl_input_signal(), tick_signal(1000 / 30));
-
-def buffer_size = 2000;
-
-def game_event_log = struct {
-  events : sized_array(game_event, buffer_size),
-  len : i64,
+print {
+  fn(a : i64, b : i64) => i64
 };
 
-def new_game_event = fun(log : ptr game_event_log, e : ptr game_event) {
-  if !paused {
-    if log.len < buffer_size {
-      log.events[log.len] = *e;
-      log.len = log.len + 1;
-    }
-  }
-};
+print ptr i64;
 
-// state node holding a history of game events (only adds events when not paused)
-def event_log = 0;
+print {
+  struct { a : i64, b : i64 }
+}
 
-// updates based on the event log and the timer
-def game_state = 0;
+print typeof [2, 3];
 
-// draws the game state
-def renderer = 0;
+print sized_array(i64, 2);
 
+// def add = fun(a : i64, b : i64) {
+//   a + b
+// };
+
+// print add(5, 6);
+
+// {
+//   let a = #10;
+//   print #(5 + $a);
+// }
+
+// def add = fun(t : expr) => expr {
+//   #(
+//     fun(a : $t, b : $t) {
+//       a + b
+//     }
+//   )
+// };
+
+// def add_i64 = add(#i64);
+
+// print add_i64;
+
+// def add_i32 = embed add(#i32);
+
+// print add_i64(5, 9);
+// print add_i32(5 as i32, 9 as i32);

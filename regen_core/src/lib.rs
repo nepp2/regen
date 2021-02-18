@@ -4,7 +4,6 @@ pub mod perm_alloc;
 pub mod symbols;
 mod parse;
 mod semantic;
-mod expr_macros;
 pub mod env;
 mod bytecode;
 mod compile;

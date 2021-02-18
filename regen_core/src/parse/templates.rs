@@ -8,7 +8,7 @@ pub fn template(e : Expr, args : &[Expr]) -> Expr {
   pub fn template_inner(e : Expr, args : &[Expr], next_arg : &mut usize) -> Expr {
     use ExprShape::*;
     match e.shape() {
-      Ref(_) | Literal(_) => e,
+      Sym(_) | Literal(_) => e,
       List(ExprTag::TemplateHole, &[_]) => {
         let mut new_e = args[*next_arg].deep_clone();
         *next_arg += 1;
@@ -57,11 +57,65 @@ impl ExprBuilder {
   }
 }
 
+pub fn struct_type_macro(nb : &ExprBuilder, names : Vec<Expr>, types : Vec<Expr>) -> Expr {
+  let names = {
+    let c = ExprContent::List(perm_slice_from_vec(names));
+    nb.expr(ExprTag::ArrayInit, c)
+  };
+  let types = {
+    let c = ExprContent::List(perm_slice_from_vec(types));
+    nb.expr(ExprTag::ArrayInit, c)
+  };
+  let tstr = nb.parse("
+    {
+      let names = $names;
+      let types = $types;
+      struct_type(
+        array_len(names),
+        (ref names) as ptr_type(symbol),
+        (ref types) as ptr_type(type),
+      )
+    }
+  ");
+  template(tstr, &[names, types])
+}
+
+pub fn fn_type_macro(nb : &ExprBuilder, arg_types : Vec<Expr>, ret : Expr, is_cfun : bool) -> Expr {
+  let array = {
+    let c = ExprContent::List(perm_slice_from_vec(arg_types));
+    nb.expr(ExprTag::ArrayInit, c)
+  };
+  let fn_type_call = nb.parse("
+    {
+      let args = $array;
+      fun_type(
+        (ref args) as ptr_type(type),
+        array_len(args),
+        $ret,
+        false,
+      )
+    }
+  ");
+  let cfun_type_call = nb.parse("
+    {
+      let args = $array;
+      fun_type(
+        (ref args) as ptr_type(type),
+        array_len(args),
+        $ret,
+        true,
+      )
+    }
+  ");
+  if is_cfun {
+    template(cfun_type_call, &[array, ret])
+  }
+  else {
+    template(fn_type_call, &[array, ret])
+  }
+}
+
 pub fn template_macro(nb : &ExprBuilder, e : Expr, args : Vec<Expr>) -> Expr {
-  // (do
-  //   (let args (array a b c))
-  //   (template_quote e (ref args) (array_len args))
-  // )
   let array = {
     let c = ExprContent::List(perm_slice_from_vec(args));
     nb.expr(ExprTag::ArrayInit, c)
@@ -70,7 +124,7 @@ pub fn template_macro(nb : &ExprBuilder, e : Expr, args : Vec<Expr>) -> Expr {
     {
       let args = $array;
       template_quote(quote $e,
-        ref args as ptr node,
+        (ref args) as ptr expr,
         array_len(args))
     }
   ");

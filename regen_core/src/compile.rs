@@ -1,6 +1,6 @@
 /// Compiles core language into bytecode
 
-use crate::{bytecode, env, parse, perm_alloc, semantic::{ReferenceType, SemanticInfo}, symbols, types};
+use crate::{bytecode, env, parse, perm_alloc, semantic::{ReferenceType, ReferenceInfo}, symbols, types};
 
 use bytecode::{
   SequenceHandle, SequenceInfo, InstrExpr, FunctionBytecode,
@@ -27,8 +27,15 @@ pub struct Function {
   pub t : TypeHandle,
 }
 
+#[derive(Clone, Copy)]
+pub struct ConstExprValue {
+  pub e : Expr,
+  pub t : TypeHandle,
+  pub ptr : *const (),
+}
+
 /// Function builder
-struct Builder {
+struct Builder<'l> {
   bc : FunctionBytecode,
   
   /// local variables in scope
@@ -43,14 +50,26 @@ struct Builder {
   /// labels indicating the start and end of a labelled block expression
   label_stack : Vec<LabelledExpr>,
 
+  /// the constant expression values
+  const_expr_values : &'l [ConstExprValue],
+
+  /// the index of the next constant expression (assumes topologically ordered traversal)
+  next_const_index : usize,
+
   /// the environment containing all visible symbols
   env : Env,
 
-  info : Ptr<SemanticInfo>,
+  info : Ptr<ReferenceInfo>,
 }
 
-impl Builder {
-  fn new(env : Env, info : Ptr<SemanticInfo>) -> Self {
+impl <'l> Builder<'l> {
+  fn new(
+    env : Env,
+    info : Ptr<ReferenceInfo>,
+    const_expr_values : &'l [ConstExprValue],
+    next_const_index : usize,
+  ) -> Self
+  {
     Builder {
       bc: FunctionBytecode {
         sequence_info: vec![],
@@ -63,6 +82,8 @@ impl Builder {
       seq_completion: vec![],
       current_sequence: None,
       label_stack: vec![],
+      const_expr_values,
+      next_const_index,
       env,
       info,
     }
@@ -263,13 +284,21 @@ fn function_to_var(b : &mut Builder, f : Function) -> Var {
   function_var
 }
 
-fn compile_function_def(env: Env, info : Ptr<SemanticInfo>, args : &[Expr], return_tag : Option<Expr>, body : Expr) -> Function {
-  let mut b = Builder::new(env, info);
+fn compile_function_def(
+  env: Env,
+  info : Ptr<ReferenceInfo>,
+  const_expr_values : &[ConstExprValue],
+  const_next_index : usize,
+  args : &[Expr],
+  return_tag : Option<Expr>,
+  body : Expr,
+) -> Function {
+  let mut b = Builder::new(env, info, const_expr_values, const_next_index);
   b.bc.args = args.len();
   let mut arg_types = vec![];
   for a in args {
     if let Some(&[name, tag]) = a.as_syntax() {
-      let t = expr_to_type(&b, tag);
+      let t = const_expr_to_type(&mut b, tag);
       new_local_variable(&mut b, name.as_symbol(), t);
       arg_types.push(t);
     }
@@ -277,7 +306,7 @@ fn compile_function_def(env: Env, info : Ptr<SemanticInfo>, args : &[Expr], retu
       panic!("expected function argument definition at ({})", a.loc)
     }
   }
-  let expected_return = return_tag.map(|e| expr_to_type(&mut b, e));
+  let expected_return = return_tag.map(|e| const_expr_to_type(&mut b, e));
   compile_function(b, body, &arg_types, expected_return)
 }
 
@@ -312,8 +341,13 @@ fn compile_function(
 }
 
 /// Compile basic imperative language into bytecode
-pub fn compile_expr_to_function(env: Env, info : Ptr<SemanticInfo>, root : Expr) -> Function {
-  compile_function(Builder::new(env, info), root, &[], None)
+pub fn compile_expr_to_function(
+  env: Env,
+  info : Ptr<ReferenceInfo>,
+  const_expr_values : &[ConstExprValue],
+  root : Expr) -> Function 
+{
+  compile_function(Builder::new(env, info, const_expr_values, 0), root, &[], None)
 }
 
 fn compile_if_else(b : &mut Builder, cond_expr : Expr, then_expr : Expr, else_expr : Expr) -> Option<Ref> {
@@ -446,7 +480,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       Some(compile_cast(b, v, b.env.c.bool_tag).to_ref())
     }
     // local reference
-    Ref(sym) => {
+    Sym(sym) => {
       match b.info.get_ref_type(e) {
         ReferenceType::Local => {
           // Look for variable in local scope
@@ -469,6 +503,12 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
         }
       }
     }
+    List(ConstExpr, &[_]) => {
+      let cev = const_value(b, e);
+      let e = InstrExpr::Literal(cev.t, cev.ptr);
+      let v = push_expr(b, e, types::pointer_type(cev.t));
+      Some(pointer_to_locator(v, false))
+    }
     // literal i64
     Literal(Val::I64(v)) => {
       let e = InstrExpr::LiteralI64(v);
@@ -482,13 +522,10 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       Some(pointer_to_locator(v, false))
     }
     // literal symbol
-    Literal(Val::Symbol(s)) => {
+    List(LiteralSymbol, &[sym]) => {
+      let s = sym.as_symbol();
       let e = InstrExpr::LiteralI64(s.as_i64());
-      return Some(push_expr(b, e, b.env.c.u64_tag).to_ref());
-    }
-    // literal node
-    Literal(Val::Expr(e)) => {
-      Some(compile_quote(b, e).to_ref())
+      return Some(push_expr(b, e, b.env.c.symbol_tag).to_ref());
     }
     // literal void
     Literal(Val::Void) => {
@@ -507,7 +544,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
         }
         element_values.push(v.id);
       }
-      let t = types::array_type(element_type, elements.len() as u64);
+      let t = types::array_type(element_type, elements.len() as i64);
       let e = InstrExpr::Array(perm_slice_from_vec(element_values));
       Some(push_expr(b, e, t).to_ref())
     }
@@ -554,14 +591,14 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     }
     // zero init
     List(ZeroInit, &[t]) => {
-      let t = expr_to_type(b, t);
+      let t = const_expr_to_type(b, t);
       Some(push_expr(b, InstrExpr::ZeroInit, t).to_ref())      
     }
     // init
     List(StructInit, es) => {
       let type_expr = es[0];
       let field_vals = &es[1..];
-      let t = expr_to_type(b, type_expr);
+      let t = const_expr_to_type(b, type_expr);
       let info = if let Some(i) = types::type_as_struct(&t) {
         i
       }
@@ -611,7 +648,10 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
         if ret.tag == Omitted { None }
         else { Some(ret) }
       };
-      let f = compile_function_def(b.env, b.info, args.children(), return_tag, body);
+      let f = compile_function_def(
+        b.env, b.info,
+        b.const_expr_values, b.next_const_index,
+        args.children(), return_tag, body);
       let v = function_to_var(b, f);
       Some(v.to_ref())
     }
@@ -700,7 +740,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     }
     // cast
     List(Cast, &[value, to_type]) => {
-      let t = expr_to_type(b, to_type);
+      let t = const_expr_to_type(b, to_type);
       let v = compile_expr_to_var(b, value);
       Some(compile_cast(b, v, t).to_ref())
     }
@@ -716,25 +756,9 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       let arg_exprs = &exprs[1..];
       Some(compile_function_call(b, e, function_expr, arg_exprs).to_ref())
     }
-    // types
-    List(PtrType, _) => {
-      Some(compile_type_expr(b, e).to_ref())
-    }
-    // function type
-    List(FnType, _) => {
-      Some(compile_type_expr(b, e).to_ref())
-    }
-    // c function type
-    List(CFunType, _) => {
-      Some(compile_type_expr(b, e).to_ref())
-    }
-    // array type
-    List(SizedArrayType, _) => {
-      Some(compile_type_expr(b, e).to_ref())
-    }
-    // struct type
-    List(StructType, _) => {
-      Some(compile_type_expr(b, e).to_ref())
+    // literal node
+    List(Quote, &[e]) => {
+      Some(compile_expr_value(b, e.deep_clone()).to_ref())
     }
     _ => {
       panic!("encountered invalid expression '{}' at ({})", e.loc.src_snippet(), e.loc)
@@ -749,106 +773,39 @@ fn compile_array_len(b : &mut Builder, array : Expr) -> Var {
   push_expr(b, e, b.env.c.i64_tag)
 }
 
-fn symbol_to_type(b : &Builder, s : Symbol) -> Option<TypeHandle> {
-  env::get_global_value(b.env, s, b.env.c.type_tag)
-}
-
-fn eval_literal_i64(b : &Builder, e : Expr) -> i64 {
-  let env = b.env;
-  match e.shape() {
-    ExprShape::Literal(Val::I64(v)) => return v,
-    ExprShape::Ref(sym) => {
-      if b.info.get_ref_type(e) == ReferenceType::Global {
-        if let Some(v) = env::get_global_value(env, sym, env.c.i64_tag) {
-          return v;
-        }
-      }
+fn const_value(b : &mut Builder, e : Expr) -> ConstExprValue {
+  if let ExprShape::List(ExprTag::ConstExpr, &[ce]) = e.shape() {
+    let cev = b.const_expr_values[b.next_const_index];
+    b.next_const_index += 1;
+    if cev.e != ce {
+      panic!("const expressions '{}' and '{}' do not match", cev.e, ce);
     }
-    _ => (),
+    return cev;
   }
-  panic!("expected literal i64 at ({})", e.loc)
+  panic!("expected const expression, found '{}' at ({})", e, e.loc)
 }
 
-fn compile_type_expr(b : &mut Builder, e : Expr) -> Var {
-  let type_tag = expr_to_type(b, e);
-  let e = InstrExpr::LiteralI64(Ptr::to_i64(type_tag));
-  push_expr(b, e, b.env.c.type_tag)
-}
-
-fn expr_to_type(b: &Builder, e : Expr) -> TypeHandle {
-  if let Some(t) = try_expr_to_type(b, e) {
-    t
+fn const_expr_to_i64(b : &mut Builder, e : Expr) -> i64 {
+  let cev = const_value(b, e);
+  if cev.t != b.env.c.i64_tag {
+    println!("expected an i64 expression, found {}", cev.t);
   }
-  else {
-    panic!("invalid type expression '{}' at ({})", e.loc.src_snippet(), e.loc);
+  unsafe { *(cev.ptr as *const i64) }
+}
+
+fn const_expr_to_type(b: &mut Builder, e : Expr) -> TypeHandle {
+  let cev = const_value(b, e);
+  if cev.t != b.env.c.type_tag {
+    println!("expected a type expression, found {}", cev.t);
   }
+  unsafe { *(cev.ptr as *const TypeHandle) }
 }
 
-fn try_expr_to_type(b: &Builder, e : Expr) -> Option<TypeHandle> {
-  use ExprShape::*;
-  use ExprTag::*;
-  let t = match e.shape() {
-    Ref(sym) => {
-      if b.info.get_ref_type(e) == ReferenceType::Global {
-        symbol_to_type(b, sym)
-          .unwrap_or_else(|| panic!("expected type at ({})", e.loc))
-      }
-      else {
-        return None;
-      }
-    }
-    // pointer type
-    List(PtrType, &[inner_type]) => {
-      let inner = expr_to_type(b, inner_type);
-      types::pointer_type(inner)
-    }
-    // function type
-    List(FnType, &[args, ret]) => {
-      let arg_types = fun_arg_types(b, args);
-      let returns = expr_to_type(b, ret);
-      types::function_type(&arg_types, returns)
-    }
-    // c function type
-    List(CFunType, &[args, ret]) => {
-      let arg_types = fun_arg_types(b, args);
-      let returns = expr_to_type(b, ret);
-      types::c_function_type(&arg_types, returns)
-    }
-    // array type
-    List(SizedArrayType, &[element_type, length]) => {
-      let element = expr_to_type(b, element_type);
-      let size = eval_literal_i64(b, length);
-      types::array_type(element, size as u64)
-    }
-    // struct type
-    List(StructType, fields) => {
-      let mut field_names = vec![];
-      let mut field_types = vec![];
-      for f in fields {
-        if let Some(&[name, tag]) = f.as_syntax() {
-          field_names.push(name.as_symbol());
-          field_types.push(expr_to_type(b, tag));
-        }
-        else {
-          panic!("expected field definition at ({})", f.loc)
-        }
-      }
-      types::struct_type(
-        perm_slice_from_vec(field_names),
-        perm_slice_from_vec(field_types))
-    }
-    _ => {
-      return None;
-    },
-  };
-  Some(t)
-}
-
-fn fun_arg_types(b : &Builder, args_node : Expr) -> Vec<TypeHandle> {
+fn fun_arg_types(b : &mut Builder, args_node : Expr) -> Vec<TypeHandle> {
   let mut args = vec![];
   for e in args_node.children() {
     if let ExprShape::List(ExprTag::Syntax, &[_name, tag]) = e.shape() {
-      args.push(expr_to_type(b, tag));
+      args.push(const_expr_to_type(b, tag));
     }
   }
   args
@@ -971,8 +928,8 @@ fn compile_intrinic_op(b : &mut Builder, e : Expr, op : Operator, args : &[Expr]
   panic!("incorrect number of args to operator {} at ({})", op, e.loc)
 }
 
-fn compile_quote(b : &mut Builder, quoted : Expr) -> Var {
-  let e = InstrExpr::LiteralI64(Ptr::to_ptr(quoted) as i64);
+fn compile_expr_value(b : &mut Builder, expr : Expr) -> Var {
+  let e = InstrExpr::LiteralI64(Ptr::to_ptr(expr) as i64);
   let expr_tag = b.env.c.expr_tag;
   push_expr(b, e, expr_tag)
 }

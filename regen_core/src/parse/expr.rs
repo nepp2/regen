@@ -1,5 +1,4 @@
 use std::hash::{Hash, Hasher};
-
 use crate::{bytecode::Operator, ffi_libs::RegenString, perm_alloc::{Ptr, SlicePtr, perm, perm_slice_from_vec}, symbols::Symbol};
 
 #[derive(Clone)]
@@ -28,8 +27,9 @@ pub struct ExprData {
   pub ignore_symbol : bool,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum ExprTag {
+  ConstExpr,
   Def,
   Let,
   Name,
@@ -40,7 +40,8 @@ pub enum ExprTag {
   ArrayAsSlice,
   PtrIndex,
   FieldIndex,
-  LiteralExpr,
+  LiteralSymbol,
+  LiteralVal,
   Call,
   InstrinicOp,
   Cast,
@@ -57,12 +58,8 @@ pub enum ExprTag {
   Fun,
   ArrayLen,
   TypeOf,
-  FnType,
-  CFunType,
-  StructType,
-  PtrType,
-  SizedArrayType,
   TemplateHole,
+  Quote,
   Omitted, // was not specified
   Syntax, // cannot be evaluated
 }
@@ -73,8 +70,6 @@ pub enum Val {
   F64(u64),
   String(Ptr<RegenString>),
   Bool(bool),
-  Expr(Expr),
-  Symbol(Symbol),
   Void,
   Operator(Operator),
 }
@@ -83,7 +78,7 @@ pub enum Val {
 pub enum ExprContent {
   List(SlicePtr<Expr>),
   Sym(Symbol),
-  LiteralVal(Val),
+  Value(Val),
 }
 
 use ExprTag::*;
@@ -93,8 +88,8 @@ impl ExprData {
   pub fn shape(&self) -> ExprShape {
     match self.content {
       List(l) => ExprShape::List(self.tag, l.as_slice()),
-      Sym(s) => ExprShape::Ref(s),
-      LiteralVal(v) => ExprShape::Literal(v),
+      Sym(s) => ExprShape::Sym(s),
+      Value(v) => ExprShape::Literal(v),
     }
   }
 
@@ -118,18 +113,11 @@ impl ExprData {
     if let Sym(s) = self.content {
       return s;
     }
-    panic!("expected symbol")
-  }
-
-  pub fn as_expr_literal(&self) -> Expr {
-    if let LiteralVal(Val::Expr(e)) = self.content {
-      return e;
-    }
-    panic!("expected expr")
+    panic!("expected symbol, found '{}'", self)
   }
 
   pub fn as_operator_literal(&self) -> Operator {
-    if let LiteralVal(Val::Operator(op)) = self.content {
+    if let Value(Val::Operator(op)) = self.content {
       return op;
     }
     panic!("expected operator")
@@ -145,7 +133,7 @@ impl ExprData {
         List(perm_slice_from_vec(children))
       }
       Sym(s) => Sym(s),
-      LiteralVal(v) => LiteralVal(v),
+      Value(v) => Value(v),
     };
     let ed = ExprData {
       tag: self.tag,
@@ -173,7 +161,7 @@ impl Hash for ExprData {
 pub enum ExprShape<'l> {
   List(ExprTag, &'l [Expr]),
   Literal(Val),
-  Ref(Symbol),
+  Sym(Symbol),
 }
 
 use std::fmt;
@@ -207,3 +195,65 @@ impl fmt::Display for SrcLocation {
       self.end - line_start)
   }
 }
+
+impl fmt::Display for Val {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    use Val::*;
+    match self {
+      I64(v) => write!(f, "{}", v)?,
+      F64(v) => write!(f, "{}", v)?,
+      String(v) => write!(f, "{}", v.as_str())?,
+      Bool(v) => write!(f, "{}", v)?,
+      Void => write!(f, "void")?,
+      Operator(v) => write!(f, "{}", v)?,
+    }
+    Ok(())
+  }
+}
+
+fn write_indent(f: &mut fmt::Formatter<'_>, indent : i64) -> fmt::Result {
+  for _ in 0..indent { write!(f, "  ")? }
+  Ok(())
+}
+
+fn write_exprs_linebreak(es : &[Expr], f: &mut fmt::Formatter<'_>, indent : i64) -> fmt::Result {
+  for c in es {
+    writeln!(f)?;
+    write_indent(f, indent)?;
+    write_expr(&c, f, indent)?;
+  }
+  writeln!(f)
+}
+
+fn write_expr(e : &ExprData, f: &mut fmt::Formatter<'_>, indent : i64) -> fmt::Result {
+  match e.content {
+    List(es) => {
+      match e.tag {
+        Do => {
+          write!(f, "{{")?;
+          write_exprs_linebreak(es.as_slice(), f, indent + 1)?;
+          write_indent(f, indent)?;
+          write!(f, "}}")?;
+        }
+        _ => {
+          write!(f, "({:?}", e.tag)?;
+          for c in es {
+            write!(f, " ")?;
+            write_expr(&c, f, indent)?;
+          }
+          write!(f, ")")?;
+        }
+      }
+    }
+    Sym(s) => write!(f, "{}", s)?,
+    Value(v) => write!(f, "{}", v)?,
+  }
+  Ok(())
+}
+
+impl fmt::Display for ExprData {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write_expr(self, f, 0)
+  }
+}
+

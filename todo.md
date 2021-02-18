@@ -20,9 +20,6 @@
 
 * **TODO:** some form of generic support!
 
-notes:
-  * stream renamed to signal (why?)
-
 ### Templates
 
 Templated definitions are functions which run once, and then cache their output.

@@ -1,6 +1,7 @@
 
-use crate::{bytecode::Operator, error::{error_raw}, expr_macros, ffi_libs, perm_alloc::{Ptr, perm, perm_slice, perm_slice_from_vec}, symbols::{Symbol, SymbolTable, to_symbol}};
-use super::{expr::*, lexer::{Token, TokenType, lex}};
+use crate::{bytecode::Operator, error::{error_raw}, ffi_libs, perm_alloc::{Ptr, perm, perm_slice, perm_slice_from_vec}, symbols::{Symbol, SymbolTable, to_symbol}};
+use super::{expr::*, lexer::{Token, TokenType, lex}, templates};
+use templates::{ExprBuilder, template_macro};
 use crate::error::{Error, error};
 use std::collections::{HashSet, HashMap};
 use std::str::FromStr;
@@ -129,7 +130,6 @@ struct ParseState<'l> {
 }
 
 use TokenType::*;
-use expr_macros::{ExprBuilder, template_macro};
 
 fn match_symbol(t : &Token, s : &str) -> bool {
   if t.token_type != TokenType::Symbol { return false }
@@ -272,7 +272,7 @@ impl <'l> ParseState<'l> {
 
   fn literal_expr(&mut self, val : Val, start : usize) -> Expr {
     let loc = self.loc(start);
-    expr(LiteralExpr, ExprContent::LiteralVal(val), loc)
+    expr(LiteralVal, ExprContent::Value(val), loc)
   }
 
   fn omitted_expr(&mut self) -> Expr {
@@ -288,10 +288,10 @@ impl <'l> ParseState<'l> {
     expr(tag, content, loc)
   }
 
-  fn symbol_expr(&mut self, tag : ExprTag, s : Symbol, start : usize) -> Expr {
+  fn symbol_expr(&mut self, s : Symbol, start : usize) -> Expr {
     let loc = self.loc(start);
     let content = ExprContent::Sym(s);
-    expr(tag, content, loc)
+    expr(Name, content, loc)
   }
 }
 
@@ -381,7 +381,9 @@ fn parse_prefix(ps : &mut ParseState) -> Result<Expr, Error> {
       "#" => {
         ps.pop_type(TokenType::Symbol)?;
         let quoted = pratt_parse(ps, *new_precedence)?;
-        Ok(to_template_expr(ps.st, quoted))
+        let mut quote = to_template_expr(ps.st, quoted);
+        quote.loc = ps.loc(start);
+        Ok(quote)
       }
       "*" => {
         ps.pop_type(TokenType::Symbol)?;
@@ -417,7 +419,7 @@ fn parse_infix(ps : &mut ParseState, left_expr : Expr, precedence : i32) -> Resu
     }
     "as" => {
       ps.pop_type(TokenType::Symbol)?;
-      let list = vec![left_expr, pratt_parse(ps, precedence)?];
+      let list = vec![left_expr, parse_const_expr(ps, precedence)?];
       Ok(ps.list_expr(Cast, list, infix_start))
     }
     "=" => {
@@ -449,24 +451,10 @@ fn parse_semicolon_expr_list(ps : &mut ParseState, list : &mut Vec<Expr>) -> Res
   Ok(())
 }
 
-fn parse_tagged_name(ps : &mut ParseState, precedence : i32) -> Result<Expr, Error> {
+fn parse_const_expr(ps : &mut ParseState, precedence : i32) -> Result<Expr, Error> {
   let start = ps.peek_marker();
-  let name = pratt_parse_non_value(ps, precedence)?;
-  ps.pop_syntax(":")?;
-  let type_tag = pratt_parse(ps, precedence)?;
-  Ok(ps.list_expr(Syntax, vec![name, type_tag], start))
-}
-
-fn parse_tagged_name_list(ps : &mut ParseState, list : &mut Vec<Expr>) -> Result<(), Error> {
-  let &precedence = ps.config.expression_separators.get(",").unwrap();
-  while ps.has_tokens() {
-    let t = ps.peek()?;
-    if ps.config.paren_terminators.contains(t.string) { break }
-    let tagged_name = parse_tagged_name(ps, precedence)?;
-    list.push(tagged_name);
-    if !ps.accept(",") { break }
-  }
-  Ok(())
+  let e = pratt_parse(ps, precedence)?;
+  Ok(ps.list_expr(ConstExpr, vec![e], start))
 }
 
 fn parse_comma_expr_list(ps : &mut ParseState, list : &mut Vec<Expr>) -> Result<(), Error> {
@@ -577,7 +565,7 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       let cond = pratt_parse(ps, kp)?;
       let body = parse_block_in_braces(ps)?;
       let nb = ExprBuilder { loc: ps.loc(start), st: ps.st };
-      expr_macros::while_macro(&nb, cond, body)
+      templates::while_macro(&nb, cond, body)
     }
     "for" => {
       ps.pop_type(TokenType::Symbol)?;
@@ -588,7 +576,7 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       let end_val = pratt_parse(ps, kp)?;
       let body = parse_block_in_braces(ps)?;
       let nb = ExprBuilder { loc: ps.loc(start), st: ps.st };
-      expr_macros::for_macro(&nb, loop_var, start_val, end_val, body)
+      templates::for_macro(&nb, loop_var, start_val, end_val, body)
     }
     "fun" => {
       ps.pop_type(TokenType::Symbol)?;
@@ -596,7 +584,7 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       let arg_start = ps.peek_marker();
       let mut args = vec![];
       ps.expect("(")?;
-      parse_tagged_name_list(ps, &mut args)?;
+      parse_function_arg_list(ps, &mut args)?;
       ps.expect(")")?;
 
       let mut es = vec![ps.list_expr(Syntax, args, arg_start)];
@@ -625,10 +613,15 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       let value = pratt_parse(ps, kp)?;
       ps.list_expr(Let, vec![name, value], start)
     }
+    "quote" => {
+      ps.pop_type(TokenType::Symbol)?;
+      let quoted = pratt_parse(ps, kp)?;
+      ps.list_expr(Quote, vec![quoted], start)
+    }
     "init" => {
       ps.pop_type(TokenType::Symbol)?;
       let pp = paren_precedence(ps);
-      let type_name = pratt_parse(ps, pp)?;
+      let type_name = parse_const_expr(ps, pp)?;
       let mut es = vec![type_name];
       ps.expect("(")?;
       parse_comma_expr_list(ps, &mut es)?;
@@ -685,18 +678,8 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
     }
     "sym" => {
       ps.pop_type(TokenType::Symbol)?;
-      let st = ps.st;
-      let s = ps.pop_type(Symbol)?.string;
-      let sym = to_symbol(st, s);
-      ps.literal_expr(Val::Symbol(sym), start)
-    }
-    "struct" => {
-      ps.pop_type(TokenType::Symbol)?;
-      ps.expect("{")?;
-      let mut fields = vec![];
-      parse_tagged_name_list(ps, &mut fields)?;
-      ps.expect("}")?;
-      ps.list_expr(StructType, fields, start)
+      let sym = pratt_parse_non_value(ps, kp)?;
+      ps.list_expr(LiteralSymbol, vec![sym], start)
     }
     "label" => {
       ps.pop_type(TokenType::Symbol)?;
@@ -704,10 +687,22 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       let exprs = parse_new_scope(ps, kp)?;
       ps.list_expr(LabelledBlock, vec![label, exprs], start)
     }
+    "struct" => {
+      ps.pop_type(TokenType::Symbol)?;
+      ps.expect("{")?;
+      let mut names = vec![];
+      let mut types = vec![];
+      parse_symbol_type_tuple(ps, &mut names, &mut types)?;
+      ps.expect("}")?;
+      let loc = ps.loc(start);
+      let nb = ExprBuilder { loc, st: ps.st };
+      templates::struct_type_macro(&nb, names, types)
+    }
     "ptr" => {
       ps.pop_type(TokenType::Symbol)?;
+      let f = ps.symbol_expr(to_symbol(ps.st, "ptr_type"), start);
       let inner_type = pratt_parse(ps, kp)?;
-      ps.list_expr(PtrType, vec![inner_type], start)
+      ps.list_expr(Call, vec![f, inner_type], start)
     }
     "fn" => {
       parse_function_type(ps, false)?
@@ -724,11 +719,13 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
     }
     "sized_array" => {
       ps.pop_type(TokenType::Symbol)?;
-      let mut es = vec![];
+      let f = ps.symbol_expr(to_symbol(ps.st, "sized_array_type"), start);
       ps.expect("(")?;
-      parse_comma_expr_list(ps, &mut es)?;
+      let element = pratt_parse(ps, kp)?;
+      ps.expect(",")?;
+      let length = pratt_parse(ps, kp)?;
       ps.expect(")")?;
-      ps.list_expr(SizedArrayType, es, start)
+      ps.list_expr(Call, vec![f, element, length], start)
     }
     "slice" => {
       ps.pop_type(TokenType::Symbol)?;
@@ -737,29 +734,63 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       ps.expect(")")?;
       let loc = ps.loc(start);
       let nb = ExprBuilder { loc, st: ps.st };
-      expr_macros::slice_type_macro(&nb, element_type)
+      templates::slice_type_macro(&nb, element_type)
     }
     _ => return Ok(None),
   };
   Ok(Some(expr))
 }
 
+fn parse_function_arg_list(ps : &mut ParseState, args : &mut Vec<Expr>) -> Result<(), Error> {
+  let &precedence = ps.config.expression_separators.get(",").unwrap();
+  while ps.has_tokens() {
+    let t = ps.peek()?;
+    if ps.config.paren_terminators.contains(t.string) { break }
+    let start = ps.peek_marker();
+    let name = pratt_parse_non_value(ps, precedence)?;
+    ps.pop_syntax(":")?;
+    let tag = parse_const_expr(ps, precedence)?;
+    args.push(ps.list_expr(Syntax, vec![name, tag], start));
+    if !ps.accept(",") { break }
+  }
+  Ok(())
+}
+
+fn parse_symbol_type_tuple(ps : &mut ParseState, symbols : &mut Vec<Expr>, types : &mut Vec<Expr>) -> Result<(), Error> {
+  let &precedence = ps.config.expression_separators.get(",").unwrap();
+  while ps.has_tokens() {
+    let t = ps.peek()?;
+    if ps.config.paren_terminators.contains(t.string) { break }
+    let symbol = {
+      let start = ps.peek_marker();
+      let sym = pratt_parse_non_value(ps, precedence)?;
+      ps.list_expr(LiteralSymbol, vec![sym], start)
+    };
+    symbols.push(symbol);
+    ps.pop_syntax(":")?;
+    types.push(parse_const_expr(ps, precedence)?);
+    if !ps.accept(",") { break }
+  }
+  Ok(())
+}
+
 fn parse_function_type(ps : &mut ParseState, is_cfun : bool) -> Result<Expr, Error> {
   let start = ps.peek_marker();
   let kp = keyword_precedence(ps);
   ps.pop_type(TokenType::Symbol)?;
-  let mut es = vec![];
   // arguments
   ps.expect("(")?;
-  let mut args = vec![];
-  parse_tagged_name_list(ps, &mut args)?;
-  es.push(ps.list_expr(Syntax, args, start));
+  let mut symbols = vec![];
+  let mut types = vec![];
+  parse_symbol_type_tuple(ps, &mut symbols, &mut types)?;
   ps.expect(")")?;
   // return type
   ps.expect("=>")?;
-  es.push(pratt_parse(ps, kp)?);
-  let tag = if is_cfun { CFunType} else { FnType };
-  Ok(ps.list_expr(tag, es, start))
+  let ret = pratt_parse(ps, kp)?;
+  // apply template
+  let loc = ps.loc(start);
+  let nb = ExprBuilder { loc, st: ps.st };
+  Ok(templates::fn_type_macro(&nb, types, ret, is_cfun))
 }
 
 fn parse_expression_term(ps : &mut ParseState) -> Result<Expr, Error> {
@@ -816,7 +847,7 @@ fn parse_expression_term(ps : &mut ParseState) -> Result<Expr, Error> {
           let st = ps.st;
           let s = ps.pop_type(Symbol)?.string;
           let sym = to_symbol(st, s);
-          Ok(ps.symbol_expr(Name, sym, start))
+          Ok(ps.symbol_expr(sym, start))
         }
       }
     }
@@ -877,6 +908,7 @@ fn to_template_expr(st : SymbolTable, quoted : Expr) -> Expr {
     template_macro(&nb, quoted, template_args)
   }
   else {
-    expr(LiteralExpr, ExprContent::LiteralVal(Val::Expr(quoted)), quoted.loc)
+    let content = ExprContent::List(perm_slice(&[quoted]));
+    expr(Quote, content, quoted.loc)
   }
 }

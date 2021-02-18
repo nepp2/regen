@@ -67,8 +67,8 @@ impl fmt::Display for DebugDisplay {
         write!(f, "{}", v)
       }
       Kind::Expr => {
-        let n = unsafe { *(self.p as *const Expr) };
-        write!(f, "{}", n.loc.src_snippet())
+        let e = unsafe { *(self.p as *const Expr) };
+        write!(f, "{}", e)
       }
     }
   }

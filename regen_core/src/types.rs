@@ -63,7 +63,7 @@ impl PartialEq for TypeInfo {
 #[repr(C)]
 pub struct ArrayInfo {
   pub inner : TypeHandle,
-  pub length : u64,
+  pub length : i64,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -102,6 +102,7 @@ pub struct CoreTypes {
   pub string_tag : TypeHandle,
   pub expr_tag : TypeHandle,
   pub expr_slice_tag : TypeHandle,
+  pub symbol_tag : TypeHandle,
 
   pub core_types : Vec<(&'static str, TypeHandle)>,
 }
@@ -210,9 +211,9 @@ pub fn slice_type(c : &CoreTypes, st : SymbolTable, element_type : TypeHandle) -
   )
 }
 
-pub fn array_type(inner : TypeHandle, length : u64) -> TypeHandle {
+pub fn array_type(inner : TypeHandle, length : i64) -> TypeHandle {
   let info = Box::into_raw(Box::new(ArrayInfo { inner, length })) as u64;
-  new_type(Kind::Array, length * inner.size_of, info)
+  new_type(Kind::Array, length as u64 * inner.size_of, info)
 }
 
 pub fn pointer_type(inner : TypeHandle) -> TypeHandle {
@@ -261,6 +262,9 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
 
   let type_tag = new_type(Kind::Type, 8, 0);
 
+  let TODO = (); // give symbol a proper type
+  let symbol_tag = u64_tag;
+
   let string_tag = struct_type(
     perm_slice(&[data_sym, len_sym]),
     perm_slice(&[pointer_type(u8_tag), u64_tag]),
@@ -274,7 +278,7 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
   CoreTypes {
     type_tag, i64_tag, i32_tag, u64_tag, u32_tag, u16_tag,
     u8_tag, void_tag, bool_tag, string_tag,
-    expr_tag, expr_slice_tag,
+    expr_tag, expr_slice_tag, symbol_tag,
 
     core_types:
       vec![
@@ -292,6 +296,7 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
         ("expr", expr_tag),
         ("node_slice", expr_slice_tag),
         ("string", string_tag),
+        ("symbol", symbol_tag),
       ],
   }
 }

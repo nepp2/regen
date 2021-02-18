@@ -1,3 +1,4 @@
+use compile::ConstExprValue;
 use parse::{ExprShape, ExprTag};
 
 /// Bytecode interpreter
@@ -15,7 +16,7 @@ use crate::{
   ffi_ccall,
   parse::{self, Expr},
   perm_alloc::{Ptr, SlicePtr},
-  semantic::{self, SemanticInfo},
+  semantic::{self, ReferenceInfo},
   symbols::Symbol,
   types::{self, TypeHandle, Primitive}
 };
@@ -58,11 +59,11 @@ pub fn interpret_function(f : *const Function, args : &[u64], env : Env, return_
   interpreter_loop(&mut shadow_stack, env);
 }
 
-pub fn interpret_def_expr(name : Symbol, initialiser : Expr, env : Env, info : Ptr<SemanticInfo>) {
-  let f = compile::compile_expr_to_function(env, info, initialiser);
+pub fn interpret_def_expr(name : Symbol, initialiser : Expr, env : Env, info : Ptr<ReferenceInfo>) {
+  env::set_active_definition(env, Some(name));
+  let f = compiler_expr_to_function(env, info, initialiser);
   let def_type = types::type_as_function(&f.t).unwrap().returns;
   let def_ptr = env::env_alloc_global(env, name, def_type);
-  env::set_active_definition(env, Some(name));
   interpret_function(&f, &[], env, Some(def_ptr));
   env::set_active_definition(env, None);
 }
@@ -74,8 +75,31 @@ pub fn interpret_def(name : Symbol, initialiser : Expr, env : Env) {
 
 pub fn interpret_expr(expr : Expr, env : Env) {
   let info = semantic::get_semantic_info(expr);
-  let f = compile::compile_expr_to_function(env, info, expr);
+  let f = compiler_expr_to_function(env, info, expr);
   interpret_function(&f, &[], env, None);
+}
+
+fn eval_const_expr(env : Env, e : Expr) -> ConstExprValue {
+  let info = semantic::get_semantic_info(e);
+  let f = compiler_expr_to_function(env, info, e);
+  let expr_type = types::type_as_function(&f.t).unwrap().returns;
+  let TODO = (); // it's wasteful to allocate for types that are 64bits wide or smaller
+  let ptr = {
+    let layout = std::alloc::Layout::from_size_align(expr_type.size_of as usize, 8).unwrap();
+    unsafe { std::alloc::alloc(layout) as *mut () }
+  };
+  interpret_function(&f, &[], env, Some(ptr));
+  ConstExprValue { e, t: expr_type, ptr }
+}
+
+pub fn compiler_expr_to_function(env : Env, info : Ptr<ReferenceInfo>, expr : Expr) -> Function {
+  let mut const_values = vec![];
+  let TODO = (); // compiling and evaluating these separately is slow and wasteful
+  let const_exprs = semantic::get_const_exprs(expr);
+  for e in const_exprs {
+    const_values.push(eval_const_expr(env, e));
+  }
+  compile::compile_expr_to_function(env, info, &const_values, expr)
 }
 
 pub fn interpret_file(module_name : &str, code : &str, env : Env) {
