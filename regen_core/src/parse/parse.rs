@@ -457,15 +457,25 @@ fn parse_const_expr(ps : &mut ParseState, precedence : i32) -> Result<Expr, Erro
   Ok(ps.list_expr(ConstExpr, vec![e], start))
 }
 
-fn parse_comma_expr_list(ps : &mut ParseState, list : &mut Vec<Expr>) -> Result<(), Error> {
+fn parse_comma_list(
+  ps : &mut ParseState,
+  list : &mut Vec<Expr>,
+  expr_parser : fn(&mut ParseState, i32) -> Result<Expr, Error>
+) -> Result<(), Error>
+{
   let &precedence = ps.config.expression_separators.get(",").unwrap();
   while ps.has_tokens() {
     let t = ps.peek()?;
     if ps.config.paren_terminators.contains(t.string) { break }
-    list.push(pratt_parse(ps, precedence)?);
+    let e = expr_parser(ps, precedence)?;
+    list.push(e);
     if !ps.accept(",") { break }
   }
   Ok(())
+}
+
+fn parse_comma_expr_list(ps : &mut ParseState, list : &mut Vec<Expr>) -> Result<(), Error> {
+  parse_comma_list(ps, list, pratt_parse)
 }
 
 fn peek_statement_terminated(ps : &ParseState) -> bool {
@@ -582,29 +592,51 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       ps.pop_type(TokenType::Symbol)?;
       // arguments
       let arg_start = ps.peek_marker();
-      let mut args = vec![];
+      let mut arg_exprs = vec![];
       ps.expect("(")?;
-      parse_function_arg_list(ps, &mut args)?;
+      parse_function_arg_list(ps, &mut arg_exprs)?;
       ps.expect(")")?;
-
-      let mut es = vec![ps.list_expr(Syntax, args, arg_start)];
+      let args = ps.list_expr(Syntax, arg_exprs, arg_start);
       // return type
-      if ps.accept("=>") {
-        es.push(pratt_parse(ps, kp)?);
+      let ret = if ps.accept("=>") {
+        pratt_parse(ps, kp)?
       }
       else {
-        es.push(ps.omitted_expr());
-      }
+        ps.omitted_expr()
+      };
       // body
-      es.push(parse_block_in_braces(ps)?);
-      ps.list_expr(Fun, es, start)
+      let body = parse_block_in_braces(ps)?;
+      ps.list_expr(Fun, vec![args, ret, body], start)
     }
     "def" => {
       ps.pop_type(TokenType::Symbol)?;
       let name = pratt_parse_non_value(ps, kp)?;
+      // arguments
+      let arg_start = ps.peek_marker();
+      let mut arg_exprs = vec![];
+      if ps.accept("[") {
+        parse_comma_list(ps, &mut arg_exprs, pratt_parse_non_value)?; // need to explicitly ignore symbols
+        ps.expect("]")?;
+      }
+      let args = ps.list_expr(Syntax, arg_exprs, arg_start);
+      // body
       ps.pop_syntax("=")?;
       let value = pratt_parse(ps, kp)?;
-      ps.list_expr(Def, vec![name, value], start)
+      if value.tag == Do {
+        let mut def_exprs = vec![];
+        let mut body_exprs = vec![];
+        for &c in value.children() {
+          if c.tag == Def { def_exprs.push(c); }
+          else { body_exprs.push(c); }
+        }
+        let defs = ps.list_expr(Syntax, def_exprs, start);
+        let body = ps.list_expr(Do, body_exprs, start);
+        ps.list_expr(Def, vec![name, args, defs, body], start)
+      }
+      else {
+        let defs = ps.list_expr(Syntax, vec![], start);
+        ps.list_expr(Def, vec![name, args, defs, value], start)
+      }
     }
     "let" => {
       ps.pop_type(TokenType::Symbol)?;

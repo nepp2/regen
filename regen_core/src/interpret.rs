@@ -1,5 +1,4 @@
 use compile::ConstExprValue;
-use parse::{ExprShape, ExprTag};
 
 /// Bytecode interpreter
 ///
@@ -14,7 +13,7 @@ use crate::{
   debug,
   env::{self, Env},
   ffi_ccall,
-  parse::{self, Expr},
+  parse::Expr,
   perm_alloc::{Ptr, SlicePtr},
   semantic::{self, ReferenceInfo},
   symbols::Symbol,
@@ -100,20 +99,6 @@ pub fn compiler_expr_to_function(env : Env, info : Ptr<ReferenceInfo>, expr : Ex
     const_values.push(eval_const_expr(env, e));
   }
   compile::compile_expr_to_function(env, info, &const_values, expr)
-}
-
-pub fn interpret_file(module_name : &str, code : &str, env : Env) {
-  let es = parse::parse_module(env.st, module_name, code).unwrap();
-  for e in es {
-    match e.shape() {
-      ExprShape::List(ExprTag::Def, &[name, expr]) => {
-        interpret_def(name.as_symbol(), expr, env);
-      }
-      _ => {
-        interpret_expr(e, env);
-      }
-    }
-  }
 }
   
 struct Frame {

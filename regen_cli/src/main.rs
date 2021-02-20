@@ -7,7 +7,7 @@ mod hotload_watcher;
 #[cfg(test)]
 mod test;
 
-use regen_core::{interpret::interpret_file, new_env};
+use regen_core::{new_env, hotload::{self, HotloadState}};
 use std::fs;
 
 pub fn run_file(path : &str) {
@@ -16,7 +16,8 @@ pub fn run_file(path : &str) {
     .expect("Something went wrong reading the file");
   let env = new_env();
   ffi_libs::bind_libs(env);
-  interpret_file(path, &code, env);
+  let mut hs = HotloadState::new();
+  hotload::hotload_changes(path, &code, env, &mut hs);
 }
 
 fn main(){
@@ -26,15 +27,14 @@ fn main(){
     ["hotload", path] => {
       hotload_watcher::watch_file(path)
     }
-    ["watch", path] => {
-      watcher::watch(path.as_ref())
-    }
-    ["watch"] => watcher::watch("examples/scratchpad.gen"),
     ["run", path] => {
       run_file(path);
     }
+    [path] => {
+      hotload_watcher::watch_file(path);
+    }
     [] => {
-      run_file("examples/scratchpad.gen");
+      hotload_watcher::watch_file("examples/scratchpad.gen");
     },
     args => {
       println!("unrecognised arguments {:?}", args);

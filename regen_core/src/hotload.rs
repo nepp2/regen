@@ -137,6 +137,11 @@ fn hotload_def(
   new_defs.insert(name, new_def_state);
 }
 
+pub fn interpret_module(module_name : &str, code : &str, env : Env) {
+  let mut hs = HotloadState::new();
+  hotload_changes(module_name, &code, env, &mut hs);
+}
+
 pub fn hotload_changes(module_name : &str, code : &str, env : Env, hs : &mut HotloadState) {
   // Parse file
   let exprs = {
@@ -151,7 +156,7 @@ pub fn hotload_changes(module_name : &str, code : &str, env : Env, hs : &mut Hot
   let mut new_defs = HashMap::new();
   for e in exprs {
     match e.shape() {
-      ExprShape::List(ExprTag::Def, &[name, value_expr]) => {
+      ExprShape::List(ExprTag::Def, &[name, _args, _defs, value_expr]) => {
         let name = name.as_symbol();
         hotload_def(hs, env, name, value_expr, &mut new_defs);
       }

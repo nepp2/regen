@@ -1,44 +1,14 @@
 
-print 5;
+// GRAPHS ARE THE ANSWER
 
-print {
-  fn(a : i64, b : i64) => i64
+def c = 20;
+
+def v = {
+  def a = 6;
+
+  def b = 7;
+  
+  a + b + c
 };
 
-print ptr i64;
-
-print {
-  struct { a : i64, b : i64 }
-}
-
-print typeof [2, 3];
-
-print sized_array(i64, 2);
-
-// def add = fun(a : i64, b : i64) {
-//   a + b
-// };
-
-// print add(5, 6);
-
-// {
-//   let a = #10;
-//   print #(5 + $a);
-// }
-
-// def add = fun(t : expr) => expr {
-//   #(
-//     fun(a : $t, b : $t) {
-//       a + b
-//     }
-//   )
-// };
-
-// def add_i64 = add(#i64);
-
-// print add_i64;
-
-// def add_i32 = embed add(#i32);
-
-// print add_i64(5, 9);
-// print add_i32(5 as i32, 9 as i32);
+print v;

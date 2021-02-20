@@ -109,6 +109,10 @@ pub fn get_const_exprs(expr : Expr) -> Vec<Expr> {
 
 fn find_const_exprs(const_exprs : &mut Vec<Expr>, expr : Expr) {
   match expr.shape() {
+    List(Def, _) => {
+      // Defs must be evalated in a different environment
+      return;
+    }
     List(ConstExpr, &[c]) => {
       const_exprs.push(c);
       return;
