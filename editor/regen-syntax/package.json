@@ -1,0 +1,27 @@
+{
+    "name": "regen-syntax",
+    "displayName": "regen-syntax",
+    "description": "syntax highlighting for the regen language",
+    "version": "0.0.1",
+    "engines": {
+        "vscode": "^1.53.0"
+    },
+    "categories": [
+        "Language Packs"
+    ],
+    "contributes": {
+        "languages": [
+            {
+            "id": "regen",
+            "extensions": [".gen"]
+            }
+        ],
+        "grammars": [
+            {
+            "language": "regen",
+            "scopeName": "source.regen",
+            "path": "./regen.tmGrammar.json"
+            }
+        ]
+        }
+}

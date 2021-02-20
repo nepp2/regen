@@ -1,0 +1,171 @@
+{
+  "fileTypes": [
+    "gen"
+  ],
+  "name": "regen",
+  "patterns": [
+    {
+      "include": "#main"
+    }
+  ],
+  "scopeName": "source.regen",
+  "uuid": "",
+  "repository": {
+    "main": {
+      "patterns": [
+        {
+          "match": "(def|fun|if|while|for|graph|let)",
+          "name": "keyword.regen"
+        },
+        {
+          "match": "(\\b[a-zA-Z][a-zA-Z0-9_]*)",
+          "name": "symbol.regen"
+        },
+        {
+          "include": "#multi_line_comment"
+        },
+        {
+          "match": "(//.*)",
+          "name": "comment.regen"
+        },
+        {
+          "include": "#number"
+        },
+        {
+          "begin": "(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.regen"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#main__1"
+            }
+          ],
+          "end": "(\\})",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.regen"
+            }
+          }
+        },
+        {
+          "begin": "(\\[)",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.regen"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#main__2"
+            }
+          ],
+          "end": "(\\])",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.regen"
+            }
+          }
+        },
+        {
+          "begin": "(\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.regen"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#main__3"
+            }
+          ],
+          "end": "(\\))",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.regen"
+            }
+          }
+        },
+        {
+          "match": "(;|:|\\+|=|>|<|,|\\*|/)",
+          "name": "punctuation.regen"
+        },
+        {
+          "begin": "(\\\")",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.regen"
+            }
+          },
+          "contentName": "text.regen",
+          "end": "(\\\")",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.regen"
+            }
+          }
+        },
+        {
+          "match": "([^\\s])",
+          "name": "invalid.regen"
+        }
+      ]
+    },
+    "main__1": {
+      "patterns": [
+        {
+          "include": "#main"
+        }
+      ]
+    },
+    "main__2": {
+      "patterns": [
+        {
+          "include": "#main"
+        }
+      ]
+    },
+    "main__3": {
+      "patterns": [
+        {
+          "include": "#main"
+        }
+      ]
+    },
+    "main__4": {
+      "patterns": []
+    },
+    "multi_line_comment": {
+      "patterns": [
+        {
+          "begin": "(/\\*)",
+          "beginCaptures": {
+            "1": {
+              "name": "comment.regen"
+            }
+          },
+          "contentName": "comment.regen",
+          "end": "(\\*/)",
+          "endCaptures": {
+            "1": {
+              "name": "comment.regen"
+            }
+          }
+        }
+      ]
+    },
+    "multi_line_comment__1": {
+      "patterns": []
+    },
+    "number": {
+      "patterns": [
+        {
+          "match": "([\\x{002b}-]?([0-9]*[.])?[0-9]+f?)",
+          "name": "constant.numeric.regen"
+        }
+      ]
+    }
+  }
+}
