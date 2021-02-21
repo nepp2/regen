@@ -59,7 +59,7 @@ fn find_refs(
 {
   match expr.shape() {
     Sym(name) => {
-      if !expr.ignore_symbol {
+      if !expr.metadata.ignore_symbol {
         if locals.iter().find(|&&n| n == name).is_some() {
           push_ref(refs, expr, Local);
         }

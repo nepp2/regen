@@ -303,7 +303,7 @@ fn compile_function_def(
       arg_types.push(t);
     }
     else {
-      panic!("expected function argument definition at ({})", a.loc)
+      panic!("expected function argument definition at ({})", a.loc())
     }
   }
   let expected_return = return_tag.map(|e| const_expr_to_type(&mut b, e));
@@ -356,7 +356,7 @@ fn compile_if_else(b : &mut Builder, cond_expr : Expr, then_expr : Expr, else_ex
   let else_seq = create_sequence(b, "else");
   let exit_seq = create_sequence(b, "exit");
   let cond = compile_expr_to_var(b, cond_expr).id;
-  assert_type(cond_expr.loc, cond.t, b.env.c.bool_tag);
+  assert_type(cond_expr.loc(), cond.t, b.env.c.bool_tag);
   b.bc.instrs.push(Instr::CJump{ cond, then_seq, else_seq });
   set_current_sequence(b, then_seq);
   let then_result = compile_expr(b, then_expr);
@@ -407,7 +407,7 @@ fn compile_expr_to_ref(b : &mut Builder, e : Expr) -> Ref {
     r
   }
   else {
-    panic!("expected value, found none at ({})", e.loc);
+    panic!("expected value, found none at ({})", e.loc());
   }
 }
 
@@ -498,7 +498,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
             Some(pointer_to_locator(v, true))
           }
           else {
-            panic!("symbol '{}' not defined ({})", sym, e.loc)
+            panic!("symbol '{}' not defined ({})", sym, e.loc())
           }
         }
       }
@@ -540,7 +540,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
         let v = compile_expr_to_var(b, *e);
         if v.t != element_type {
           panic!("expected element of type {} and found type {}, at {}",
-            element_type, v.t, e.loc);
+            element_type, v.t, e.loc());
         }
         element_values.push(v.id);
       }
@@ -571,7 +571,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
         info
       }
       else {
-        panic!("expected array at ({})", array.loc)
+        panic!("expected array at ({})", array.loc())
       };
       let array_ptr = v.get_address(b);
       let element_ptr_type = types::pointer_type(info.inner);
@@ -604,18 +604,18 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       }
       else {
         panic!("expected struct, found {} at ({})",
-          t, e.loc);
+          t, e.loc());
       };
       if field_vals.len() != info.field_types.len() {
         panic!("expected {} fields, found {}, at ({})",
-          info.field_types.len(), field_vals.len(), e.loc);
+          info.field_types.len(), field_vals.len(), e.loc());
       }
       let mut field_values = Vec::with_capacity(field_vals.len());
       for (i, f) in field_vals.iter().enumerate() {
         let v = compile_expr_to_var(b, *f);
         if info.field_types[i] != v.t  {
           panic!("expected arg of type {}, found type {}, at ({})",
-            info.field_types[i], v.t, f.loc);
+            info.field_types[i], v.t, f.loc());
         }
         field_values.push(v.id);
       }
@@ -628,13 +628,13 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       let struct_addr = struct_ref.get_address(b).id;
       let info =
         types::type_as_struct(&struct_ref.t)
-        .unwrap_or_else(|| panic!("expected struct, found {} at ({})", struct_ref.t, e.loc));
+        .unwrap_or_else(|| panic!("expected struct, found {} at ({})", struct_ref.t, e.loc()));
       let i = {
         let sym = field_name.as_symbol();
         info.field_names.as_slice().iter()
           .position(|n| *n == sym)
           .unwrap_or_else(||
-            panic!("no such field '{}' at ({})", sym, field_name.loc)
+            panic!("no such field '{}' at ({})", sym, field_name.loc())
           ) as u64
       };
       let field_type = info.field_types[i as usize];
@@ -678,7 +678,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       let then_seq = create_sequence(b, "then");
       let exit_seq = create_sequence(b, "exit");
       let cond_var = compile_expr_to_var(b, cond).id;
-      assert_type(cond.loc, cond_var.t, b.env.c.bool_tag);
+      assert_type(cond.loc(), cond_var.t, b.env.c.bool_tag);
       b.bc.instrs.push(Instr::CJump{ cond: cond_var, then_seq, else_seq: exit_seq });
       set_current_sequence(b, then_seq);
       compile_expr(b, then_expr);
@@ -718,7 +718,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     // debug
     List(Debug, &[v]) => {
       let local = compile_expr_to_var(b, v);
-      b.bc.instrs.push(Instr::Debug(v.loc, local.id, local.t));
+      b.bc.instrs.push(Instr::Debug(v.loc(), local.id, local.t));
       None
     }
     // typeof
@@ -761,7 +761,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       Some(compile_expr_value(b, e.deep_clone()).to_ref())
     }
     _ => {
-      panic!("encountered invalid expression '{}' at ({})", e.loc.src_snippet(), e.loc)
+      panic!("encountered invalid expression '{}' at ({})", e.loc().src_snippet(), e.loc())
     }
   }
 }
@@ -782,7 +782,7 @@ fn const_value(b : &mut Builder, e : Expr) -> ConstExprValue {
     }
     return cev;
   }
-  panic!("expected const expression, found '{}' at ({})", e, e.loc)
+  panic!("expected const expression, found '{}' at ({})", e, e.loc())
 }
 
 fn const_expr_to_i64(b : &mut Builder, e : Expr) -> i64 {
@@ -818,22 +818,22 @@ fn compile_function_call(b : &mut Builder, e : Expr, function : Expr, args : &[E
   }
   else {
     panic!("expected function, found {} at ({})",
-      f.t, function.loc);
+      f.t, function.loc());
   };
   if args.len() != info.args.len() {
     panic!("expected {} args, found {}, at ({})",
-      info.args.len(), args.len(), e.loc);
+      info.args.len(), args.len(), e.loc());
   }
   let mut arg_values = vec![];
   for i in 0..args.len() {
     let arg = args[i];
     let v = compile_expr_to_var(b, arg);
     if info.args[i] != v.t  {
-      panic!("expected arg of type {}, found type {}, at ({})", info.args[i], v.t, arg.loc);
+      panic!("expected arg of type {}, found type {}, at ({})", info.args[i], v.t, arg.loc());
     }
     if info.c_function && v.t.size_of > 8 {
       panic!("types passed to a C function must be 64 bits wide or less; found type {} of width {} as ({})",
-        v.t, v.t.size_of, arg.loc);
+        v.t, v.t.size_of, arg.loc());
     }
     arg_values.push(v.id);
   }
@@ -914,7 +914,7 @@ fn compile_intrinic_op(b : &mut Builder, e : Expr, op : Operator, args : &[Expr]
       return push_expr(b, e, t);
     }
     panic!("no binary op {} for types {} and {} at ({})",
-      op, v1.t, v2.t, e.loc)
+      op, v1.t, v2.t, e.loc())
   }
   if let [v1] = args {
     let v1 = compile_expr_to_var(b, *v1);
@@ -923,9 +923,9 @@ fn compile_intrinic_op(b : &mut Builder, e : Expr, op : Operator, args : &[Expr]
       return push_expr(b, e, t);
     }
     panic!("no unary op {} for type {} at ({})",
-      op, v1.t, e.loc)
+      op, v1.t, e.loc())
   }
-  panic!("incorrect number of args to operator {} at ({})", op, e.loc)
+  panic!("incorrect number of args to operator {} at ({})", op, e.loc())
 }
 
 fn compile_expr_value(b : &mut Builder, expr : Expr) -> Var {

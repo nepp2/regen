@@ -137,7 +137,8 @@ fn match_symbol(t : &Token, s : &str) -> bool {
 }
 
 fn expr(tag : ExprTag, content : ExprContent, loc : SrcLocation) -> Expr {
-  let ed = ExprData { tag, content, loc, ignore_symbol : false };
+  let metadata = ExprMetadata { loc, ignore_symbol : false };
+  let ed = ExprData { tag, content, metadata };
   perm(ed)
 }
 
@@ -297,7 +298,7 @@ impl <'l> ParseState<'l> {
 
 fn pratt_parse_non_value(ps : &mut ParseState, precedence : i32) -> Result<Expr, Error> {
   let mut e = pratt_parse(ps, precedence)?;
-  e.ignore_symbol = true;
+  e.metadata.ignore_symbol = true;
   Ok(e)
 }
 
@@ -348,7 +349,7 @@ fn pratt_parse(ps : &mut ParseState, precedence : i32) -> Result<Expr, Error> {
 }
 
 fn parse_paren_infix(ps : &mut ParseState, left_expr : Expr, first_arg : Option<Expr>) -> Result<Expr, Error> {
-  let start = left_expr.loc.start;
+  let start = left_expr.loc().start;
   let t = ps.peek()?;
   let (operation, start_paren) = match t.string {
     "(" => (Call, "("),
@@ -382,7 +383,7 @@ fn parse_prefix(ps : &mut ParseState) -> Result<Expr, Error> {
         ps.pop_type(TokenType::Symbol)?;
         let quoted = pratt_parse(ps, *new_precedence)?;
         let mut quote = to_template_expr(ps.st, quoted);
-        quote.loc = ps.loc(start);
+        quote.metadata.loc = ps.loc(start);
         Ok(quote)
       }
       "*" => {
@@ -404,7 +405,7 @@ fn parse_prefix(ps : &mut ParseState) -> Result<Expr, Error> {
 }
 
 fn parse_infix(ps : &mut ParseState, left_expr : Expr, precedence : i32) -> Result<Expr, Error> {
-  let infix_start = left_expr.loc.start;
+  let infix_start = left_expr.loc().start;
   let t = ps.peek()?;
   match t.string {
     "." => {
@@ -489,7 +490,7 @@ fn peek_statement_terminated(ps : &ParseState) -> bool {
 }
 
 fn parse_list(ps : &mut ParseState, mut list : Vec<Expr>, separator : &str, tag : ExprTag) -> Result<Expr, Error> {
-  let start = list.first().map(|e| e.loc.start).unwrap_or_else(|| ps.peek_marker());
+  let start = list.first().map(|e| e.loc().start).unwrap_or_else(|| ps.peek_marker());
   match separator {
     ";" => parse_semicolon_expr_list(ps, &mut list)?,
     "," => parse_comma_expr_list(ps, &mut list)?,
@@ -936,11 +937,11 @@ fn to_template_expr(st : SymbolTable, quoted : Expr) -> Expr {
   let mut template_args = vec![];
   find_template_arguments(quoted, &mut template_args);
   if template_args.len() > 0 {
-    let nb = ExprBuilder { loc: quoted.loc, st };
+    let nb = ExprBuilder { loc: quoted.loc(), st };
     template_macro(&nb, quoted, template_args)
   }
   else {
     let content = ExprContent::List(perm_slice(&[quoted]));
-    expr(Quote, content, quoted.loc)
+    expr(Quote, content, quoted.loc())
   }
 }

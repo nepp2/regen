@@ -1,6 +1,6 @@
 
 use crate::{parse::{self, Expr, ExprShape}, perm_alloc, symbols};
-use parse::{ExprContent, ExprData, ExprTag, SrcLocation};
+use parse::{ExprContent, ExprData, ExprMetadata, ExprTag, SrcLocation};
 use perm_alloc::{perm, perm_slice_from_vec};
 use symbols::{SymbolTable};
 
@@ -13,7 +13,7 @@ pub fn template(e : Expr, args : &[Expr]) -> Expr {
         let mut new_e = args[*next_arg].deep_clone();
         *next_arg += 1;
         // preserve semantic information from the template expression
-        new_e.ignore_symbol = e.ignore_symbol;
+        new_e.metadata.ignore_symbol = e.metadata.ignore_symbol;
         new_e
       }
       List(_, cs) => {
@@ -24,8 +24,7 @@ pub fn template(e : Expr, args : &[Expr]) -> Expr {
         let ed = ExprData {
           tag: e.tag,
           content: ExprContent::List(perm_slice_from_vec(children)),
-          loc: e.loc,
-          ignore_symbol: e.ignore_symbol,
+          metadata: e.metadata,
         };
         perm(ed)
       },
@@ -42,7 +41,7 @@ pub struct ExprBuilder {
 impl ExprBuilder {
 
   fn set_loc(&self, mut e : Expr) {
-    e.loc = self.loc;
+    e.metadata.loc = self.loc;
     for &c in e.children() { self.set_loc(c) }
   }
 
@@ -53,7 +52,14 @@ impl ExprBuilder {
   }
 
   fn expr(&self, tag : ExprTag, content : ExprContent) -> Expr {
-    perm(ExprData { tag, content, loc: self.loc, ignore_symbol: false })
+    perm(ExprData {
+      tag,
+      content,
+      metadata: ExprMetadata {
+        loc: self.loc,
+        ignore_symbol: false 
+      }
+    })
   }
 }
 

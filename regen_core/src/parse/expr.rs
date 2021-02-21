@@ -16,15 +16,21 @@ pub struct SrcLocation {
 
 pub type Expr = Ptr<ExprData>;
 
+/// Metadata is not taken into account during expr comparisons (Hash, PartialEq, etc)
+#[derive(Copy, Clone)]
+pub struct ExprMetadata {
+  pub loc : SrcLocation,
+  
+  /// Indicates that, if this is a symbol, it is not a local or global reference.
+  /// It may be something like a field name or a new variable definition.
+  pub ignore_symbol : bool,
+}
+
 #[derive(Copy, Clone)]
 pub struct ExprData {
   pub tag : ExprTag,
   pub content : ExprContent,
-  pub loc : SrcLocation,
-
-  /// Indicates that, if this is a symbol, it is not a local or global reference.
-  /// It may be something like a field name or a new variable definition.
-  pub ignore_symbol : bool,
+  pub metadata : ExprMetadata,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -93,6 +99,8 @@ impl ExprData {
     }
   }
 
+  pub fn loc(&self) -> SrcLocation { self.metadata.loc }
+
   pub fn children(&self) -> &[Expr] {
     if let List(es) = self.content {
       return es.as_slice();
@@ -138,8 +146,7 @@ impl ExprData {
     let ed = ExprData {
       tag: self.tag,
       content,
-      loc: self.loc,
-      ignore_symbol: self.ignore_symbol,
+      metadata: self.metadata,
     };
     perm(ed)
   }
