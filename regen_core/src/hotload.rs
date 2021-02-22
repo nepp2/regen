@@ -99,29 +99,27 @@ fn load_expr(
   env : Env,
   new_cells : &HashMap<CellId, CellStatus>,
   const_expr : Expr,
-) -> Result<(), Error>
-{
-  let (v, info) = eval_expr(cg, env, new_cells, const_expr)?;
-  let id = ConstCell(const_expr);
-  cg.cells.insert(id, v);
-  cg.dependencies.insert(id, info.dependencies);
-  Ok(())
-}
-
-fn eval_expr(
-  cg : &mut CellGraph,
-  env : Env,
-  new_cells : &HashMap<CellId, CellStatus>,
-  const_expr : Expr,
 ) -> Result<(ConstExprValue, ReferenceInfo), Error>
 {
   let info = semantic::get_semantic_info(const_expr);
   check_dependencies(cg, new_cells, const_expr, &info)?;
   // TODO: using catch unwind is very ugly. Replace with proper error handling.
   let v = std::panic::catch_unwind(|| {
-    eval_const_expr(cg, env, const_expr, &info)
+    eval_expr(cg, env, const_expr, &info)
   }).map_err(|_| error_raw(SrcLocation::zero(), "regen eval panic!"))?;
   Ok((v, info))
+}
+
+fn eval_expr(cg : &CellGraph, env : Env, e : Expr, info : &ReferenceInfo) -> ConstExprValue {
+  let f = compile::compile_expr_to_function(env, info, cg, e);
+  let expr_type = types::type_as_function(&f.t).unwrap().returns;
+  // TODO: it's wasteful to allocate for types that are 64bits wide or smaller
+  let ptr = {
+    let layout = std::alloc::Layout::from_size_align(expr_type.size_of as usize, 8).unwrap();
+    unsafe { std::alloc::alloc(layout) as *mut () }
+  };
+  interpret::interpret_function(&f, &[], Some(ptr));
+  ConstExprValue { e, t: expr_type, ptr }
 }
 
 fn load_def(
@@ -133,7 +131,7 @@ fn load_def(
 ) -> Result<(), Error>
 {
   env::set_active_definition(env, Some(name));
-  let (v, info) = eval_expr(cg, env, new_cells, value_expr)?;
+  let (v, info) = load_expr(cg, env, new_cells, value_expr)?;
   env::set_active_definition(env, None);
   let id = DefCell(name);
   cg.cells.insert(id, v);
@@ -272,8 +270,11 @@ fn hotload_expr(
   }
   if let New | Changed = new_cell_state {
     // load the main expr
-    let r = load_expr(cg, env, new_cells, expr);
-    if r.is_err() {
+    if let Ok((v, info)) = load_expr(cg, env, new_cells, expr) {
+      cg.cells.insert(id, v);
+      cg.dependencies.insert(id, info.dependencies);
+    }
+    else {
       new_cell_state = Broken;
     }
   }
@@ -325,18 +326,6 @@ pub fn hotload_changes(module_name : &str, code : &str, env : Env, cg : &mut Cel
   for def in deletion_list {
     unload_cell(cg, env, def)
   }
-}
-
-fn eval_const_expr(cg : &CellGraph, env : Env, e : Expr, info : &ReferenceInfo) -> ConstExprValue {
-  let f = compile::compile_expr_to_function(env, info, cg, e);
-  let expr_type = types::type_as_function(&f.t).unwrap().returns;
-  // TODO: it's wasteful to allocate for types that are 64bits wide or smaller
-  let ptr = {
-    let layout = std::alloc::Layout::from_size_align(expr_type.size_of as usize, 8).unwrap();
-    unsafe { std::alloc::alloc(layout) as *mut () }
-  };
-  interpret::interpret_function(&f, &[], Some(ptr));
-  ConstExprValue { e, t: expr_type, ptr }
 }
 
 impl fmt::Display for CellId {
