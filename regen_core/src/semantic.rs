@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{hotload::CellId, parse::{Expr, ExprShape, ExprTag}, perm_alloc::{Ptr, perm}, symbols::Symbol};
+use crate::{hotload::CellId, parse::{Expr, ExprShape, ExprTag}, perm_alloc::Ptr, symbols::Symbol};
 
 use ExprTag::*;
 use ExprShape::*;
@@ -11,48 +11,48 @@ pub enum ReferenceType {
   Global, Local,
 }
 
+/// uses expr pointers as unique keys in a map
+#[derive(Clone)]
+pub struct ExprMap<T> {
+  map : HashMap<u64, T>,
+}
+
+impl <T> ExprMap<T> {
+  fn new() -> Self {
+    ExprMap { map: HashMap::new() }
+  }
+
+  pub fn get(&self, e : Expr) -> Option<&T> {
+    self.map.get(&Ptr::to_u64(e))
+  }
+
+  pub fn insert(&mut self, e : Expr, v : T) {
+    let id = Ptr::to_u64(e);
+    if self.map.contains_key(&id) {
+      panic!("multiple instances of expression encountered")
+    }
+    self.map.insert(id, v);
+  }
+}
+
 #[derive(Clone)]
 pub struct ReferenceInfo {
-  references : HashMap<u64, (Expr, ReferenceType)>,
+  pub references : ExprMap<ReferenceType>,
+  pub dependencies : HashSet<CellId>,
 }
 
-impl ReferenceInfo {
-
-  pub fn get_ref_type(&self, e : Expr) -> ReferenceType {
-    self.references.get(&Ptr::to_u64(e))
-      .unwrap_or_else(|| panic!("no type found for {}", e))
-      .1
-  }
-
-  pub fn global_set(&self) -> HashSet<CellId> {
-    let mut globals = HashSet::new();
-    for &(e, t) in self.references.values() {
-      if t == ReferenceType::Global {
-        globals.insert(CellId::DefCell(e.as_symbol()));
-      }
-    }
-    globals
-  }
-}
-
-pub fn get_semantic_info(expr : Expr) -> Ptr<ReferenceInfo> {
-  let mut references = HashMap::new();
+pub fn get_semantic_info(expr : Expr) -> ReferenceInfo {
+  let mut info = ReferenceInfo {
+    references: ExprMap::new(),
+    dependencies: HashSet::new(),
+  };
   let mut locals = vec![];
-  find_refs(&mut references, &mut locals, expr);
-  let info = ReferenceInfo { references };
-  perm(info)
-}
-
-fn push_ref(refs : &mut HashMap<u64, (Expr, ReferenceType)>, e : Expr, r : ReferenceType) {
-  let id = Ptr::to_u64(e);
-  if refs.contains_key(&id) {
-    panic!("multiple instances of expression encountered")
-  }
-  refs.insert(id, (e, r));
+  find_refs(&mut info, &mut locals, expr);
+  info
 }
 
 fn find_refs(
-  refs : &mut HashMap<u64, (Expr, ReferenceType)>,
+  info : &mut ReferenceInfo,
   locals : &mut Vec<Symbol>,
   expr : Expr
 )
@@ -61,10 +61,11 @@ fn find_refs(
     Sym(name) => {
       if !expr.metadata.ignore_symbol {
         if locals.iter().find(|&&n| n == name).is_some() {
-          push_ref(refs, expr, Local);
+          info.references.insert(expr, Local);
         }
         else {
-          push_ref(refs, expr, Global);
+          info.references.insert(expr, Global);
+          info.dependencies.insert(CellId::DefCell(name));
         }
       }
     }
@@ -81,22 +82,26 @@ fn find_refs(
         else { panic!() }
       }
       for &c in expr.children() {
-        find_refs(refs, &mut function_locals, c);
+        find_refs(info, &mut function_locals, c);
       }
       return;
     }
     List(Do, exprs) => {
       let local_count = locals.len();
       for &c in exprs {
-        find_refs(refs, locals, c);
+        find_refs(info, locals, c);
       }
       locals.drain(local_count..);
+      return;
+    }
+    List(ConstExpr, &[c]) => {
+      info.dependencies.insert(CellId::ConstCell(c));
       return;
     }
     _ => (),
   }
   for &c in expr.children() {
-    find_refs(refs, locals, c);
+    find_refs(info, locals, c);
   }
 }
 

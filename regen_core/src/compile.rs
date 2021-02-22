@@ -45,17 +45,18 @@ struct Builder<'l> {
 
   /// the cell graph, holding constant expression values
   cell_graph : &'l CellGraph,
+  
+  /// contains a mapping from expr to reference type (local or global)
+  info : &'l ReferenceInfo,
 
   /// the environment containing all visible symbols
   env : Env,
-
-  info : Ptr<ReferenceInfo>,
 }
 
 impl <'l> Builder<'l> {
   fn new(
     env : Env,
-    info : Ptr<ReferenceInfo>,
+    info : &'l ReferenceInfo,
     cell_graph : &'l CellGraph,
   ) -> Self
   {
@@ -274,7 +275,7 @@ fn function_to_var(b : &mut Builder, f : Function) -> Var {
 
 fn compile_function_def(
   env: Env,
-  info : Ptr<ReferenceInfo>,
+  info : &ReferenceInfo,
   cell_graph : &CellGraph,
   args : &[Expr],
   return_tag : Option<Expr>,
@@ -330,7 +331,7 @@ fn compile_function(
 /// Compile basic imperative language into bytecode
 pub fn compile_expr_to_function(
   env: Env,
-  info : Ptr<ReferenceInfo>,
+  info : &ReferenceInfo,
   cell_graph : &CellGraph,
   root : Expr) -> Function 
 {
@@ -468,8 +469,8 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     }
     // local reference
     Sym(sym) => {
-      match b.info.get_ref_type(e) {
-        ReferenceType::Local => {
+      match b.info.references.get(e) {
+        Some(ReferenceType::Local) => {
           // Look for variable in local scope
           if let Some(v) = find_var_in_scope(b, sym) {
             Some(v.to_ref())
@@ -478,7 +479,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
             panic!("local var not found in codegen!")
           }
         }
-        ReferenceType::Global => {
+        Some(ReferenceType::Global) => {
           if let Some(entry) = env::get_entry(&b.env, sym) {
             let e = InstrExpr::StaticValue(entry.tag, entry.ptr);
             let pointer_type = types::pointer_type(entry.tag);
@@ -488,6 +489,9 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
           else {
             panic!("symbol '{}' not defined ({})", sym, e.loc())
           }
+        }
+        None => {
+          panic!("expr is not a reference ({})", e.loc())
         }
       }
     }

@@ -67,17 +67,16 @@ fn unload_cell(cg : &mut CellGraph, env : Env, id : CellId){
   }
 }
 
-fn get_checked_references(
+fn check_dependencies(
   cg : &mut CellGraph,
   new_cells : &HashMap<CellId, CellStatus>,
   const_expr : Expr,
-  info : Ptr<ReferenceInfo>,
-) -> Result<HashSet<CellId>, Error>
+  info : &ReferenceInfo,
+) -> Result<(), Error>
 {
   let id = ConstCell(const_expr);
-  let global_references = info.global_set();
   // check dependencies are available
-  for dep_id in global_references.iter() {
+  for dep_id in &info.dependencies {
     match new_cells.get(dep_id) {
       Some(CellStatus::Broken) => {
         return error(const_expr.loc(),
@@ -92,7 +91,7 @@ fn get_checked_references(
       _ => (),
     }
   }
-  Ok(global_references)
+  Ok(())
 }
 
 fn load_expr(
@@ -102,10 +101,10 @@ fn load_expr(
   const_expr : Expr,
 ) -> Result<(), Error>
 {
-  let (v, global_references) = eval_expr(cg, env, new_cells, const_expr)?;
+  let (v, info) = eval_expr(cg, env, new_cells, const_expr)?;
   let id = ConstCell(const_expr);
   cg.cells.insert(id, v);
-  cg.dependencies.insert(id, global_references);
+  cg.dependencies.insert(id, info.dependencies);
   Ok(())
 }
 
@@ -114,15 +113,15 @@ fn eval_expr(
   env : Env,
   new_cells : &HashMap<CellId, CellStatus>,
   const_expr : Expr,
-) -> Result<(ConstExprValue, HashSet<CellId>), Error>
+) -> Result<(ConstExprValue, ReferenceInfo), Error>
 {
   let info = semantic::get_semantic_info(const_expr);
-  let global_references = get_checked_references(cg, new_cells, const_expr, info)?;
+  check_dependencies(cg, new_cells, const_expr, &info)?;
   // TODO: using catch unwind is very ugly. Replace with proper error handling.
   let v = std::panic::catch_unwind(|| {
-    eval_const_expr(cg, env, const_expr, info)
+    eval_const_expr(cg, env, const_expr, &info)
   }).map_err(|_| error_raw(SrcLocation::zero(), "regen eval panic!"))?;
-  Ok((v, global_references))
+  Ok((v, info))
 }
 
 fn load_def(
@@ -133,16 +132,12 @@ fn load_def(
   value_expr : Expr,
 ) -> Result<(), Error>
 {
-  // make sure any nested const expressions have been loaded
-  hotload_nested_const_exprs(cg, env, value_expr, new_cells);
-  // set the active definition for signal registration, and evaluate the main expression
   env::set_active_definition(env, Some(name));
-  let (v, global_references) = eval_expr(cg, env, new_cells, value_expr)?;
+  let (v, info) = eval_expr(cg, env, new_cells, value_expr)?;
   env::set_active_definition(env, None);
-  // 
   let id = DefCell(name);
   cg.cells.insert(id, v);
-  cg.dependencies.insert(id, global_references);
+  cg.dependencies.insert(id, info.dependencies);
   let module = value_expr.loc().module;
   env::insert_entry(env, module, name, v.t, v.ptr);
   Ok(())
@@ -234,11 +229,12 @@ fn hotload_def(
   if new_cells.contains_key(&id) {
     println!("def {} defined twice!", name);
   }
+  // make sure any nested const expressions have been loaded
+  hotload_nested_const_exprs(cg, env, value_expr, new_cells);
   // check whether the def needs to be updated
   use CellStatus::*;
   let mut new_cell_state = get_def_status(cg, env, name, value_expr, new_cells);
   if new_cell_state == Changed {
-    println!("unloading {}", id);
     unload_cell(cg, env, id);
   }
   if let New | Changed = new_cell_state {
@@ -265,6 +261,9 @@ fn hotload_expr(
   if new_cells.contains_key(&id) {
     return;
   }
+  // make sure any nested const expressions have been loaded
+  hotload_nested_const_exprs(cg, env, expr, new_cells);
+  // check whether this expr needs to be loaded/reloaded
   use CellStatus::*;
   let mut new_cell_state =
     get_dependencies_status(cg, env, id, expr.loc().module, new_cells);
@@ -272,8 +271,6 @@ fn hotload_expr(
     unload_cell(cg, env, id);
   }
   if let New | Changed = new_cell_state {
-    // make sure any nested const expressions have been loaded
-    hotload_nested_const_exprs(cg, env, expr, new_cells);
     // load the main expr
     let r = load_expr(cg, env, new_cells, expr);
     if r.is_err() {
@@ -330,7 +327,7 @@ pub fn hotload_changes(module_name : &str, code : &str, env : Env, cg : &mut Cel
   }
 }
 
-fn eval_const_expr(cg : &CellGraph, env : Env, e : Expr, info : Ptr<ReferenceInfo>) -> ConstExprValue {
+fn eval_const_expr(cg : &CellGraph, env : Env, e : Expr, info : &ReferenceInfo) -> ConstExprValue {
   let f = compile::compile_expr_to_function(env, info, cg, e);
   let expr_type = types::type_as_function(&f.t).unwrap().returns;
   // TODO: it's wasteful to allocate for types that are 64bits wide or smaller
