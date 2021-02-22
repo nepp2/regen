@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{parse::{Expr, ExprShape, ExprTag}, perm_alloc::{Ptr, perm}, symbols::Symbol};
+use crate::{hotload::CellId, parse::{Expr, ExprShape, ExprTag}, perm_alloc::{Ptr, perm}, symbols::Symbol};
 
 use ExprTag::*;
 use ExprShape::*;
@@ -24,11 +24,11 @@ impl ReferenceInfo {
       .1
   }
 
-  pub fn global_set(&self) -> HashSet<Symbol> {
+  pub fn global_set(&self) -> HashSet<CellId> {
     let mut globals = HashSet::new();
     for &(e, t) in self.references.values() {
       if t == ReferenceType::Global {
-        globals.insert(e.as_symbol());
+        globals.insert(CellId::DefCell(e.as_symbol()));
       }
     }
     globals
@@ -100,8 +100,8 @@ fn find_refs(
   }
 }
 
-/// All of the const expressions in the expr, in topological order
-pub fn get_const_exprs(expr : Expr) -> Vec<Expr> {
+/// All of the const expressions in the expr, and nested const exprs, in a valid order for evaluation
+pub fn get_ordered_const_exprs(expr : Expr) -> Vec<Expr> {
   let mut const_exprs = vec![];
   find_const_exprs(&mut const_exprs, expr);
   const_exprs
@@ -114,6 +114,8 @@ fn find_const_exprs(const_exprs : &mut Vec<Expr>, expr : Expr) {
       return;
     }
     List(ConstExpr, &[c]) => {
+      // insert nested const exprs before inserting this one
+      find_const_exprs(const_exprs, c);
       const_exprs.push(c);
       return;
     }

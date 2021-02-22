@@ -105,10 +105,8 @@ impl fmt::Display for DisplayExpr {
     match &self.1 {
       InstrExpr::LiteralI64(v) =>
         write!(f, "{}", v),
-      InstrExpr::Literal(t, _v) =>
-        write!(f, "(literal {})", t),
-      InstrExpr::Def(sym) =>
-        write!(f, "{}", sym),
+      InstrExpr::StaticValue(t, _v) =>
+        write!(f, "(static_value {})", t),
       InstrExpr::LocalAddr(local) =>
         write!(f, "(ref {})", local),
       InstrExpr::Array(elements) => {

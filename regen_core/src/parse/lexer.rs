@@ -288,9 +288,9 @@ impl <'l> TokenIterator<'l> {
         return Some(Err(self.raise_error("malformed string literal".to_string())));
       }
       let c = self.peek();
-      // this needs to be fixed. perhaps this processing should happen
-      //  in the parser, when the string literal is created.
-      let TODO = ();
+      // TODO: this needs to be fixed. perhaps this processing should happen
+      // in the parser, when the string literal is created.
+      //
       // if c == '\\' {
       //   // slash pattern, e.g. \n for newline
       //   self.skip_char();

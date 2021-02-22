@@ -54,51 +54,13 @@ extern {
   pub fn memset(dest : *mut u8, val: i32, count : usize) -> *mut u8;
 }
 
-pub extern "C" fn env_get_global_ptr(env : Env, sym : Symbol) -> *mut () {
+pub extern "C" fn env_get_global_ptr(env : Env, sym : Symbol) -> *const () {
   env::get_entry(&env, sym).unwrap().ptr
 }
 
 pub extern "C" fn symbol_display(sym : Symbol) {
   println!("symbol: {}", sym)
 }
-
-// TODO: fix these functions to work with Expr instead
-
-// pub extern "C" fn node_children(out : &mut SlicePtr<Node>, expr : Node) {
-//   let s = match expr.content {
-//     NodeContent::List(l) => l,
-//     _ => perm_slice(&[]),
-//   };
-//   *out = s;
-// }
-
-// pub extern "C" fn node_from_list(list : &SlicePtr<Node>) -> Node {
-//   let info = NodeInfo {
-//     loc: SrcLocation::zero(),
-//     content: NodeContent::List(perm_slice(list.as_slice())),
-//   };
-//   perm(info)
-// }
-
-// pub extern "C" fn node_from_symbol(s : Symbol) -> Node {
-//   let info = NodeInfo {
-//     loc: SrcLocation::zero(),
-//     content: NodeContent::Sym(s),
-//   };
-//   perm(info)
-// }
-
-// pub extern "C" fn node_from_literal(v : i64) -> Node {
-//   let info = NodeInfo {
-//     loc: SrcLocation::zero(),
-//     content: NodeContent::Literal(NodeLiteral::I64(v)),
-//   };
-//   perm(info)
-// }
-
-// pub extern "C" fn node_as_symbol(n : Node) -> Symbol {
-//   n.as_symbol()
-// }
 
 pub extern "C" fn ptr_type(t : TypeHandle) -> TypeHandle{
   types::pointer_type(t)
@@ -252,26 +214,6 @@ pub fn load_ffi_libs(e : Env) {
 
   define_global(e, "symbol_display", symbol_display as u64,
     c_function_type(&[u64], void));
-
-  let TODO = (); // fix these functions
-  
-  // define_global(e, "node_children_c", node_children as u64,
-  //   c_function_type(&[u64, u64], void));
-
-  // define_global(e, "node_display", node_display as u64,
-  //   c_function_type(&[u64], void));
-
-  // define_global(e, "node_from_list", node_from_list as u64,
-  //   c_function_type(&[u64], u64));
-
-  // define_global(e, "node_from_symbol", node_from_symbol as u64,
-  //   c_function_type(&[u64], u64));
-
-  // define_global(e, "node_from_literal", node_from_literal as u64,
-  //   c_function_type(&[u64], u64));
-
-  // define_global(e, "node_as_symbol", node_as_symbol as u64,
-  //   c_function_type(&[u64], u64));
 
   define_global(e, "template_quote", template_quote as u64,
     c_function_type(&[expr, types::pointer_type(expr), i64], expr));

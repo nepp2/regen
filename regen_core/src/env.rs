@@ -1,12 +1,6 @@
 /// Defines the environment (the global hashmap that defs are added to)
 
-use crate::{
-  event_loop::{self, EventLoop, SignalId},
-  symbols::{Symbol, SymbolTable, to_symbol},
-  types::{self, TypeHandle, CoreTypes, core_types },
-  ffi_libs::*,
-  perm_alloc::{Ptr, perm},
-};
+use crate::{event_loop::{self, EventLoop, SignalId}, ffi_libs::*, parse::CodeModule, perm_alloc::{Ptr, perm}, symbols::{Symbol, SymbolTable, to_symbol}, types::{self, TypeHandle, CoreTypes, core_types }};
 
 use std::collections::HashMap;
 
@@ -14,46 +8,57 @@ use std::collections::HashMap;
 #[derive(Clone)]
 pub struct Environment {
   values : HashMap<Symbol, EnvEntry>,
+  signals : HashMap<Symbol, Vec<SignalId>>,
   pub st : SymbolTable,
   pub c : CoreTypes,
   pub active_definition : Option<Symbol>,
+  pub internal_module : Ptr<CodeModule>,
 }
 
 pub type Env = Ptr<Environment>;
 
 #[derive(Clone)]
 pub struct EnvEntry {
-  pub ptr : *mut (),
+  pub ptr : *const (),
   pub tag : TypeHandle,
-  pub signals : Vec<SignalId>,
+  pub module : Ptr<CodeModule>,
 }
 
 pub fn unload_def(mut env : Env, name : Symbol) {
-  let entry = env.values.get(&name).unwrap();
   let el = get_event_loop(env);
-  for &id in &entry.signals {
-    event_loop::destroy_signal(el, id);
+  if let Some(signals) = env.signals.get(&name) {
+    for &id in signals {
+      event_loop::destroy_signal(el, id);
+    }
   }
   env.values.remove(&name);
+  env.signals.remove(&name);
 }
 
 pub fn get_entry(env : &Env, name : Symbol) -> Option<&EnvEntry> {
   env.values.get(&name)
 }
 
-pub fn env_alloc_global(mut env : Env, name : Symbol, tag : TypeHandle) -> *mut () {
+pub fn insert_entry(mut env : Env, module : Ptr<CodeModule>, name : Symbol, tag : TypeHandle, ptr : *const ()) {
+  if env.values.contains_key(&name) {
+    panic!("def {} already defined", name);
+  }
+  env.values.insert(name, EnvEntry { ptr, tag, module });
+}
+
+pub fn env_alloc_global(mut env : Env, module : Ptr<CodeModule>, name : Symbol, tag : TypeHandle) -> *mut () {
   if env.values.contains_key(&name) {
     panic!("global {} already defined", name);
   }
   let layout = std::alloc::Layout::from_size_align(tag.size_of as usize, 8).unwrap();
   let ptr = unsafe { std::alloc::alloc(layout) as *mut () };
-  env.values.insert(name, EnvEntry { ptr, tag, signals: vec![] });
+  env.values.insert(name, EnvEntry { ptr, tag, module });
   ptr
 }
 
 pub fn define_global(e : Env, s : &str, v : u64, t : TypeHandle) {
   let sym = to_symbol(e.st, s);
-  let p = env_alloc_global(e, sym, t);
+  let p = env_alloc_global(e, e.internal_module, sym, t);
   unsafe {
     *(p as *mut u64) = v;
   }
@@ -69,8 +74,8 @@ pub fn set_active_definition(mut env : Env, def : Option<Symbol>) {
 
 pub fn register_signal(mut env : Env, id : SignalId) {
   let name = env.active_definition.expect("can't register a signal; no active definition");
-  let entry = env.values.get_mut(&name).unwrap();
-  entry.signals.push(id);
+  let signals = env.signals.entry(name).or_insert_with(|| vec![]);
+  signals.push(id);
 }
 
 pub fn get_global<T : Copy>(e : Env, sym : Symbol, t : TypeHandle) -> Option<Ptr<T>> {
@@ -97,11 +102,17 @@ pub fn get_event_loop(e : Env) -> Ptr<EventLoop> {
 }
 
 pub fn new_env(st : SymbolTable) -> Env {
+  let internal_module = perm(CodeModule {
+    code: "".into(),
+    name: "__internal".into(),
+  });
   let env = perm(Environment {
-    values: Default::default(),
+    values: HashMap::new(),
+    signals: HashMap::new(),
     st,
     c: core_types(st),
     active_definition: None,
+    internal_module,
   });
   let event_loop = event_loop::create_event_loop();
   let c = &env.c;

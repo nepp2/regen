@@ -35,14 +35,13 @@ pub enum Operator {
 
 #[derive(Copy, Clone)]
 pub enum InstrExpr {
-  Def(Symbol),
   LocalAddr(LocalHandle),
   Init(SlicePtr<LocalHandle>),
   ZeroInit,
   Array(SlicePtr<LocalHandle>),
   FieldIndex { struct_addr : LocalHandle, index : u64 },
   LiteralI64(i64),
-  Literal(TypeHandle, *const ()),
+  StaticValue(TypeHandle, *const ()),
   BinaryOp(Operator, LocalHandle, LocalHandle),
   UnaryOp(Operator, LocalHandle),
   Invoke(LocalHandle, SlicePtr<LocalHandle>),

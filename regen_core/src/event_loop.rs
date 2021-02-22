@@ -44,7 +44,7 @@ pub struct TimerState {
 }
 
 #[derive(Clone, Copy)]
-pub struct RegenCallback { env : Env, f : *const Function }
+pub struct RegenCallback { f : *const Function }
 
 #[derive(Clone, Copy)]
 pub enum StreamOperation {
@@ -108,11 +108,10 @@ fn update_signal(update_number : u64, mut signal : Ptr<Signal>) -> bool {
       let event = input_signal.output;
       let mut return_val = true;
       let f = poll_function.f as *const Function;
-      let env = poll_function.env;
       interpret::interpret_function(
         f,
         &[event_source as u64, signal.output as u64, event as u64],
-        env, Some((&mut return_val) as *mut bool as *mut ()));
+        Some((&mut return_val) as *mut bool as *mut ()));
       return_val
     }
     NativePoll { input_signal, event_source, poll_function } => {
@@ -123,7 +122,7 @@ fn update_signal(update_number : u64, mut signal : Ptr<Signal>) -> bool {
       interpret::interpret_function(
         f.f as *const Function,
         &[signal.output as u64, event as u64],
-        f.env, None);
+        None);
       true
     }
     NativeState(parent, f) => {
@@ -136,7 +135,7 @@ fn update_signal(update_number : u64, mut signal : Ptr<Signal>) -> bool {
       interpret::interpret_function(
         f.f as *const Function,
         &[signal.output as u64, event as u64],
-        f.env, None);
+        None);
       true
     }
     Sample(sample_from) => {
@@ -350,7 +349,7 @@ pub mod ffi {
     update_function : *const Function,
   ) -> Ptr<Signal>
   {
-    let op = StreamOperation::State(input_signal, RegenCallback { env, f: update_function });
+    let op = StreamOperation::State(input_signal, RegenCallback { f: update_function });
     let signal = create_regen_signal(env, el, state_type, Some(initial_state), op);
     add_push_observer(el, input_signal, signal);
     signal
@@ -370,7 +369,7 @@ pub mod ffi {
     let op = StreamOperation::Poll {
       input_signal,
       event_source,
-      poll_function: RegenCallback { env, f: poll_function },
+      poll_function: RegenCallback { f: poll_function },
     };
     let signal = create_regen_signal(env, el, event_type, None, op);
     add_push_observer(el, input_signal, signal);
@@ -385,7 +384,7 @@ pub mod ffi {
     map_function : *const Function,
   ) -> Ptr<Signal>
   {
-    let op = StreamOperation::Map(input_signal, RegenCallback { env, f: map_function });
+    let op = StreamOperation::Map(input_signal, RegenCallback { f: map_function });
     let signal = create_regen_signal(env, el, output_type, None, op);
     add_push_observer(el, input_signal, signal);
     signal

@@ -1,6 +1,6 @@
 /// Compiles core language into bytecode
 
-use crate::{bytecode, env, parse, perm_alloc, semantic::{ReferenceType, ReferenceInfo}, symbols, types};
+use crate::{bytecode, env, hotload::{CellGraph, ConstExprValue}, parse, perm_alloc, semantic::{ReferenceType, ReferenceInfo}, symbols, types};
 
 use bytecode::{
   SequenceHandle, SequenceInfo, InstrExpr, FunctionBytecode,
@@ -27,13 +27,6 @@ pub struct Function {
   pub t : TypeHandle,
 }
 
-#[derive(Clone, Copy)]
-pub struct ConstExprValue {
-  pub e : Expr,
-  pub t : TypeHandle,
-  pub ptr : *const (),
-}
-
 /// Function builder
 struct Builder<'l> {
   bc : FunctionBytecode,
@@ -50,11 +43,8 @@ struct Builder<'l> {
   /// labels indicating the start and end of a labelled block expression
   label_stack : Vec<LabelledExpr>,
 
-  /// the constant expression values
-  const_expr_values : &'l [ConstExprValue],
-
-  /// the index of the next constant expression (assumes topologically ordered traversal)
-  next_const_index : usize,
+  /// the cell graph, holding constant expression values
+  cell_graph : &'l CellGraph,
 
   /// the environment containing all visible symbols
   env : Env,
@@ -66,8 +56,7 @@ impl <'l> Builder<'l> {
   fn new(
     env : Env,
     info : Ptr<ReferenceInfo>,
-    const_expr_values : &'l [ConstExprValue],
-    next_const_index : usize,
+    cell_graph : &'l CellGraph,
   ) -> Self
   {
     Builder {
@@ -82,8 +71,7 @@ impl <'l> Builder<'l> {
       seq_completion: vec![],
       current_sequence: None,
       label_stack: vec![],
-      const_expr_values,
-      next_const_index,
+      cell_graph,
       env,
       info,
     }
@@ -287,13 +275,12 @@ fn function_to_var(b : &mut Builder, f : Function) -> Var {
 fn compile_function_def(
   env: Env,
   info : Ptr<ReferenceInfo>,
-  const_expr_values : &[ConstExprValue],
-  const_next_index : usize,
+  cell_graph : &CellGraph,
   args : &[Expr],
   return_tag : Option<Expr>,
   body : Expr,
 ) -> Function {
-  let mut b = Builder::new(env, info, const_expr_values, const_next_index);
+  let mut b = Builder::new(env, info, cell_graph);
   b.bc.args = args.len();
   let mut arg_types = vec![];
   for a in args {
@@ -344,10 +331,10 @@ fn compile_function(
 pub fn compile_expr_to_function(
   env: Env,
   info : Ptr<ReferenceInfo>,
-  const_expr_values : &[ConstExprValue],
+  cell_graph : &CellGraph,
   root : Expr) -> Function 
 {
-  compile_function(Builder::new(env, info, const_expr_values, 0), root, &[], None)
+  compile_function(Builder::new(env, info, cell_graph), root, &[], None)
 }
 
 fn compile_if_else(b : &mut Builder, cond_expr : Expr, then_expr : Expr, else_expr : Expr) -> Option<Ref> {
@@ -492,9 +479,10 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
           }
         }
         ReferenceType::Global => {
-          if let Some(tag) = env::get_global_type(b.env, sym) {
-            let e = InstrExpr::Def(sym);
-            let v = push_expr(b, e, types::pointer_type(tag));
+          if let Some(entry) = env::get_entry(&b.env, sym) {
+            let e = InstrExpr::StaticValue(entry.tag, entry.ptr);
+            let pointer_type = types::pointer_type(entry.tag);
+            let v = push_expr(b, e, pointer_type);
             Some(pointer_to_locator(v, true))
           }
           else {
@@ -505,7 +493,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     }
     List(ConstExpr, &[_]) => {
       let cev = const_value(b, e);
-      let e = InstrExpr::Literal(cev.t, cev.ptr);
+      let e = InstrExpr::StaticValue(cev.t, cev.ptr);
       let v = push_expr(b, e, types::pointer_type(cev.t));
       Some(pointer_to_locator(v, false))
     }
@@ -517,7 +505,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     // literal string
     Literal(Val::String(s)) => {
       let t = types::pointer_type(b.env.c.string_tag);
-      let e = InstrExpr::Literal(t, Ptr::to_ptr(s) as *const ());
+      let e = InstrExpr::StaticValue(t, Ptr::to_ptr(s) as *const ());
       let v = push_expr(b, e, t);
       Some(pointer_to_locator(v, false))
     }
@@ -650,7 +638,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       };
       let f = compile_function_def(
         b.env, b.info,
-        b.const_expr_values, b.next_const_index,
+        b.cell_graph,
         args.children(), return_tag, body);
       let v = function_to_var(b, f);
       Some(v.to_ref())
@@ -775,22 +763,13 @@ fn compile_array_len(b : &mut Builder, array : Expr) -> Var {
 
 fn const_value(b : &mut Builder, e : Expr) -> ConstExprValue {
   if let ExprShape::List(ExprTag::ConstExpr, &[ce]) = e.shape() {
-    let cev = b.const_expr_values[b.next_const_index];
-    b.next_const_index += 1;
+    let cev = b.cell_graph.get_const_value(ce).expect("const expr not evaluated");
     if cev.e != ce {
       panic!("const expressions '{}' and '{}' do not match", cev.e, ce);
     }
     return cev;
   }
   panic!("expected const expression, found '{}' at ({})", e, e.loc())
-}
-
-fn const_expr_to_i64(b : &mut Builder, e : Expr) -> i64 {
-  let cev = const_value(b, e);
-  if cev.t != b.env.c.i64_tag {
-    println!("expected an i64 expression, found {}", cev.t);
-  }
-  unsafe { *(cev.ptr as *const i64) }
 }
 
 fn const_expr_to_type(b: &mut Builder, e : Expr) -> TypeHandle {

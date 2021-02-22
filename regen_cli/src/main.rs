@@ -7,7 +7,7 @@ mod hotload_watcher;
 #[cfg(test)]
 mod test;
 
-use regen_core::{new_env, hotload::{self, HotloadState}};
+use regen_core::{new_env, hotload::{self, CellGraph}};
 use std::fs;
 
 pub fn run_file(path : &str) {
@@ -16,8 +16,8 @@ pub fn run_file(path : &str) {
     .expect("Something went wrong reading the file");
   let env = new_env();
   ffi_libs::bind_libs(env);
-  let mut hs = HotloadState::new();
-  hotload::hotload_changes(path, &code, env, &mut hs);
+  let mut cg = CellGraph::new();
+  hotload::hotload_changes(path, &code, env, &mut cg);
 }
 
 fn main(){

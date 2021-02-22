@@ -30,12 +30,12 @@ impl <T> Ptr<T> {
   }
 
   pub fn from_ptr(p : *mut T) -> Self {
-    let TODO = (); // mark as unsafe
+    // TODO: mark as unsafe
     Ptr { p }
   }
 
   pub fn from_u64(v : u64) -> Self {
-    let TODO = (); // mark as unsafe
+    // TODO: mark as unsafe
     Ptr { p: v as *mut T }
   }
 }

@@ -1,5 +1,3 @@
-use compile::ConstExprValue;
-
 /// Bytecode interpreter
 ///
 /// Uses a low-level format which is not safe.
@@ -9,20 +7,18 @@ use crate::{
   bytecode::{
     Instr, InstrExpr, Operator, LocalHandle,
   },
-  compile::{self, Function},
+  compile::Function,
   debug,
-  env::{self, Env},
+  env::Env,
   ffi_ccall,
   parse::Expr,
-  perm_alloc::{Ptr, SlicePtr},
-  semantic::{self, ReferenceInfo},
-  symbols::Symbol,
+  perm_alloc::SlicePtr,
   types::{self, TypeHandle, Primitive}
 };
 
 pub type CompileExpression = fn(env : &Env, fun : Expr) -> Function;
 
-pub fn interpret_function(f : *const Function, args : &[u64], env : Env, return_addr : Option<*mut ()>) {
+pub fn interpret_function(f : *const Function, args : &[u64], return_addr : Option<*mut ()>) {
   let mut stack = [0 as u8 ; 16384];
   let mut return_offset = 0;
   let return_addr = {
@@ -55,50 +51,7 @@ pub fn interpret_function(f : *const Function, args : &[u64], env : Env, return_
       return_addr,
     }
   ];
-  interpreter_loop(&mut shadow_stack, env);
-}
-
-pub fn interpret_def_expr(name : Symbol, initialiser : Expr, env : Env, info : Ptr<ReferenceInfo>) {
-  env::set_active_definition(env, Some(name));
-  let f = compiler_expr_to_function(env, info, initialiser);
-  let def_type = types::type_as_function(&f.t).unwrap().returns;
-  let def_ptr = env::env_alloc_global(env, name, def_type);
-  interpret_function(&f, &[], env, Some(def_ptr));
-  env::set_active_definition(env, None);
-}
-
-pub fn interpret_def(name : Symbol, initialiser : Expr, env : Env) {
-  let info = semantic::get_semantic_info(initialiser);
-  interpret_def_expr(name, initialiser, env, info)
-}
-
-pub fn interpret_expr(expr : Expr, env : Env) {
-  let info = semantic::get_semantic_info(expr);
-  let f = compiler_expr_to_function(env, info, expr);
-  interpret_function(&f, &[], env, None);
-}
-
-fn eval_const_expr(env : Env, e : Expr) -> ConstExprValue {
-  let info = semantic::get_semantic_info(e);
-  let f = compiler_expr_to_function(env, info, e);
-  let expr_type = types::type_as_function(&f.t).unwrap().returns;
-  let TODO = (); // it's wasteful to allocate for types that are 64bits wide or smaller
-  let ptr = {
-    let layout = std::alloc::Layout::from_size_align(expr_type.size_of as usize, 8).unwrap();
-    unsafe { std::alloc::alloc(layout) as *mut () }
-  };
-  interpret_function(&f, &[], env, Some(ptr));
-  ConstExprValue { e, t: expr_type, ptr }
-}
-
-pub fn compiler_expr_to_function(env : Env, info : Ptr<ReferenceInfo>, expr : Expr) -> Function {
-  let mut const_values = vec![];
-  let TODO = (); // compiling and evaluating these separately is slow and wasteful
-  let const_exprs = semantic::get_const_exprs(expr);
-  for e in const_exprs {
-    const_values.push(eval_const_expr(env, e));
-  }
-  compile::compile_expr_to_function(env, info, &const_values, expr)
+  interpreter_loop(&mut shadow_stack);
 }
   
 struct Frame {
@@ -191,7 +144,7 @@ fn execute_unary_op(
   panic!("unary op {} not supported for operands of type {}", op, a.t)
 }
 
-fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
+fn interpreter_loop(shadow_stack : &mut Vec<Frame>) {
   let mut frame = shadow_stack.pop().unwrap();
   'outer: loop {
     let fun = unsafe { &*frame.f };
@@ -205,14 +158,6 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
             LocalAddr(l) => {
               let v = frame.local_addr(l) as u64;
               frame.set_local(var, &v);
-            }
-            Def(sym) => {
-              if let Some(entry) = env::get_entry(&env, sym) {
-                frame.set_local(var, &entry.ptr);
-              }
-              else {
-                panic!("Symbol '{}' not present in env", sym);
-              }
             }
             Array(element_vals) => {
               let info = types::type_as_array(&var.t).expect("expected array");
@@ -239,7 +184,7 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
             LiteralI64(val) => {
               frame.set_local(var, &val);
             }
-            Literal(_t, p) => {
+            StaticValue(_t, p) => {
               frame.set_local(var, &p);
             }
             BinaryOp(op, a, b) => {
@@ -274,18 +219,19 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>, env : Env) {
                 std::slice::from_raw_parts(data, args.len)
               };
               let val = unsafe { ffi_ccall::call_c_function(fptr, args) };
-              // TODO: the line below is incorrect for void types, and probably also
-              // for any types that isn't exactly 64 bits wide. The arguments passed are
-              // also suspect; args smaller than 64 bits may be passed incorrectly.
+              if var.t.size_of > 8 {
+                panic!("C functions returning values more than 64bits wide aren't supported");
+              }
               unsafe {
                 let v = (&val as *const u64) as *const ();
-                cast_and_store(v, frame.local_addr(var), env.c.u64_tag, var.t);
+                // TODO: this may be wrong
+                cast_and_store(v, frame.local_addr(var), var.t, var.t);
               }
             }
             Load(ptr) => {
               let p : *mut () = frame.get_local(ptr);
               let vaddr = frame.local_addr(var);
-              unsafe { store(p as *mut (), vaddr, var.t.size_of) }
+              unsafe { store(p, vaddr, var.t.size_of) }
             }
             PtrOffset{ ptr, offset } => {
               let sizeof =

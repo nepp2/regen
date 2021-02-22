@@ -600,7 +600,7 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       let args = ps.list_expr(Syntax, arg_exprs, arg_start);
       // return type
       let ret = if ps.accept("=>") {
-        pratt_parse(ps, kp)?
+        parse_const_expr(ps, kp)?
       }
       else {
         ps.omitted_expr()
