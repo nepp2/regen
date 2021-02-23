@@ -1,64 +1,74 @@
-/// Defines the environment (the global hashmap that defs are added to)
+use crate::{event_loop::{self, EventLoop, SignalId}, ffi_libs::*, parse::{self, CodeModule, Expr, ExprContent, ExprTag, SrcLocation, Val}, perm_alloc::{Ptr, perm}, symbols::{Symbol, SymbolTable, to_symbol}, types::{TypeHandle, CoreTypes, core_types }};
 
-use crate::{event_loop::{self, EventLoop, SignalId}, ffi_libs::*, parse::CodeModule, perm_alloc::{Ptr, perm}, symbols::{Symbol, SymbolTable, to_symbol}, types::{self, TypeHandle, CoreTypes, core_types }};
+use std::collections::{HashMap, HashSet};
+use std::fmt;
 
-use std::collections::HashMap;
-
-/// Environment for interpreter
+/// Environment for regen editing session
 #[derive(Clone)]
 pub struct Environment {
-  values : HashMap<Symbol, EnvEntry>,
+  pub cells : HashMap<CellId, CellValue>,
+  pub dependencies : HashMap<CellId, HashSet<CellId>>,
   signals : HashMap<Symbol, Vec<SignalId>>,
+  pub event_loop : Ptr<EventLoop>,
   pub st : SymbolTable,
   pub c : CoreTypes,
   pub active_definition : Option<Symbol>,
-  pub internal_module : Ptr<CodeModule>,
+  builtin_dummy_expr : Expr,
 }
 
 pub type Env = Ptr<Environment>;
 
-#[derive(Clone)]
-pub struct EnvEntry {
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CellId { DefCell(Symbol), ConstCell(Expr) }
+
+use CellId::*;
+
+#[derive(Clone, Copy)]
+pub struct CellValue {
+  pub e : Expr,
+  pub t : TypeHandle,
   pub ptr : *const (),
-  pub tag : TypeHandle,
-  pub module : Ptr<CodeModule>,
 }
 
-pub fn unload_def(mut env : Env, name : Symbol) {
-  let el = get_event_loop(env);
-  if let Some(signals) = env.signals.get(&name) {
-    for &id in signals {
-      event_loop::destroy_signal(el, id);
+pub fn unload_cell(mut env : Env, id : CellId) {
+  if let DefCell(name) = id {
+    let el = env.event_loop;
+    if let Some(signals) = env.signals.get(&name) {
+      for &id in signals {
+        event_loop::destroy_signal(el, id);
+      }
     }
+    env.signals.remove(&name);
   }
-  env.values.remove(&name);
-  env.signals.remove(&name);
+  env.cells.remove(&id);
+  env.dependencies.remove(&id);
 }
 
-pub fn get_entry(env : &Env, name : Symbol) -> Option<&EnvEntry> {
-  env.values.get(&name)
+pub fn get_def_cell(env : &Env, name : Symbol) -> Option<&CellValue> {
+  env.cells.get(&DefCell(name))
 }
 
-pub fn insert_entry(mut env : Env, module : Ptr<CodeModule>, name : Symbol, tag : TypeHandle, ptr : *const ()) {
-  if env.values.contains_key(&name) {
-    panic!("def {} already defined", name);
+fn insert_cell(mut env : Env, e : Expr, id : CellId, t : TypeHandle, ptr : *const ()) {
+  if env.cells.contains_key(&id) {
+    panic!("{} already defined", id);
   }
-  env.values.insert(name, EnvEntry { ptr, tag, module });
+  env.cells.insert(id, CellValue { e, t, ptr });
 }
 
-pub fn env_alloc_global(mut env : Env, module : Ptr<CodeModule>, name : Symbol, tag : TypeHandle) -> *mut () {
-  if env.values.contains_key(&name) {
-    panic!("global {} already defined", name);
+fn env_alloc_global(mut env : Env, e : Expr, name : Symbol, t : TypeHandle) -> *mut () {
+  let id = DefCell(name);
+  if env.cells.contains_key(&id) {
+    panic!("def {} already defined", id);
   }
-  let layout = std::alloc::Layout::from_size_align(tag.size_of as usize, 8).unwrap();
+  let layout = std::alloc::Layout::from_size_align(t.size_of as usize, 8).unwrap();
   let ptr = unsafe { std::alloc::alloc(layout) as *mut () };
-  env.values.insert(name, EnvEntry { ptr, tag, module });
+  env.cells.insert(id, CellValue { e, t, ptr });
   ptr
 }
 
 pub fn define_global(e : Env, s : &str, v : u64, t : TypeHandle) {
   let sym = to_symbol(e.st, s);
-  let p = env_alloc_global(e, e.internal_module, sym, t);
+  let p = env_alloc_global(e, e.builtin_dummy_expr, sym, t);
   unsafe {
     *(p as *mut u64) = v;
   }
@@ -79,8 +89,8 @@ pub fn register_signal(mut env : Env, id : SignalId) {
 }
 
 pub fn get_global<T : Copy>(e : Env, sym : Symbol, t : TypeHandle) -> Option<Ptr<T>> {
-  if let Some(entry) = e.values.get(&sym) {
-    if entry.tag == t {
+  if let Some(entry) = e.cells.get(&DefCell(sym)) {
+    if entry.t == t {
       return Some(Ptr::from_ptr(entry.ptr as *mut T));
     }
   }
@@ -92,44 +102,49 @@ pub fn get_global_value<T : Copy>(e : Env, sym : Symbol, t : TypeHandle) -> Opti
 }
 
 pub fn get_global_type(e : Env, sym : Symbol) -> Option<TypeHandle> {
-  e.values.get(&sym).map(|entry| entry.tag)
+  e.cells.get(&DefCell(sym)).map(|entry| entry.t)
+}
+
+pub fn get_const_value(e : Env, expr : Expr) -> Option<CellValue> {
+  e.cells.get(&ConstCell(expr)).cloned()
 }
 
 pub fn get_event_loop(e : Env) -> Ptr<EventLoop> {
-  let sym = to_symbol(e.st, "event_loop");
-  let entry = e.values.get(&sym).unwrap();
-  unsafe { *(entry.ptr as *mut Ptr<EventLoop>) }
+  e.event_loop
 }
 
 pub fn new_env(st : SymbolTable) -> Env {
-  let internal_module = perm(CodeModule {
-    code: "".into(),
-    name: "__internal".into(),
-  });
+  let builtin_dummy_expr = {
+    let module = perm(CodeModule {
+      code: "".into(),
+      name: "__internal".into(),
+    });
+    parse::expr(
+      ExprTag::Omitted,
+      ExprContent::Value(Val::Void),
+      SrcLocation { start: 0, end: 0, module },
+    )
+  };
+
   let env = perm(Environment {
-    values: HashMap::new(),
+    cells: HashMap::new(),
+    dependencies: HashMap::new(),
     signals: HashMap::new(),
+    event_loop: event_loop::create_event_loop(),
     st,
     c: core_types(st),
     active_definition: None,
-    internal_module,
+    builtin_dummy_expr,
   });
-  let event_loop = event_loop::create_event_loop();
-  let c = &env.c;
-  for (n, t) in &c.core_types {
-    define_global(env, n, Ptr::to_u64(*t), env.c.type_tag);
-  }
-
-  let void = env.c.void_tag;
-  let void_ptr = types::pointer_type(void);
-
-  define_global(env, "env", Ptr::to_u64(env), void_ptr);
-
-  define_global(env, "region", 0, void_ptr);
-
-  define_global(env, "event_loop", Ptr::to_u64(event_loop), void_ptr);
   load_ffi_libs(env);
-
   env
 }
 
+impl fmt::Display for CellId {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self {
+      DefCell(name) => write!(f, "def {}", name),
+      ConstCell(expr) => write!(f, "const expr ({})", expr.loc()),
+    }
+  }
+}

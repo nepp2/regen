@@ -8,7 +8,7 @@ use crate::ffi_libs;
 use regen_core::{
   new_env,
   env::{Env, get_event_loop},
-  hotload::{self, CellGraph},
+  hotload,
   event_loop::{
     self, TimerState,
     native_poll_signal,
@@ -17,7 +17,7 @@ use regen_core::{
 };
 use std::fs;
 
-fn hotload_file(env : Env, cg : &mut CellGraph, path : &str) {
+fn hotload_file(env : Env, path : &str) {
   println!();
   println!();
   println!("-----------------------------------");
@@ -27,7 +27,7 @@ fn hotload_file(env : Env, cg : &mut CellGraph, path : &str) {
   let code =
     fs::read_to_string(path)
     .expect("Something went wrong reading the file");
-  hotload::hotload_changes(path, &code, env, cg);
+  hotload::hotload_changes(path, &code, env);
 }
 
 struct WatchState {
@@ -37,7 +37,6 @@ struct WatchState {
 
 struct CompilerState {
   env : Env,
-  cg : CellGraph,
   path : String,
 }
 
@@ -75,13 +74,12 @@ pub fn watch_file(path : &str) {
     }
   );
 
-  let mut cg = CellGraph::new();
-  hotload_file(env, &mut cg, path);
-  let cs = CompilerState { env, cg, path: path.to_string() };
+  hotload_file(env, path);
+  let cs = CompilerState { env, path: path.to_string() };
 
   native_state_signal(event_loop, file_changes, cs,
     |cs : &mut CompilerState, _ : &WatchState| {
-      hotload_file(cs.env, &mut cs.cg, &cs.path);
+      hotload_file(cs.env, &cs.path);
     }
   );
   

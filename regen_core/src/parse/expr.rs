@@ -16,6 +16,12 @@ pub struct SrcLocation {
 
 pub type Expr = Ptr<ExprData>;
 
+pub fn expr(tag : ExprTag, content : ExprContent, loc : SrcLocation) -> Expr {
+  let metadata = ExprMetadata { loc, ignore_symbol : false };
+  let ed = ExprData { tag, content, metadata };
+  perm(ed)
+}
+
 /// Metadata is not taken into account during expr comparisons (Hash, PartialEq, etc)
 #[derive(Copy, Clone)]
 pub struct ExprMetadata {

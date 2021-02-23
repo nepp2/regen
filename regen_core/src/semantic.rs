@@ -1,6 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{hotload::CellId, parse::{Expr, ExprShape, ExprTag}, perm_alloc::Ptr, symbols::Symbol};
+use crate::{
+  env::CellId,
+  parse::{Expr, ExprShape, ExprTag},
+  perm_alloc::Ptr,
+  symbols::Symbol
+};
 
 use ExprTag::*;
 use ExprShape::*;

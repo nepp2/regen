@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 use crate::{env, event_loop::ffi::*, parse::templates::template, parse::Expr, perm_alloc, symbols::Symbol, types, types::{TypeHandle, c_function_type, function_type}};
 
 use env::{Env, define_global};
-use perm_alloc::{SlicePtr, perm_slice_from_vec, perm_slice};
+use perm_alloc::{Ptr, SlicePtr, perm_slice_from_vec, perm_slice};
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -55,7 +55,7 @@ extern {
 }
 
 pub extern "C" fn env_get_global_ptr(env : Env, sym : Symbol) -> *const () {
-  env::get_entry(&env, sym).unwrap().ptr
+  env::get_def_cell(&env, sym).unwrap().ptr
 }
 
 pub extern "C" fn symbol_display(sym : Symbol) {
@@ -137,6 +137,21 @@ pub fn load_ffi_libs(e : Env) {
   let type_tag_ptr = types::pointer_type(type_tag);
   let symbol = e.c.symbol_tag;
   let symbol_ptr = types::pointer_type(symbol);
+
+  let c = &e.c;
+  for (n, t) in &c.core_types {
+    define_global(e, n, Ptr::to_u64(*t), e.c.type_tag);
+  }
+
+  let void = e.c.void_tag;
+  let void_ptr = types::pointer_type(void);
+
+  define_global(e, "env", Ptr::to_u64(e), void_ptr);
+
+  define_global(e, "region", 0, void_ptr);
+
+  define_global(e, "event_loop", Ptr::to_u64(e.event_loop), void_ptr);
+
 
   // ----------- Bind type constructor functions
 

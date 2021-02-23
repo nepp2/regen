@@ -13,7 +13,7 @@ const LIB_PATH : &'static str = "..";
 pub extern "C" fn include(env : Env, file_name : &RegenString) {
   let file_name = file_name.as_str();
   let path_symbol = to_symbol(env.st, format!("module::{}", file_name));
-  if env::get_entry(&env, path_symbol).is_none() {
+  if env::get_def_cell(&env, path_symbol).is_none() {
     let path = format!("{}/{}", LIB_PATH, file_name);
     let code =
       fs::read_to_string(&path)

@@ -136,12 +136,6 @@ fn match_symbol(t : &Token, s : &str) -> bool {
   t.string == s
 }
 
-fn expr(tag : ExprTag, content : ExprContent, loc : SrcLocation) -> Expr {
-  let metadata = ExprMetadata { loc, ignore_symbol : false };
-  let ed = ExprData { tag, content, metadata };
-  perm(ed)
-}
-
 impl <'l> ParseState<'l> {
 
   fn new(
