@@ -54,7 +54,7 @@ fn check_dependencies(
 fn is_external_dependency(env : Env, current_module : Ptr<CodeModule>, id : CellId) -> bool {
   // const expressions should always be local, but their CellIds will clash.
   let TODO = ();
-  if let DefCell(name) = id {
+  if let DefCell(_) = id {
     if let Some(cell) = env.cells.get(&id) {
       if cell.e.loc().module.name != current_module.name {
         return true;
@@ -135,7 +135,7 @@ fn load_def(
   Ok(())
 }
 
-fn unload_cell(mut env : Env, id : CellId){
+fn unload_cell(env : Env, id : CellId){
   env::unload_cell(env, id);
 }
 
