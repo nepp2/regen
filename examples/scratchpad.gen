@@ -1,18 +1,6 @@
 
 // GRAPHS ARE THE ANSWER
 
-def c = 20;
-
-def a = 70;
-
-def v = {
-  def a = 6;
-
-  def b = 7;
-  
-  a + b + c
+def list[T] = {
+  struct { data : ptr T, length : i64 }
 };
-
-print v;
-
-print a + c;

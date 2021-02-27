@@ -105,4 +105,4 @@ print {
     total = total + vs[i];
   }
   total
-}; // ???
+}; // 45

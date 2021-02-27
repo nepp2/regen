@@ -683,7 +683,7 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
         ps.list_expr(Break, vec![], start)
       }
       else {
-        let label = pratt_parse(ps, kp)?;
+        let label = pratt_parse_non_value(ps, kp)?;
         ps.list_expr(Break, vec![label], start)
       }
     }
@@ -694,7 +694,7 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
         ps.list_expr(Repeat, vec![], start)
       }
       else {
-        let label = pratt_parse(ps, kp)?;
+        let label = pratt_parse_non_value(ps, kp)?;
         ps.list_expr(Repeat, vec![label], start)
       }
     }
@@ -710,7 +710,7 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
     }
     "label" => {
       ps.pop_type(TokenType::Symbol)?;
-      let label = pratt_parse(ps, kp)?;
+      let label = pratt_parse_non_value(ps, kp)?;
       let exprs = parse_new_scope(ps, kp)?;
       ps.list_expr(LabelledBlock, vec![label, exprs], start)
     }
