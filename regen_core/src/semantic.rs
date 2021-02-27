@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{env::CellId, parse::{Expr, ExprShape, ExprTag}, perm_alloc::Ptr, symbols::Symbol};
+use crate::{env::{CellId, CellUid}, parse::{Expr, ExprShape, ExprTag}, perm_alloc::Ptr, symbols::Symbol};
 
 use ExprTag::*;
 use ExprShape::*;
@@ -39,6 +39,11 @@ impl <T> ExprMap<T> {
 pub struct ReferenceInfo {
   pub references : ExprMap<ReferenceType>,
   pub dependencies : HashSet<CellId>,
+}
+
+pub struct ResolvedReferenceInfo {
+  pub references : ExprMap<ReferenceType>,
+  pub dependencies : HashMap<CellId, CellUid>,
 }
 
 pub fn get_semantic_info(expr : Expr) -> ReferenceInfo {

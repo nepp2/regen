@@ -1,6 +1,8 @@
+use std::collections::HashMap;
+
 /// Compiles core language into bytecode
 
-use crate::{bytecode, env::{self, CellId, CellValue, Env, Namespace}, parse, perm_alloc, semantic::{ReferenceType, ReferenceInfo}, symbols, types};
+use crate::{bytecode, env::{CellId, CellValue, Env}, parse, perm_alloc, semantic::{ReferenceType, ReferenceInfo}, symbols::{self, SymbolTable}, types};
 
 use bytecode::{
   SequenceHandle, SequenceInfo, InstrExpr, FunctionBytecode,
@@ -45,18 +47,23 @@ struct Builder<'l> {
   /// contains a mapping from expr to reference type (local or global)
   info : &'l ReferenceInfo,
 
-  /// the namespace this expression is evaluating in
-  namespace : Namespace,
+  dependencies : &'l HashMap<CellId, CellValue>,
 
-  /// the environment containing all visible symbols
-  env : Env,
+  c : &'l CoreTypes,
+
+  st : SymbolTable,
+}
+
+fn get_cell_value(b : &Builder, id : CellId) -> CellValue {
+  *b.dependencies.get(&id).expect("unexpected missing dependency!")
 }
 
 impl <'l> Builder<'l> {
   fn new(
-    env : Env,
     info : &'l ReferenceInfo,
-    namespace : Namespace,
+    dependencies : &'l HashMap<CellId, CellValue>,
+    c : &'l CoreTypes,
+    st : SymbolTable,
   ) -> Self
   {
     Builder {
@@ -72,8 +79,8 @@ impl <'l> Builder<'l> {
       current_sequence: None,
       label_stack: vec![],
       info,
-      namespace,
-      env,
+      dependencies,
+      c, st,
     }
   }
 }
@@ -214,12 +221,12 @@ fn find_label<'a>(b : &'a mut Builder, label : Symbol) -> &'a LabelledExpr {
 fn create_sequence(b : &mut Builder, name : &str) -> SequenceHandle {
   // Make sure the name is unique
   let mut i = 1;
-  let mut name_candidate = symbols::to_symbol(b.env.st, name);
+  let mut name_candidate = symbols::to_symbol(b.st, name);
   loop {
     let name_unique = b.bc.sequence_info.iter().find(|s| s.name == name_candidate).is_none();
     if name_unique { break }
     i += 1;
-    name_candidate = symbols::to_symbol(b.env.st, &format!("{}_{}", name, i));
+    name_candidate = symbols::to_symbol(b.st, &format!("{}_{}", name, i));
   }
   let seq = perm(SequenceInfo {
     index: b.bc.sequence_info.len(),
@@ -273,14 +280,15 @@ fn function_to_var(b : &mut Builder, f : Function) -> Var {
 }
 
 fn compile_function_def(
-  env : Env,
-  namespace : Namespace,
   info : &ReferenceInfo,
+  dependencies : &HashMap<CellId, CellValue>,
+  c : &CoreTypes,
+  st : SymbolTable,
   args : &[Expr],
   return_tag : Option<Expr>,
   body : Expr,
 ) -> Function {
-  let mut b = Builder::new(env, info, namespace);
+  let mut b = Builder::new(info, dependencies, c, st);
   b.bc.args = args.len();
   let mut arg_types = vec![];
   for a in args {
@@ -305,7 +313,7 @@ fn compile_function(
   let entry_seq = create_sequence(&mut b, "entry");
   set_current_sequence(&mut b, entry_seq);
 
-  let mut return_type = b.env.c.void_tag;
+  let mut return_type = b.c.void_tag;
   let result = compile_expr(&mut b, body);
   if let Some(r) = result {
     let v = r.to_var(&mut b);
@@ -330,11 +338,11 @@ fn compile_function(
 /// Compile basic imperative language into bytecode
 pub fn compile_expr_to_function(
   env : Env,
-  namespace : Namespace,
   info : &ReferenceInfo,
+  dependencies : &HashMap<CellId, CellValue>,
   root : Expr) -> Function 
 {
-  compile_function(Builder::new(env, info, namespace), root, &[], None)
+  compile_function(Builder::new(info, dependencies, &env.c, env.st), root, &[], None)
 }
 
 fn compile_if_else(b : &mut Builder, cond_expr : Expr, then_expr : Expr, else_expr : Expr) -> Option<Ref> {
@@ -343,7 +351,7 @@ fn compile_if_else(b : &mut Builder, cond_expr : Expr, then_expr : Expr, else_ex
   let else_seq = create_sequence(b, "else");
   let exit_seq = create_sequence(b, "exit");
   let cond = compile_expr_to_var(b, cond_expr).id;
-  assert_type(cond_expr.loc(), cond.t, b.env.c.bool_tag);
+  assert_type(cond_expr.loc(), cond.t, b.c.bool_tag);
   b.bc.instrs.push(Instr::CJump{ cond, then_seq, else_seq });
   set_current_sequence(b, then_seq);
   let then_result = compile_expr(b, then_expr);
@@ -463,8 +471,8 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     // boolean
     Literal(Val::Bool(v)) => {
       let e = InstrExpr::LiteralI64(if v { 1 } else { 0 });
-      let v = push_expr(b, e, b.env.c.u64_tag);
-      Some(compile_cast(b, v, b.env.c.bool_tag).to_ref())
+      let v = push_expr(b, e, b.c.u64_tag);
+      Some(compile_cast(b, v, b.c.bool_tag).to_ref())
     }
     // local reference
     Sym(sym) => {
@@ -480,15 +488,11 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
         }
         Some(&ReferenceType::GlobalDef) => {
           let id = CellId::DefCell(sym);
-          if let Some((_, cell)) = env::resolve_cell_uid(b.env, id, b.namespace) {
-            let e = InstrExpr::StaticValue(cell.t, cell.ptr);
-            let pointer_type = types::pointer_type(cell.t);
-            let v = push_expr(b, e, pointer_type);
-            Some(pointer_to_locator(v, true))
-          }
-          else {
-            panic!("symbol '{}' not defined ({})", sym, e.loc())
-          }
+          let cell = get_cell_value(b, id);
+          let e = InstrExpr::StaticValue(cell.t, cell.ptr);
+          let pointer_type = types::pointer_type(cell.t);
+          let v = push_expr(b, e, pointer_type);
+          Some(pointer_to_locator(v, true))
         }
         None => {
           panic!("expr is not a reference ({})", e.loc())
@@ -504,11 +508,11 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     // literal i64
     Literal(Val::I64(v)) => {
       let e = InstrExpr::LiteralI64(v);
-      Some(push_expr(b, e, b.env.c.i64_tag).to_ref())
+      Some(push_expr(b, e, b.c.i64_tag).to_ref())
     }
     // literal string
     Literal(Val::String(s)) => {
-      let t = types::pointer_type(b.env.c.string_tag);
+      let t = types::pointer_type(b.c.string_tag);
       let e = InstrExpr::StaticValue(t, Ptr::to_ptr(s) as *const ());
       let v = push_expr(b, e, t);
       Some(pointer_to_locator(v, false))
@@ -517,7 +521,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     List(LiteralSymbol, &[sym]) => {
       let s = sym.as_symbol();
       let e = InstrExpr::LiteralI64(s.as_i64());
-      return Some(push_expr(b, e, b.env.c.symbol_tag).to_ref());
+      return Some(push_expr(b, e, b.c.symbol_tag).to_ref());
     }
     // literal void
     Literal(Val::Void) => {
@@ -549,7 +553,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       let ptr = compile_cast(b, array_ptr, element_ptr_type);
       let len = compile_array_len(b, array);
       let e = InstrExpr::Init(perm_slice(&[ptr.id, len.id]));
-      let t = types::slice_type(&b.env.c, b.env.st, info.inner);
+      let t = types::slice_type(&b.c, b.st, info.inner);
       Some(push_expr(b, e, t).to_ref())
     }
     // array length
@@ -641,8 +645,12 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
         else { Some(ret) }
       };
       let f = compile_function_def(
-        b.env, b.namespace, b.info,
-        args.children(), return_tag, body);
+        b.info,
+        b.dependencies,
+        &b.c, b.st,
+        args.children(),
+        return_tag,
+        body);
       let v = function_to_var(b, f);
       Some(v.to_ref())
     }
@@ -669,7 +677,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       let then_seq = create_sequence(b, "then");
       let exit_seq = create_sequence(b, "exit");
       let cond_var = compile_expr_to_var(b, cond).id;
-      assert_type(cond.loc(), cond_var.t, b.env.c.bool_tag);
+      assert_type(cond.loc(), cond_var.t, b.c.bool_tag);
       b.bc.instrs.push(Instr::CJump{ cond: cond_var, then_seq, else_seq: exit_seq });
       set_current_sequence(b, then_seq);
       compile_expr(b, then_expr);
@@ -717,7 +725,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       // TODO: it's weird to codegen the expression when we only need its type
       let var = compile_expr_to_var(b, v);
       let e = InstrExpr::LiteralI64(Ptr::to_i64(var.t));
-      return Some(push_expr(b, e, b.env.c.type_tag).to_ref());
+      return Some(push_expr(b, e, b.c.type_tag).to_ref());
     }
     // deref
     List(Deref, &[pointer]) => {
@@ -761,15 +769,13 @@ fn compile_array_len(b : &mut Builder, array : Expr) -> Var {
   let r = compile_expr_to_ref(b, array);
   let info = types::type_as_array(&r.t).expect("expected array");
   let e = InstrExpr::LiteralI64(info.length as i64);
-  push_expr(b, e, b.env.c.i64_tag)
+  push_expr(b, e, b.c.i64_tag)
 }
 
 fn const_value(b : &mut Builder, e : Expr) -> CellValue {
   if let ExprShape::List(ExprTag::ConstExpr, &[ce]) = e.shape() {
     let id = CellId::ExprCell(ce);
-    let (_uid, cell) =
-      env::resolve_cell_uid(b.env, id, b.namespace)
-      .expect("const expr not evaluated");
+    let cell = get_cell_value(b, id);
     if cell.e != ce {
       panic!("const expressions '{}' and '{}' do not match", cell.e, ce);
     }
@@ -780,7 +786,7 @@ fn const_value(b : &mut Builder, e : Expr) -> CellValue {
 
 fn const_expr_to_type(b: &mut Builder, e : Expr) -> TypeHandle {
   let cev = const_value(b, e);
-  if cev.t != b.env.c.type_tag {
+  if cev.t != b.c.type_tag {
     println!("expected a type expression, found {}", cev.t);
   }
   unsafe { *(cev.ptr as *const TypeHandle) }
@@ -894,7 +900,7 @@ fn compile_intrinic_op(b : &mut Builder, e : Expr, op : Operator, args : &[Expr]
   if let [v1, v2] = args {
     let v1 = compile_expr_to_var(b, *v1);
     let v2 = compile_expr_to_var(b, *v2);
-    if let Some(t) = binary_op_type(&b.env.c, op, v1.t, v2.t) {
+    if let Some(t) = binary_op_type(&b.c, op, v1.t, v2.t) {
       let e = InstrExpr::BinaryOp(op, v1.id, v2.id);
       return push_expr(b, e, t);
     }
@@ -903,7 +909,7 @@ fn compile_intrinic_op(b : &mut Builder, e : Expr, op : Operator, args : &[Expr]
   }
   if let [v1] = args {
     let v1 = compile_expr_to_var(b, *v1);
-    if let Some(t) = unary_op_type(&b.env.c, op, v1.t) {
+    if let Some(t) = unary_op_type(&b.c, op, v1.t) {
       let e = InstrExpr::UnaryOp(op, v1.id);
       return push_expr(b, e, t);
     }
@@ -915,6 +921,6 @@ fn compile_intrinic_op(b : &mut Builder, e : Expr, op : Operator, args : &[Expr]
 
 fn compile_expr_value(b : &mut Builder, expr : Expr) -> Var {
   let e = InstrExpr::LiteralI64(Ptr::to_ptr(expr) as i64);
-  let expr_tag = b.env.c.expr_tag;
+  let expr_tag = b.c.expr_tag;
   push_expr(b, e, expr_tag)
 }

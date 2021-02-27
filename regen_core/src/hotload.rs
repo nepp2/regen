@@ -22,6 +22,7 @@ enum CellStatus {
 fn resolve_dependencies(
   env : Env,
   namespace : Namespace,
+  current_module : Ptr<CodeModule>,
   new_cells : &HashMap<CellUid, CellStatus>,
   expr : Expr,
   info : &ReferenceInfo,
@@ -31,68 +32,88 @@ fn resolve_dependencies(
   let id = CellUid::expr(expr, namespace);
   // check dependencies are available
   for &dep_id in &info.dependencies {
-    if let Some((dep_uid, dep_cell)) = env::resolve_cell_uid(env, dep_id, namespace) {
-      resolved.insert(dep_uid);
-      if let Some(&status) = new_cells.get(&dep_uid) {
-        if status == CellStatus::Broken {
-          return error(expr.loc(),
-            format!("{} depends on broken dependency {}", id, dep_id));
-        }
-        // dependency found
-        continue;
+    let r = resolve_cell_uid(env, namespace, current_module, new_cells, dep_id);
+    if let Some((dep_uid, status)) = r {
+      resolved.insert(dep_uid);      
+      if status == CellStatus::Broken {
+        return error(expr.loc(),
+          format!("{} depends on broken dependency {}", id, dep_id));
       }
-      else if expr.loc().module.name != dep_cell.e.loc().module.name {
-        // this is an external dependency
-        continue;
-      }
+      // dependency found
+      continue;
     }
-    // if this line is reached, the dependency isn't available
     return error(expr.loc(),
       format!("{} is missing dependency {}", id, dep_id));
   }
   Ok(resolved)
 }
 
-fn is_external_def(env : Env, current_module : Ptr<CodeModule>, uid : CellUid) -> bool {
-  // const expressions should always be local, but their CellIds will clash.
-  // long-term fix:
-  //    - const expressions are refcounted
-  //    - it doesn't matter which module they are loaded from
-  let TODO = ();
-  if let DefCell(_) = uid.id {
-    if let Some(cell) = env.cells.get(&uid) {
+fn resolve_cell_uid(
+  env : Env,
+  namespace : Namespace,
+  current_module : Ptr<CodeModule>,
+  new_cells : &HashMap<CellUid, CellStatus>,
+  id : CellId,
+) -> Option<(CellUid, CellStatus)>
+{
+  // Look for the id in the current module
+  let mut names = namespace.names;
+  loop {
+    let uid = CellUid { id, namespace: Namespace { names } };
+    if let Some(&status) = new_cells.get(&uid) {
+      return Some((uid, status));
+    }
+    if names.len() == 0 {
+      break;
+    }
+    names = names.slice_range(0..names.len()-1);
+  }
+  // Accept external defs
+  if let DefCell(_) = id {
+    if let Some((uid, cell)) = env::resolve_cell_uid(env, id, namespace) {
       if cell.e.loc().module.name != current_module.name {
-        return true;
+        return Some((uid, CellStatus::Unchanged));
       }
     }
   }
-  false
+  None
 }
 
 fn get_dependencies_status(
   env : Env,
+  namespace : Namespace,
   uid : CellUid,
   current_module : Ptr<CodeModule>,
   new_cells : &HashMap<CellUid, CellStatus>,
 ) -> CellStatus
 {
+  use CellStatus::*;
   if let Some(deps) = env.dependencies.get(&uid) {
     let mut changed = false;
-    for dep_uid in deps {
-      if !is_external_def(env, current_module, *dep_uid) {
-        let status = new_cells.get(dep_uid);
-        if status == Some(&CellStatus::Broken) {
-          return CellStatus::Broken
-        }
-        if status != Some(&CellStatus::Unchanged) {
+    for &prev_dep_uid in deps {
+      let r = resolve_cell_uid(env, namespace, current_module, new_cells, prev_dep_uid.id);
+      if let Some((dep_uid, status)) = r {
+        if dep_uid != prev_dep_uid {
           changed = true;
         }
+        match status {
+          Broken => {
+            return Broken;
+          }
+          Changed | New => {
+            changed = true;
+          }
+          Unchanged => (),
+        }
+      }
+      else {
+        changed = true;
       }
     }
-    if changed { CellStatus::Changed } else { CellStatus::Unchanged }
+    if changed { Changed } else { Unchanged }
   }
   else {
-    CellStatus::New
+    New
   }
 }
 
@@ -132,16 +153,22 @@ fn load_expr(
 ) -> Result<(CellValue, HashSet<CellUid>), Error>
 {
   let info = semantic::get_semantic_info(expr);
-  let deps = resolve_dependencies(env, namespace, new_cells, expr, &info)?;
+  let current_module = expr.loc().module;
+  let deps = resolve_dependencies(env, namespace, current_module, new_cells, expr, &info)?;
   // TODO: using catch unwind is very ugly. Replace with proper error handling.
   let v = std::panic::catch_unwind(|| {
-    eval_expr(env, namespace, expr, &info)
+    eval_expr(env, expr, &info, &deps)
   }).map_err(|_| error_raw(SrcLocation::zero(), "regen eval panic!"))?;
   Ok((v, deps))
 }
 
-fn eval_expr(env : Env, namespace : Namespace, e : Expr, info : &ReferenceInfo) -> CellValue {
-  let f = compile::compile_expr_to_function(env, namespace, info, e);
+fn eval_expr(env : Env, e : Expr, info : &ReferenceInfo, deps : &HashSet<CellUid>) -> CellValue {
+  let mut resolved_deps = HashMap::new();
+  for &uid in deps {
+    let v = env::get_cell_value(env, uid).unwrap();
+    resolved_deps.insert(uid.id, v);
+  }
+  let f = compile::compile_expr_to_function(env, info, &resolved_deps, e);
   let expr_type = types::type_as_function(&f.t).unwrap().returns;
   // TODO: it's wasteful to allocate for types that are 64bits wide or smaller
   let ptr = {
@@ -152,28 +179,13 @@ fn eval_expr(env : Env, namespace : Namespace, e : Expr, info : &ReferenceInfo) 
   CellValue { e, t: expr_type, ptr }
 }
 
-fn load_def(
-  mut env : Env,
-  namespace : Namespace,
-  new_cells : &mut HashMap<CellUid, CellStatus>,
-  uid : CellUid,
-  value_expr : Expr,
-) -> Result<(), Error>
-{
-  env::set_active_definition(env, Some(uid));
-  let (v, deps) = load_expr(env, namespace, new_cells, value_expr)?;
-  env::set_active_definition(env, None);
-  env.cells.insert(uid, v);
-  env.dependencies.insert(uid, deps);
-  Ok(())
-}
-
 fn unload_cell(env : Env, uid : CellUid){
   env::unload_cell(env, uid);
 }
 
-fn get_def_status(
+fn get_cell_status(
   env : Env,
+  namespace : Namespace,
   uid : CellUid,
   value_expr : Expr,
   new_cells : &HashMap<CellUid, CellStatus>,
@@ -186,7 +198,7 @@ fn get_def_status(
       CellStatus::Changed
     }
     else {
-      get_dependencies_status(env, uid, value_expr.loc().module, new_cells)
+      get_dependencies_status(env, namespace, uid, value_expr.loc().module, new_cells)
     }
   }
   else {
@@ -230,7 +242,7 @@ fn hotload_cell(
   hotload_nested_const_exprs(env, namespace, expr, new_cells);
   // check whether the def needs to be loaded/reloaded
   use CellStatus::*;
-  let mut new_cell_state = get_def_status(env, uid, expr, new_cells);
+  let mut new_cell_state = get_cell_status(env, namespace, uid, expr, new_cells);
   if new_cell_state == Changed {
     unload_cell(env, uid);
   }

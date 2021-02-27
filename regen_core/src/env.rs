@@ -190,7 +190,7 @@ impl fmt::Display for CellId {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
       DefCell(name) => write!(f, "{}", name),
-      ExprCell(expr) => write!(f, "const_expr({})", expr.loc()),
+      ExprCell(expr) => write!(f, "expr({})", expr.loc()),
     }
   }
 }
