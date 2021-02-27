@@ -54,10 +54,6 @@ extern {
   pub fn memset(dest : *mut u8, val: i32, count : usize) -> *mut u8;
 }
 
-pub extern "C" fn env_get_global_ptr(env : Env, sym : Symbol) -> *const () {
-  env::get_def_cell(&env, sym).unwrap().ptr
-}
-
 pub extern "C" fn symbol_display(sym : Symbol) {
   println!("symbol: {}", sym)
 }
@@ -183,10 +179,7 @@ pub fn load_ffi_libs(e : Env) {
 
   define_global(e, "memset", memset as u64,
     c_function_type(&[void_ptr, u32, u64], void_ptr));
-
-  define_global(e, "env_get_global_ptr", env_get_global_ptr as u64,
-    c_function_type(&[void_ptr, symbol], void_ptr));
-
+  
   // ----------- Bind signal functions ------------
 
   define_global(e, "register_tick_signal", register_tick_signal as u64,

@@ -3,6 +3,8 @@
 
 def c = 20;
 
+def a = 70;
+
 def v = {
   def a = 6;
 
@@ -12,3 +14,5 @@ def v = {
 };
 
 print v;
+
+print a + c;

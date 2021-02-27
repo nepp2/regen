@@ -5,7 +5,7 @@
 /// regions can be dropped. This will be unsafe from Rust's perspective, but
 /// will instead reflect the semantics of the Regen language.
 
-use std::fmt;
+use std::{fmt, ops::Range};
 use std::ops::{Deref, DerefMut, Index, RangeFrom};
 use core::hash::{Hash, Hasher};
 use std::borrow;
@@ -132,7 +132,7 @@ impl <T: 'static> SlicePtr<T> {
     self.len
   }
 
-  pub fn slice_range(&self, r : RangeFrom<usize>) -> SlicePtr<T> {
+  pub fn slice_range(&self, r : Range<usize>) -> SlicePtr<T> {
     let s = &self.as_slice()[r];
     SlicePtr{ p: s.as_ptr(), len: s.len() }
   }

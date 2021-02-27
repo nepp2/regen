@@ -1,17 +1,16 @@
 
 use crate::{
   compile,
-  env::{self, Env, CellId, CellValue},
+  env::{self, Env, CellId, CellUid, CellValue, Namespace},
   error::{Error, error, error_raw},
   interpret,
   parse::{self, CodeModule, Expr, ExprShape, ExprTag, SrcLocation},
   perm_alloc::Ptr,
   semantic::{self, ReferenceInfo},
-  symbols::Symbol,
   types,
 };
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use CellId::*;
 
@@ -20,42 +19,48 @@ enum CellStatus {
   New, Changed, Unchanged, Broken,
 }
 
-fn check_dependencies(
+fn resolve_dependencies(
   env : Env,
-  new_cells : &HashMap<CellId, CellStatus>,
+  namespace : Namespace,
+  new_cells : &HashMap<CellUid, CellStatus>,
   expr : Expr,
   info : &ReferenceInfo,
-) -> Result<(), Error>
+) -> Result<HashSet<CellUid>, Error>
 {
-  let id = ConstCell(expr);
+  let mut resolved = HashSet::new();
+  let id = CellUid::expr(expr, namespace);
   // check dependencies are available
-  for dep_id in &info.dependencies {
-    match new_cells.get(dep_id) {
-      Some(CellStatus::Broken) => {
-        return error(expr.loc(),
-          format!("{} depends on broken dependency {}", id, dep_id));
-      }
-      None => {
-        if let Some(v) = env.cells.get(&dep_id) {
-          if expr.loc().module.name != v.e.loc().module.name {
-            // this is an external dependency
-            continue;
-          }
+  for &dep_id in &info.dependencies {
+    if let Some((dep_uid, dep_cell)) = env::resolve_cell_uid(env, dep_id, namespace) {
+      resolved.insert(dep_uid);
+      if let Some(&status) = new_cells.get(&dep_uid) {
+        if status == CellStatus::Broken {
+          return error(expr.loc(),
+            format!("{} depends on broken dependency {}", id, dep_id));
         }
-        return error(expr.loc(),
-          format!("{} is missing dependency {}", id, dep_id));
+        // dependency found
+        continue;
       }
-      _ => (),
+      else if expr.loc().module.name != dep_cell.e.loc().module.name {
+        // this is an external dependency
+        continue;
+      }
     }
+    // if this line is reached, the dependency isn't available
+    return error(expr.loc(),
+      format!("{} is missing dependency {}", id, dep_id));
   }
-  Ok(())
+  Ok(resolved)
 }
 
-fn is_external_dependency(env : Env, current_module : Ptr<CodeModule>, id : CellId) -> bool {
+fn is_external_def(env : Env, current_module : Ptr<CodeModule>, uid : CellUid) -> bool {
   // const expressions should always be local, but their CellIds will clash.
+  // long-term fix:
+  //    - const expressions are refcounted
+  //    - it doesn't matter which module they are loaded from
   let TODO = ();
-  if let DefCell(_) = id {
-    if let Some(cell) = env.cells.get(&id) {
+  if let DefCell(_) = uid.id {
+    if let Some(cell) = env.cells.get(&uid) {
       if cell.e.loc().module.name != current_module.name {
         return true;
       }
@@ -66,16 +71,16 @@ fn is_external_dependency(env : Env, current_module : Ptr<CodeModule>, id : Cell
 
 fn get_dependencies_status(
   env : Env,
-  id : CellId,
+  uid : CellUid,
   current_module : Ptr<CodeModule>,
-  new_cells : &HashMap<CellId, CellStatus>,
+  new_cells : &HashMap<CellUid, CellStatus>,
 ) -> CellStatus
 {
-  if let Some(deps) = env.dependencies.get(&id) {
+  if let Some(deps) = env.dependencies.get(&uid) {
     let mut changed = false;
-    for dep_id in deps {
-      if !is_external_dependency(env, current_module, *dep_id) {
-        let status = new_cells.get(dep_id);
+    for dep_uid in deps {
+      if !is_external_def(env, current_module, *dep_uid) {
+        let status = new_cells.get(dep_uid);
         if status == Some(&CellStatus::Broken) {
           return CellStatus::Broken
         }
@@ -92,23 +97,51 @@ fn get_dependencies_status(
 }
 
 
-fn load_expr(
-  env : Env,
-  new_cells : &HashMap<CellId, CellStatus>,
+/// Returns the evaluated expr value, and the cell's resolved dependencies
+fn load_cell(
+  mut env : Env,
+  namespace : Namespace,
+  new_cells : &HashMap<CellUid, CellStatus>,
+  uid : CellUid,
   expr : Expr,
-) -> Result<(CellValue, ReferenceInfo), Error>
+) -> Result<(), Error>
 {
-  let info = semantic::get_semantic_info(expr);
-  check_dependencies(env, new_cells, expr, &info)?;
-  // TODO: using catch unwind is very ugly. Replace with proper error handling.
-  let v = std::panic::catch_unwind(|| {
-    eval_expr(env, expr, &info)
-  }).map_err(|_| error_raw(SrcLocation::zero(), "regen eval panic!"))?;
-  Ok((v, info))
+  match uid.id {
+    DefCell(_) => {
+      env::set_active_definition(env, Some(uid));
+      let (v, deps) = load_expr(env, namespace, new_cells, expr)?;
+      env::set_active_definition(env, None);
+      env.cells.insert(uid, v);
+      env.dependencies.insert(uid, deps);
+    }
+    ExprCell(_) => {
+      let (v, deps) = load_expr(env, namespace, new_cells, expr)?;
+      env.cells.insert(uid, v);
+      env.dependencies.insert(uid, deps);
+    }
+  }
+  Ok(())
 }
 
-fn eval_expr(env : Env, e : Expr, info : &ReferenceInfo) -> CellValue {
-  let f = compile::compile_expr_to_function(env, info, e);
+/// Returns the evaluated expr value, and the cell's resolved dependencies
+fn load_expr(
+  env : Env,
+  namespace : Namespace,
+  new_cells : &HashMap<CellUid, CellStatus>,
+  expr : Expr,
+) -> Result<(CellValue, HashSet<CellUid>), Error>
+{
+  let info = semantic::get_semantic_info(expr);
+  let deps = resolve_dependencies(env, namespace, new_cells, expr, &info)?;
+  // TODO: using catch unwind is very ugly. Replace with proper error handling.
+  let v = std::panic::catch_unwind(|| {
+    eval_expr(env, namespace, expr, &info)
+  }).map_err(|_| error_raw(SrcLocation::zero(), "regen eval panic!"))?;
+  Ok((v, deps))
+}
+
+fn eval_expr(env : Env, namespace : Namespace, e : Expr, info : &ReferenceInfo) -> CellValue {
+  let f = compile::compile_expr_to_function(env, namespace, info, e);
   let expr_type = types::type_as_function(&f.t).unwrap().returns;
   // TODO: it's wasteful to allocate for types that are 64bits wide or smaller
   let ptr = {
@@ -121,39 +154,39 @@ fn eval_expr(env : Env, e : Expr, info : &ReferenceInfo) -> CellValue {
 
 fn load_def(
   mut env : Env,
-  new_cells : &mut HashMap<CellId, CellStatus>,
-  name : Symbol,
+  namespace : Namespace,
+  new_cells : &mut HashMap<CellUid, CellStatus>,
+  uid : CellUid,
   value_expr : Expr,
 ) -> Result<(), Error>
 {
-  env::set_active_definition(env, Some(name));
-  let (v, info) = load_expr(env, new_cells, value_expr)?;
+  env::set_active_definition(env, Some(uid));
+  let (v, deps) = load_expr(env, namespace, new_cells, value_expr)?;
   env::set_active_definition(env, None);
-  let id = DefCell(name);
-  env.cells.insert(id, v);
-  env.dependencies.insert(id, info.dependencies);
+  env.cells.insert(uid, v);
+  env.dependencies.insert(uid, deps);
   Ok(())
 }
 
-fn unload_cell(env : Env, id : CellId){
-  env::unload_cell(env, id);
+fn unload_cell(env : Env, uid : CellUid){
+  env::unload_cell(env, uid);
 }
 
 fn get_def_status(
   env : Env,
-  name : Symbol,
+  uid : CellUid,
   value_expr : Expr,
-  new_cells : &HashMap<CellId, CellStatus>,
+  new_cells : &HashMap<CellUid, CellStatus>,
 ) -> CellStatus
 {
   // if already defined
-  if let Some(cell) = env.cells.get(&DefCell(name)) {
+  if let Some(cell) = env.cells.get(&uid) {
     // check if expression has changed
     if cell.e != value_expr {
       CellStatus::Changed
     }
     else {
-      get_dependencies_status(env, DefCell(name), value_expr.loc().module, new_cells)
+      get_dependencies_status(env, uid, value_expr.loc().module, new_cells)
     }
   }
   else {
@@ -163,85 +196,56 @@ fn get_def_status(
 
 fn hotload_nested_const_exprs(
   env : Env,
+  namespace : Namespace,
   expr : Expr,
-  new_cells : &mut HashMap<CellId, CellStatus>,
+  new_cells : &mut HashMap<CellUid, CellStatus>,
 ) {
   let const_exprs = semantic::get_ordered_const_exprs(expr);
   for e in const_exprs {
-    hotload_expr(env, e, new_cells);
+    let uid = CellUid::expr(e, namespace);
+    hotload_cell(env, namespace, uid, e, new_cells);
   }
 }
 
-fn hotload_def(
+fn hotload_cell(
   mut env : Env,
-  name : Symbol,
-  value_expr : Expr,
-  new_cells : &mut HashMap<CellId, CellStatus>,
+  namespace : Namespace,
+  uid : CellUid,
+  expr : Expr,
+  new_cells : &mut HashMap<CellUid, CellStatus>,
 )
 {
-  let id = DefCell(name);
-  if new_cells.contains_key(&id) {
-    println!("def {} defined twice!", name);
+  if new_cells.contains_key(&uid) {
+    match uid.id {
+      DefCell(_) => {
+        println!("def {} defined twice!", uid);
+        return;
+      }
+      ExprCell(_) => {
+        return;
+      }
+    }
   }
   // make sure any nested const expressions have been loaded
-  hotload_nested_const_exprs(env, value_expr, new_cells);
-  // check whether the def needs to be updated
+  hotload_nested_const_exprs(env, namespace, expr, new_cells);
+  // check whether the def needs to be loaded/reloaded
   use CellStatus::*;
-  let mut new_cell_state = get_def_status(env, name, value_expr, new_cells);
+  let mut new_cell_state = get_def_status(env, uid, expr, new_cells);
   if new_cell_state == Changed {
-    unload_cell(env, id);
+    unload_cell(env, uid);
   }
   if let New | Changed = new_cell_state {
-    let r = load_def(env, new_cells, name, value_expr);
+    let r = load_cell(env, namespace, new_cells, uid, expr);
     if let Err(e) = r {
       println!("{}", e.display());
       new_cell_state = Broken;
     }
   }
   if new_cell_state == Unchanged {
-    // Update nodes so that their text locations are correct
-    env.cells.get_mut(&id).unwrap().e = value_expr;
+    // Update exprs so that their text locations are correct
+    env.cells.get_mut(&uid).unwrap().e = expr;
   }
-  new_cells.insert(id, new_cell_state);
-}
-
-fn hotload_expr(
-  mut env : Env,
-  expr : Expr,
-  new_cells : &mut HashMap<CellId, CellStatus>,
-)
-{
-  let id = ConstCell(expr);
-  if new_cells.contains_key(&id) {
-    return;
-  }
-  // make sure any nested const expressions have been loaded
-  hotload_nested_const_exprs(env, expr, new_cells);
-  // check whether this expr needs to be loaded/reloaded
-  use CellStatus::*;
-  let mut new_cell_state =
-    get_dependencies_status(env, id, expr.loc().module, new_cells);
-  if new_cell_state == Changed {
-    unload_cell(env, id);
-  }
-  if let New | Changed = new_cell_state {
-    // load the main expr
-    match load_expr(env, new_cells, expr) {
-      Ok((v, info)) => {
-        env.cells.insert(id, v);
-        env.dependencies.insert(id, info.dependencies);
-      }
-      Err(e) => {
-        println!("{}", e.display());
-        new_cell_state = Broken;
-      }
-    }
-  }
-  if new_cell_state == Unchanged {
-    // Update nodes so that their text locations are correct
-    env.cells.get_mut(&id).unwrap().e = expr;
-  }
-  new_cells.insert(id, new_cell_state);
+  new_cells.insert(uid, new_cell_state);
 }
 
 pub fn interpret_module(module_name : &str, code : &str, env : Env) {
@@ -250,22 +254,29 @@ pub fn interpret_module(module_name : &str, code : &str, env : Env) {
 
 fn hotload_cells(
   env : Env,
-  new_cells : &mut HashMap<CellId, CellStatus>,
-  cell_exprs : &[Expr]
+  namespace : Namespace,
+  new_cells : &mut HashMap<CellUid, CellStatus>,
+  cell_exprs : &[Expr],
 )
 {
   for &e in cell_exprs {
     match e.shape() {
       ExprShape::List(ExprTag::Def, &[name, _args, defs, value_expr]) => {
-        hotload_cells(env, new_cells, defs.children());
         let name = name.as_symbol();
-        hotload_def(env, name, value_expr, new_cells);
+        let uid = CellUid::def(name, namespace);
+        // a new nested namespace is only needed if the def has child defs
+        let nested_namespace = if defs.children().len() > 0 {
+          namespace.extend(name)
+        }
+        else {
+          namespace
+        };
+        hotload_cells(env, nested_namespace, new_cells, defs.children());
+        hotload_cell(env, nested_namespace, uid, value_expr, new_cells);
       }
       _ => {
-        let id = ConstCell(e);
-        if !new_cells.contains_key(&id) {
-          hotload_expr(env, e, new_cells);
-        }
+        let uid = CellUid::expr(e, namespace);
+        hotload_cell(env, namespace, uid, e, new_cells);
       }
     }
   }
@@ -282,7 +293,7 @@ pub fn hotload_changes(module_name : &str, code : &str, env : Env) {
 
   // Find new and unchanged cells
   let mut new_cells = HashMap::new();
-  hotload_cells(env, &mut new_cells, &exprs);
+  hotload_cells(env, Namespace::new(&[]), &mut new_cells, &exprs);
 
   // unload any cells that were deleted or broken
   let mut deletion_list = vec![];

@@ -1,11 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{
-  env::CellId,
-  parse::{Expr, ExprShape, ExprTag},
-  perm_alloc::Ptr,
-  symbols::Symbol
-};
+use crate::{env::CellId, parse::{Expr, ExprShape, ExprTag}, perm_alloc::Ptr, symbols::Symbol};
 
 use ExprTag::*;
 use ExprShape::*;
@@ -13,7 +8,7 @@ use ReferenceType::*;
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum ReferenceType {
-  Global, Local,
+  GlobalDef, Local,
 }
 
 /// uses expr pointers as unique keys in a map
@@ -69,8 +64,9 @@ fn find_refs(
           info.references.insert(expr, Local);
         }
         else {
-          info.references.insert(expr, Global);
-          info.dependencies.insert(CellId::DefCell(name));
+          info.references.insert(expr, GlobalDef);
+          let cell = CellId::DefCell(name);
+          info.dependencies.insert(cell);
         }
       }
     }
@@ -100,7 +96,11 @@ fn find_refs(
       return;
     }
     List(ConstExpr, &[c]) => {
-      info.dependencies.insert(CellId::ConstCell(c));
+      info.dependencies.insert(CellId::ExprCell(c));
+      return;
+    }
+    List(Def, _) => {
+      let TODO = (); // Should defs actually be ignored here?
       return;
     }
     _ => (),

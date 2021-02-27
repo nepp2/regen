@@ -1,14 +1,6 @@
 /// Compiles core language into bytecode
 
-use crate::{
-  bytecode,
-  env::{self, Env, CellValue},
-  parse,
-  perm_alloc,
-  semantic::{ReferenceType, ReferenceInfo},
-  symbols,
-  types
-};
+use crate::{bytecode, env::{self, CellId, CellValue, Env, Namespace}, parse, perm_alloc, semantic::{ReferenceType, ReferenceInfo}, symbols, types};
 
 use bytecode::{
   SequenceHandle, SequenceInfo, InstrExpr, FunctionBytecode,
@@ -53,6 +45,9 @@ struct Builder<'l> {
   /// contains a mapping from expr to reference type (local or global)
   info : &'l ReferenceInfo,
 
+  /// the namespace this expression is evaluating in
+  namespace : Namespace,
+
   /// the environment containing all visible symbols
   env : Env,
 }
@@ -61,6 +56,7 @@ impl <'l> Builder<'l> {
   fn new(
     env : Env,
     info : &'l ReferenceInfo,
+    namespace : Namespace,
   ) -> Self
   {
     Builder {
@@ -75,8 +71,9 @@ impl <'l> Builder<'l> {
       seq_completion: vec![],
       current_sequence: None,
       label_stack: vec![],
-      env,
       info,
+      namespace,
+      env,
     }
   }
 }
@@ -276,13 +273,14 @@ fn function_to_var(b : &mut Builder, f : Function) -> Var {
 }
 
 fn compile_function_def(
-  env: Env,
+  env : Env,
+  namespace : Namespace,
   info : &ReferenceInfo,
   args : &[Expr],
   return_tag : Option<Expr>,
   body : Expr,
 ) -> Function {
-  let mut b = Builder::new(env, info);
+  let mut b = Builder::new(env, info, namespace);
   b.bc.args = args.len();
   let mut arg_types = vec![];
   for a in args {
@@ -331,11 +329,12 @@ fn compile_function(
 
 /// Compile basic imperative language into bytecode
 pub fn compile_expr_to_function(
-  env: Env,
+  env : Env,
+  namespace : Namespace,
   info : &ReferenceInfo,
   root : Expr) -> Function 
 {
-  compile_function(Builder::new(env, info), root, &[], None)
+  compile_function(Builder::new(env, info, namespace), root, &[], None)
 }
 
 fn compile_if_else(b : &mut Builder, cond_expr : Expr, then_expr : Expr, else_expr : Expr) -> Option<Ref> {
@@ -479,8 +478,9 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
             panic!("local var not found in codegen!")
           }
         }
-        Some(ReferenceType::Global) => {
-          if let Some(cell) = env::get_def_cell(&b.env, sym) {
+        Some(&ReferenceType::GlobalDef) => {
+          let id = CellId::DefCell(sym);
+          if let Some((_, cell)) = env::resolve_cell_uid(b.env, id, b.namespace) {
             let e = InstrExpr::StaticValue(cell.t, cell.ptr);
             let pointer_type = types::pointer_type(cell.t);
             let v = push_expr(b, e, pointer_type);
@@ -641,7 +641,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
         else { Some(ret) }
       };
       let f = compile_function_def(
-        b.env, b.info,
+        b.env, b.namespace, b.info,
         args.children(), return_tag, body);
       let v = function_to_var(b, f);
       Some(v.to_ref())
@@ -766,11 +766,14 @@ fn compile_array_len(b : &mut Builder, array : Expr) -> Var {
 
 fn const_value(b : &mut Builder, e : Expr) -> CellValue {
   if let ExprShape::List(ExprTag::ConstExpr, &[ce]) = e.shape() {
-    let cev = env::get_const_value(b.env, ce).expect("const expr not evaluated");
-    if cev.e != ce {
-      panic!("const expressions '{}' and '{}' do not match", cev.e, ce);
+    let id = CellId::ExprCell(ce);
+    let (_uid, cell) =
+      env::resolve_cell_uid(b.env, id, b.namespace)
+      .expect("const expr not evaluated");
+    if cell.e != ce {
+      panic!("const expressions '{}' and '{}' do not match", cell.e, ce);
     }
-    return cev;
+    return cell;
   }
   panic!("expected const expression, found '{}' at ({})", e, e.loc())
 }

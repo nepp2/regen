@@ -74,55 +74,93 @@ I need to implement simple subgraphs first.
 * [x] Parse subgraph into expr
 * [x] Semantic pass needs to treat each sub-expression as a separate function
 
-## Problem
+# Subgraph design
 
-I use def names or expr equivalence to identify a def. How do I identify a graph? For example:
+Any def can contain defs, and is thus a subgraph.
 
-```
-def v = {
-  let a = graph {
-    def x = 10;
-    def y = x + 20;
-  };
-  let b = graph {
-    def x = 20;
-    def y = x + 30;
-  };
-  a + b
-};
-```
+Templates are then just a def with parameters.
 
-Suppose the first `x` value is changed. How do we know which `x` to update? How do we know which `y` to update? The problem is that we don't actually know which graph we are in. We can't just use the structure of the graph, because it has changed. It won't match either of the original graphs.
+All cells in a subgraph are tracked in the same global environment. It's just a question of visibility. cells defined inside a def should not be visible outside it, without mentioning their namespace.
 
-The simplest solution is to give graphs mandatory names, like defs:
+```regen
+  def a = 10;
+  def b = 10;
+  def c = 10;
 
-```
-def v = {
-  graph a {
-    def x = 10;
-    def y = x + 20;
-  };
-  graph b {
-    def x = 20;
-    def y = x + 30;
-  };
-  a + b
-};
+  def foo = {
+    def b = 20;
+
+    def bar {
+      def c = 30;
+    }
+  }
 ```
 
-Then graphs and defs can appear anywhere, but they are obscured behind the parent def. In that case, the graph keyword is not really achieving anything. This could just as easily be written as:
+globally, this defines:
 
-```
-def v = {
-  def a = {
-    def x = 10;
-    def y = x + 20;
-  };
-  def b = {
-    def x = 20;
-    def y = x + 30;
-  };
-  a + b
-};
+* `a`
+* `b`
+* `c`
+* `foo::b`
+* `foo::bar::c`
+
+Within `foo::bar` we have to find symbols from all three namepsaces. Priority must be given to the most local scope.
+
+Def can be a (namespace, symbol) pair. A namespace can be a PtrSlice of symbols.
+
+## Shadowing problem
+
+Two constant expressions defined in different namespaces may not be equivalent.
+
+In fact it's very difficult to tell if a cell has been changed by the introduction of a more local def, which shadows an existing def.
+
+```regen
+  def a = 1;
+
+  def foo = {
+    def a = 2; // this line is hotloaded in after the initial evaluation
+
+    a
+  }
 ```
 
+The nested `a` could find the def it is shadowing, and mark its dependents to indicate that they should check their dependencies again.
+
+Shadowed defs could be stored on some kind of def stack, and every def encountered in within the namespace checks its dependents against everything in the def stack.
+
+I should seek a solution to this shadowing problem that is compatible with an evaluation mode that doesn't depend on def order.
+
+## Namespaced const expression
+
+```regen
+  def foo = {
+    def a = i64;
+    fun (v : a) {
+      v + v
+    }
+  }
+
+  def a = i32;
+
+  fun bar(v : a) {
+    v + v
+  }
+```
+The problem here is that the value of the constant expression `a` will be cached as `i64`, which will be used for both `foo` and `bar`. In reality it is sensitive to the def scope.
+
+So const expressions should also be namespaced? I suppose they can be copied from each other if their dependencies are equal.
+
+# Rewrite hotload
+
+* Iterate over loaded cells
+  * Equality comparison on exprs of all loaded cells
+    * Mark changed as appropriate
+    * Add to eval list
+  * Keep track of all new cells
+* Iterate over module's cells
+  * Overwrite exprs (to update location data)
+  * Mark the deleted cells (they didn't appear in the new code)
+  * Question: should cells be grouped by module in the environment?
+* Iterate over changed cells
+  * Mark their dependents as changed, recursively
+* 
