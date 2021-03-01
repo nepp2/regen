@@ -105,7 +105,6 @@ fn find_refs(
       return;
     }
     List(Def, _) => {
-      let TODO = (); // Should defs actually be ignored here?
       return;
     }
     _ => (),

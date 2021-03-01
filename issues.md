@@ -1,8 +1,12 @@
 # Issues
 
-* Add support for binding event streams to defs
+* Const expressions are needlessly duplicated when nested in new namespaces
 
-* Fix event handler ordering
+* Hotloader doesn't support changeset smaller than a full module
+
+* Add support for binding signals to defs
+
+* Fix signal handler ordering
 
 * Fix the code/value dependency issue
   * `def val = 5;`

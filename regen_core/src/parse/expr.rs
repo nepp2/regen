@@ -48,7 +48,7 @@ pub enum ExprTag {
   StructInit,
   ZeroInit,
   ArrayInit,
-  ArrayIndex,
+  Index,
   ArrayAsSlice,
   PtrIndex,
   FieldIndex,

@@ -1,6 +1,30 @@
 
-// GRAPHS ARE THE ANSWER
+print (typeof struct_type);
+
+// simplest solution for the ambiguous template problem
+// is that templates only work for type values. This isn't ideal,
+// but it can be fixed/expanded later. The only limitation is that
+// the values must be freely comparable.
+
+// could use a special-case type matching algorithm to infer generic function calls
+// could also use a more conventional syntax to make this behaviour less surprising.
 
 def list[T] = {
-  struct { data : ptr T, length : i64 }
-};
+  def inner = struct { data : ptr T, length : i64, capacity : i64 };
+
+  ptr inner
+}
+
+def list_new[T] = fun() {
+  // create new list
+}
+
+def list_add[T] = fun(l : list[T], v : T){
+  // append an element
+}
+
+let vs = list_new[i64]();
+
+list_add(vs, 6);
+
+list_len(vs);

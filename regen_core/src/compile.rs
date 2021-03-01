@@ -560,8 +560,8 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     List(ArrayLen, &[array]) => {
       Some(compile_array_len(b, array).to_ref())
     }
-    // array index
-    List(ArrayIndex, &[array , index]) => {
+    // index
+    List(Index, &[array , index]) => {
       let v = compile_expr_to_ref(b, array);
       let info = if let Some(info) = types::type_as_array(&v.t) {
         info

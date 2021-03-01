@@ -347,7 +347,7 @@ fn parse_paren_infix(ps : &mut ParseState, left_expr : Expr, first_arg : Option<
   let t = ps.peek()?;
   let (operation, start_paren) = match t.string {
     "(" => (Call, "("),
-    "[" => (ArrayIndex, "["),
+    "[" => (Index, "["),
     _ => return error(t.loc, "unexpected token"),
   };
   let end_paren = ps.config.paren_pairs.get(start_paren).unwrap().clone();
@@ -542,8 +542,8 @@ fn keyword_precedence(ps : &ParseState) -> i32 {
   *ps.config.prefix_precedence.get("#keyword").unwrap()
 }
 
-fn paren_precedence(ps : &ParseState) -> i32 {
-  *ps.config.infix_precedence.get("(").unwrap()
+fn infix_precedence(ps : &ParseState, op : &str) -> i32 {
+  *ps.config.infix_precedence.get(op).unwrap()
 }
 
 fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
@@ -605,7 +605,8 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
     }
     "def" => {
       ps.pop_type(TokenType::Symbol)?;
-      let name = pratt_parse_non_value(ps, kp)?;
+      let bracket_precedence = infix_precedence(ps, "[");
+      let name = pratt_parse_non_value(ps, bracket_precedence)?;
       // arguments
       let arg_start = ps.peek_marker();
       let mut arg_exprs = vec![];
@@ -647,8 +648,8 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
     }
     "init" => {
       ps.pop_type(TokenType::Symbol)?;
-      let pp = paren_precedence(ps);
-      let type_name = parse_const_expr(ps, pp)?;
+      let paren_precedence = infix_precedence(ps, "(");
+      let type_name = parse_const_expr(ps, paren_precedence)?;
       let mut es = vec![type_name];
       ps.expect("(")?;
       parse_comma_expr_list(ps, &mut es)?;
