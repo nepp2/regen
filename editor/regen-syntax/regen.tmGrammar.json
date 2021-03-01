@@ -9,12 +9,11 @@
     }
   ],
   "scopeName": "source.regen",
-  "uuid": "",
   "repository": {
     "main": {
       "patterns": [
         {
-          "match": "(def|fun|if|while|for|graph|let)",
+          "match": "\\b(def|fun|if|while|for|graph|let|print|struct)\\s+",
           "name": "keyword.regen"
         },
         {
@@ -38,6 +37,11 @@
               "name": "punctuation.regen"
             }
           },
+          "captures": [
+            {
+              "name": "punctuation.section.scope.regen"
+            }
+          ],
           "patterns": [
             {
               "include": "#main__1"
@@ -57,6 +61,11 @@
               "name": "punctuation.regen"
             }
           },
+          "captures": [
+            {
+              "name": "punctuation.section.scope.regen"
+            }
+          ],
           "patterns": [
             {
               "include": "#main__2"
@@ -76,6 +85,11 @@
               "name": "punctuation.regen"
             }
           },
+          "captures": [
+            {
+              "name": "punctuation.section.scope.regen"
+            }
+          ],
           "patterns": [
             {
               "include": "#main__3"

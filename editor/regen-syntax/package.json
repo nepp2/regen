@@ -13,7 +13,8 @@
         "languages": [
             {
             "id": "regen",
-            "extensions": [".gen"]
+            "extensions": [".gen"],
+            "configuration": "./language-configuration.json"
             }
         ],
         "grammars": [
