@@ -324,7 +324,7 @@ fn pratt_parse(ps : &mut ParseState, precedence : i32) -> Result<Expr, Error> {
       if next_precedence > precedence {
         // Parens
         if ps.config.paren_pairs.contains_key(t.string) {
-          expr = parse_paren_infix(ps, expr, None)?;
+          expr = parse_paren_infix(ps, expr)?;
         }
         // Normal infix
         else {
@@ -342,20 +342,17 @@ fn pratt_parse(ps : &mut ParseState, precedence : i32) -> Result<Expr, Error> {
   Ok(expr)
 }
 
-fn parse_paren_infix(ps : &mut ParseState, left_expr : Expr, first_arg : Option<Expr>) -> Result<Expr, Error> {
+fn parse_paren_infix(ps : &mut ParseState, left_expr : Expr) -> Result<Expr, Error> {
   let start = left_expr.loc().start;
   let t = ps.peek()?;
   let (operation, start_paren) = match t.string {
     "(" => (Call, "("),
-    "[" => (Index, "["),
+    "[" => (OverloadedName, "["),
     _ => return error(t.loc, "unexpected token"),
   };
   let end_paren = ps.config.paren_pairs.get(start_paren).unwrap().clone();
   ps.expect(start_paren)?;
   let mut list = vec![left_expr];
-  if let Some(first_arg) = first_arg {
-    list.push(first_arg);
-  }
   parse_comma_expr_list(ps, &mut list)?;
   ps.expect(&end_paren)?;
   Ok(ps.list_expr(operation, list, start))
@@ -404,8 +401,15 @@ fn parse_infix(ps : &mut ParseState, left_expr : Expr, precedence : i32) -> Resu
   match t.string {
     "." => {
       ps.pop_type(TokenType::Symbol)?;
-      let field_name = pratt_parse_non_value(ps, precedence)?;
-      Ok(ps.list_expr(FieldIndex, vec![left_expr, field_name], infix_start))
+      if ps.accept("[") {
+        let right_expr = pratt_parse(ps, precedence)?;
+        ps.expect("]")?;
+        Ok(ps.list_expr(Index, vec![left_expr, right_expr], infix_start))
+      }
+      else {
+        let field_name = pratt_parse_non_value(ps, precedence)?;
+        Ok(ps.list_expr(FieldIndex, vec![left_expr, field_name], infix_start))
+      }
     }
     ":" => {
       ps.pop_type(TokenType::Symbol)?;

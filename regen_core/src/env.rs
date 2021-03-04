@@ -23,9 +23,23 @@ pub struct Namespace {
   pub names : SlicePtr<Symbol>,
 }
 
+pub type GenKey = TypeHandle;
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct DefOverload {
+  name : Symbol,
+  params : Vec<CellUid>,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+pub enum DefName {
+  Simple(Symbol),
+  Overload(Ptr<DefOverload>),
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CellId { 
-  DefCell(Symbol),
+  DefCell(DefName),
   ExprCell(Expr),
 }
 
@@ -35,6 +49,7 @@ pub struct CellUid {
   pub namespace : Namespace,
 }
 use CellId::*;
+use DefName::*;
 
 #[derive(Clone, Copy)]
 pub struct CellValue {
@@ -55,9 +70,24 @@ impl Namespace {
   }
 }
 
+impl CellId {
+  pub fn def(name : Symbol) -> Self {
+    DefCell(Simple(name))
+  }
+
+  pub fn overload(name : Symbol, params : Vec<CellUid>) -> Self {
+    let o = perm(DefOverload { name, params });
+    DefCell(Overload(o))
+  }
+}
+
 impl CellUid {
   pub fn def(name : Symbol, namespace : Namespace) -> CellUid {
-    CellUid { id: DefCell(name), namespace }
+    CellUid { id: CellId::def(name), namespace }
+  }
+
+  pub fn overload(name : Symbol, params : Vec<CellUid>, namespace : Namespace) -> CellUid {
+    CellUid { id: CellId::overload(name, params), namespace }
   }
 
   pub fn expr(e : Expr, namespace : Namespace) -> CellUid {
@@ -183,6 +213,21 @@ impl fmt::Display for CellUid {
       write!(f, "{}::", n)?;
     }
     write!(f, "{}", self.id)
+  }
+}
+
+impl fmt::Display for DefName {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self {
+      Simple(name) => write!(f, "{}", name),
+      Overload(o) => {
+        write!(f, "{}[{}", o.name, o.params[0])?;
+        for p in &o.params[1..] {
+          write!(f, ", {}", p)?;
+        }
+        write!(f, "]")
+      }
+    }
   }
 }
 

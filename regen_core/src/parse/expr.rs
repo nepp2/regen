@@ -27,8 +27,16 @@ pub fn expr(tag : ExprTag, content : ExprContent, loc : SrcLocation) -> Expr {
 pub struct ExprMetadata {
   pub loc : SrcLocation,
   
-  /// Indicates that, if this is a symbol, it is not a local or global reference.
+  /// This flag indicates that, if this is a symbol, it is not a local or global reference.
   /// It may be something like a field name or a new variable definition.
+  ///
+  /// This is needed because otherwise there's no easy way to spot symbol references
+  /// prior to type checking, without duplicating parser logic.
+  /// Perhaps the same thing could be achieved with a container expr, flagged with a
+  /// particular ExprType.
+  ///
+  /// TODO: this is likely to cause bugs and should be removed somehow.
+  ///
   pub ignore_symbol : bool,
 }
 
@@ -45,6 +53,7 @@ pub enum ExprTag {
   Def,
   Let,
   Name,
+  OverloadedName,
   StructInit,
   ZeroInit,
   ArrayInit,

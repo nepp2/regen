@@ -6,6 +6,7 @@ use crate::{symbols, perm_alloc};
 use symbols::{Symbol, SymbolTable, to_symbol};
 use perm_alloc::{Ptr, SlicePtr, perm, perm_slice, perm_slice_from_vec};
 use std::fmt;
+use std::hash::{Hash, Hasher};
 
 pub type TypeHandle = Ptr<TypeInfo>;
 
@@ -22,7 +23,7 @@ pub enum Primitive {
   Bool = 7,
 }
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 #[repr(u64)]
 pub enum Kind {
   Primitive = 1,
@@ -59,14 +60,32 @@ impl PartialEq for TypeInfo {
   }
 }
 
-#[derive(Copy, Clone, PartialEq)]
+impl Hash for TypeInfo {
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    self.kind.hash(state);
+    self.size_of.hash(state);
+    match self.kind {
+      Kind::Primitive => self.info.hash(state),
+      Kind::Macro | Kind::Type | Kind::Expr => (),
+      Kind::Array => type_as_array(self).hash(state),
+      Kind::Function => type_as_function(self).hash(state),
+      Kind::Pointer =>
+        TypeHandle::from_u64(self.info).hash(state),
+      Kind::Struct => type_as_struct(self).hash(state),
+    }
+  }
+}
+
+impl Eq for TypeInfo {}
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(C)]
 pub struct ArrayInfo {
   pub inner : TypeHandle,
   pub length : i64,
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(C)]
 pub struct StructInfo {
   pub field_names : SlicePtr<Symbol>,
@@ -80,7 +99,7 @@ pub struct PointerInfo {
   pub points_to : TypeHandle,
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(C)]
 pub struct FunctionInfo {
   pub args : SlicePtr<TypeHandle>,

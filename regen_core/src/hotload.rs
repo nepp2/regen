@@ -273,9 +273,21 @@ fn hotload_cells(
 {
   for &e in cell_exprs {
     match e.shape() {
-      ExprShape::List(ExprTag::Def, &[name, _args, defs, value_expr]) => {
+      ExprShape::List(ExprTag::Def, &[name, args, defs, value_expr]) => {
         let name = name.as_symbol();
-        let uid = CellUid::def(name, namespace);
+        let uid = {
+          if args.children().len() > 0 {
+            let mut params = vec![];
+            for a in args.children() {
+              let TODO = (); // this only works in the simplest case
+              params.push(CellUid::def(a.as_symbol(), namespace));
+            }
+            CellUid::overload(name, params, namespace)
+          }
+          else {
+            CellUid::def(name, namespace)
+          }
+        };
         // a new nested namespace is only needed if the def has child defs
         let nested_namespace = if defs.children().len() > 0 {
           namespace.extend(name)

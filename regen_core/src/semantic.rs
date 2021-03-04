@@ -56,6 +56,15 @@ pub fn get_semantic_info(expr : Expr) -> ReferenceInfo {
   info
 }
 
+fn to_cell_id(e : Expr) -> CellId {
+  // let name = es[0].as_symbol();
+  // let mut params = vec![];
+  // for e in &es[1..] {
+
+  // }
+  panic!("not implemented")
+}
+
 fn find_refs(
   info : &mut ReferenceInfo,
   locals : &mut Vec<Symbol>,
@@ -70,9 +79,16 @@ fn find_refs(
         }
         else {
           info.references.insert(expr, GlobalDef);
-          let cell = CellId::DefCell(name);
+          let cell = CellId::def(name);
           info.dependencies.insert(cell);
         }
+      }
+    }
+    List(OverloadedName, _) => {
+      if !expr.metadata.ignore_symbol {
+        info.references.insert(expr, GlobalDef);
+        let cell = to_cell_id(expr);
+        info.dependencies.insert(cell);
       }
     }
     List(Let, &[name, _value]) => {

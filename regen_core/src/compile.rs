@@ -487,7 +487,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
           }
         }
         Some(&ReferenceType::GlobalDef) => {
-          let id = CellId::DefCell(sym);
+          let id = CellId::def(sym);
           let cell = get_cell_value(b, id);
           let e = InstrExpr::StaticValue(cell.t, cell.ptr);
           let pointer_type = types::pointer_type(cell.t);
