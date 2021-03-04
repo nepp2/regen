@@ -13,6 +13,7 @@ fn ffi_test() {
   }
 }
 
+#[cfg(test)]
 pub extern "C" fn blah(a : i16, b : i16, c : u8, d : u32, e : u8, f : u8) {
   println!(
     "a: {}, b: {}, c: {}, d: {}, e: {}, f: {}",

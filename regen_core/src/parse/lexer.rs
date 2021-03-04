@@ -232,15 +232,6 @@ impl <'l> TokenIterator<'l> {
     return slice == s;
   }
 
-  fn skip_string(&mut self, s : &str) -> bool {
-    if self.peek_string(s) {
-      self.pos += s.len();
-      self.start_pos = self.pos;
-      return true;
-    }
-    return false;
-  }
-
   fn append_string(&mut self, s : &str) -> bool {
     if self.peek_string(s) {
       self.pos += s.len();
@@ -330,10 +321,6 @@ impl <'l> Iterator for TokenIterator<'l> {
     };
     Some(t)
   }
-}
-
-pub fn token_iter<'l>(code_module : &'l Ptr<CodeModule>) -> TokenIterator<'l> {
-  TokenIterator::new(&code_module.code, *code_module)
 }
 
 pub fn lex<'l>(module : &'l Ptr<CodeModule>) -> Result<Vec<Token<'l>>, Error> {

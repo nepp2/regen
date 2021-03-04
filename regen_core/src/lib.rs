@@ -1,9 +1,6 @@
-#![allow(dead_code)]
-
 pub mod perm_alloc;
 pub mod symbols;
 mod parse;
-mod semantic;
 pub mod env;
 mod bytecode;
 mod compile;

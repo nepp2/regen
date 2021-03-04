@@ -153,13 +153,6 @@ impl <'l> ParseState<'l> {
     self.pos < self.tokens.len()
   }
 
-  fn prev(&self) -> Option<&Token> {
-    if self.pos > 0 {
-      return Some(&self.tokens[self.pos-1]);
-    }
-    None
-  }
-
   fn peek(&self) -> Result<&Token, Error> {
     if self.has_tokens() {
       Ok(&self.tokens[self.pos])
@@ -205,16 +198,6 @@ impl <'l> ParseState<'l> {
     &self.tokens[i]
   }
 
-  fn peek_ahead(&self, offset : usize) -> Option<&Token> {
-    let i = self.pos + offset;
-    if i < self.tokens.len() {
-      Some(&self.tokens[i])
-    }
-    else {
-      None
-    }
-  }
-
   fn pop_type(&mut self, token_type : TokenType) -> Result<&Token, Error> {
     let t = self.peek()?;
     if t.token_type != token_type {
@@ -258,11 +241,6 @@ impl <'l> ParseState<'l> {
     }
     self.skip();
     Ok(())
-  }
-
-  fn expr(&mut self, tag : ExprTag, content : ExprContent, start : usize) -> Expr {
-    let loc = self.loc(start);
-    expr(tag, content, loc)
   }
 
   fn literal_expr(&mut self, val : Val, start : usize) -> Expr {
@@ -618,21 +596,7 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       // body
       ps.pop_syntax("=")?;
       let value = pratt_parse(ps, kp)?;
-      if value.tag == Do {
-        let mut def_exprs = vec![];
-        let mut body_exprs = vec![];
-        for &c in value.children() {
-          if c.tag == Def { def_exprs.push(c); }
-          else { body_exprs.push(c); }
-        }
-        let defs = ps.list_expr(Syntax, def_exprs, start);
-        let body = ps.list_expr(Do, body_exprs, start);
-        ps.list_expr(Def, vec![name, args, defs, body], start)
-      }
-      else {
-        let defs = ps.list_expr(Syntax, vec![], start);
-        ps.list_expr(Def, vec![name, args, defs, value], start)
-      }
+      ps.list_expr(Def, vec![name, args, value], start)
     }
     "let" => {
       ps.pop_type(TokenType::Symbol)?;
@@ -754,15 +718,6 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       let length = pratt_parse(ps, kp)?;
       ps.expect(")")?;
       ps.list_expr(Call, vec![f, element, length], start)
-    }
-    "slice" => {
-      ps.pop_type(TokenType::Symbol)?;
-      ps.expect("(")?;
-      let element_type = pratt_parse(ps, kp)?;
-      ps.expect(")")?;
-      let loc = ps.loc(start);
-      let nb = ExprBuilder { loc, st: ps.st };
-      templates::slice_type_macro(&nb, element_type)
     }
     _ => return Ok(None),
   };

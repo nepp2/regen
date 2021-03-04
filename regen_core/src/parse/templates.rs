@@ -165,15 +165,3 @@ pub fn while_macro(nb : &ExprBuilder, cond : Expr, body : Expr) -> Expr {
   ");
   template(loop_template, &[cond, body])
 }
-
-pub fn slice_index_macro(nb : &ExprBuilder, slice : Expr, index : Expr) -> Expr {
-  let slice_index_template =
-    nb.parse("(ptr_index (. ($ slice) data) ($ index))");
-  template(slice_index_template, &[slice, index])
-}
-
-pub fn slice_type_macro(nb : &ExprBuilder, element_type : Expr) -> Expr {
-  let slice_type_template =
-    nb.parse("(struct (data (ptr ($ element_type)) (len u64))");
-  template(slice_type_template, &[element_type])
-}

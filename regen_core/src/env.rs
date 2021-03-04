@@ -102,13 +102,6 @@ pub fn get_cell_value(env : Env, uid : CellUid) -> Option<CellValue> {
   env.cells.get(&uid).cloned()
 }
 
-fn insert_cell(mut env : Env, e : Expr, path : CellUid, t : TypeHandle, ptr : *const ()) {
-  if env.cells.contains_key(&path) {
-    panic!("{} already defined", path);
-  }
-  env.cells.insert(path, CellValue { e, t, ptr });
-}
-
 fn env_alloc_global(mut env : Env, e : Expr, name : Symbol, t : TypeHandle) -> *mut () {
   let path = CellUid::def(name, Namespace::new(&[]));
   if env.cells.contains_key(&path) {
@@ -126,10 +119,6 @@ pub fn define_global(e : Env, s : &str, v : u64, t : TypeHandle) {
   unsafe {
     *(p as *mut u64) = v;
   }
-}
-
-fn region_symbol(env : Env) -> Symbol {
-  to_symbol(env.st, "region")
 }
 
 pub fn set_active_definition(mut env : Env, def : Option<CellUid>) {

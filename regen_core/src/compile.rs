@@ -1,8 +1,8 @@
-use std::collections::HashMap;
 
 /// Compiles core language into bytecode
 
-use crate::{bytecode, env::{CellId, CellValue, Env}, parse, perm_alloc, semantic::{ReferenceType, ReferenceInfo}, symbols::{self, SymbolTable}, types};
+use crate::{bytecode, env::{CellId, CellUid, CellValue, Env}, hotload::{CellResolver, CellStatus}, parse, perm_alloc, symbols::{self, SymbolTable}, types};
+use std::collections::HashSet;
 
 use bytecode::{
   SequenceHandle, SequenceInfo, InstrExpr, FunctionBytecode,
@@ -16,6 +16,17 @@ use perm_alloc::{Ptr, perm_slice_from_vec, perm_slice, perm};
 use symbols::Symbol;
 use parse::SrcLocation;
 use parse::{Expr, ExprShape, ExprTag, Val};
+
+/// Compile expression to simple no-arg function
+pub fn compile_expr_to_function(
+  env : Env,
+  resolver : &CellResolver,
+  root : Expr) -> (Function, HashSet<CellUid>)
+{
+  let mut dependencies = HashSet::new();
+  let f = compile_function(Builder::new(resolver, &mut dependencies, &env.c, env.st), root, &[], None);
+  (f, dependencies)
+}
 
 struct LabelledExpr {
   name : Symbol,
@@ -43,25 +54,20 @@ struct Builder<'l> {
 
   /// labels indicating the start and end of a labelled block expression
   label_stack : Vec<LabelledExpr>,
-  
-  /// contains a mapping from expr to reference type (local or global)
-  info : &'l ReferenceInfo,
 
-  dependencies : &'l HashMap<CellId, CellValue>,
+  resolver : &'l CellResolver<'l>,
+
+  dependencies : &'l mut HashSet<CellUid>,
 
   c : &'l CoreTypes,
 
   st : SymbolTable,
 }
 
-fn get_cell_value(b : &Builder, id : CellId) -> CellValue {
-  *b.dependencies.get(&id).expect("unexpected missing dependency!")
-}
-
 impl <'l> Builder<'l> {
   fn new(
-    info : &'l ReferenceInfo,
-    dependencies : &'l HashMap<CellId, CellValue>,
+    resolver : &'l CellResolver<'l>,
+    dependencies : &'l mut HashSet<CellUid>,
     c : &'l CoreTypes,
     st : SymbolTable,
   ) -> Self
@@ -78,7 +84,7 @@ impl <'l> Builder<'l> {
       seq_completion: vec![],
       current_sequence: None,
       label_stack: vec![],
-      info,
+      resolver,
       dependencies,
       c, st,
     }
@@ -280,15 +286,15 @@ fn function_to_var(b : &mut Builder, f : Function) -> Var {
 }
 
 fn compile_function_def(
-  info : &ReferenceInfo,
-  dependencies : &HashMap<CellId, CellValue>,
+  resolver : &CellResolver,
+  dependencies : &mut HashSet<CellUid>,
   c : &CoreTypes,
   st : SymbolTable,
   args : &[Expr],
   return_tag : Option<Expr>,
   body : Expr,
 ) -> Function {
-  let mut b = Builder::new(info, dependencies, c, st);
+  let mut b = Builder::new(resolver, dependencies, c, st);
   b.bc.args = args.len();
   let mut arg_types = vec![];
   for a in args {
@@ -333,16 +339,6 @@ fn compile_function(
   // for n in body { println!("{}", n) }
   // println!("{}", f);
   Function { bc: f, t }
-}
-
-/// Compile basic imperative language into bytecode
-pub fn compile_expr_to_function(
-  env : Env,
-  info : &ReferenceInfo,
-  dependencies : &HashMap<CellId, CellValue>,
-  root : Expr) -> Function 
-{
-  compile_function(Builder::new(info, dependencies, &env.c, env.st), root, &[], None)
 }
 
 fn compile_if_else(b : &mut Builder, cond_expr : Expr, then_expr : Expr, else_expr : Expr) -> Option<Ref> {
@@ -476,27 +472,17 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     }
     // local reference
     Sym(sym) => {
-      match b.info.references.get(e) {
-        Some(ReferenceType::Local) => {
-          // Look for variable in local scope
-          if let Some(v) = find_var_in_scope(b, sym) {
-            Some(v.to_ref())
-          }
-          else {
-            panic!("local var not found in codegen!")
-          }
-        }
-        Some(&ReferenceType::GlobalDef) => {
-          let id = CellId::DefCell(sym);
-          let cell = get_cell_value(b, id);
-          let e = InstrExpr::StaticValue(cell.t, cell.ptr);
-          let pointer_type = types::pointer_type(cell.t);
-          let v = push_expr(b, e, pointer_type);
-          Some(pointer_to_locator(v, true))
-        }
-        None => {
-          panic!("expr is not a reference ({})", e.loc())
-        }
+      // Look for variable in local scope
+      if let Some(v) = find_var_in_scope(b, sym) {
+        Some(v.to_ref())
+      }
+      else {
+        let id = CellId::DefCell(sym);
+        let cell = resolve_cell_value(b, id);
+        let e = InstrExpr::StaticValue(cell.t, cell.ptr);
+        let pointer_type = types::pointer_type(cell.t);
+        let v = push_expr(b, e, pointer_type);
+        Some(pointer_to_locator(v, true))
       }
     }
     List(ConstExpr, &[_]) => {
@@ -645,7 +631,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
         else { Some(ret) }
       };
       let f = compile_function_def(
-        b.info,
+        b.resolver,
         b.dependencies,
         &b.c, b.st,
         args.children(),
@@ -775,7 +761,7 @@ fn compile_array_len(b : &mut Builder, array : Expr) -> Var {
 fn const_value(b : &mut Builder, e : Expr) -> CellValue {
   if let ExprShape::List(ExprTag::ConstExpr, &[ce]) = e.shape() {
     let id = CellId::ExprCell(ce);
-    let cell = get_cell_value(b, id);
+    let cell = resolve_cell_value(b, id);
     if cell.e != ce {
       panic!("const expressions '{}' and '{}' do not match", cell.e, ce);
     }
@@ -790,16 +776,6 @@ fn const_expr_to_type(b: &mut Builder, e : Expr) -> TypeHandle {
     println!("expected a type expression, found {}", cev.t);
   }
   unsafe { *(cev.ptr as *const TypeHandle) }
-}
-
-fn fun_arg_types(b : &mut Builder, args_node : Expr) -> Vec<TypeHandle> {
-  let mut args = vec![];
-  for e in args_node.children() {
-    if let ExprShape::List(ExprTag::Syntax, &[_name, tag]) = e.shape() {
-      args.push(const_expr_to_type(b, tag));
-    }
-  }
-  args
 }
 
 fn compile_function_call(b : &mut Builder, e : Expr, function : Expr, args : &[Expr]) -> Var {
@@ -837,25 +813,6 @@ fn compile_function_call(b : &mut Builder, e : Expr, function : Expr, args : &[E
     }
   };
   return push_expr(b, e, info.returns);
-}
-
-fn str_to_operator(s : &str) -> Option<Operator> {
-  use Operator::*;
-  let op = match s {
-    "+" => Add,
-    "-" => Sub,
-    "*" => Mul,
-    "/" => Div,
-    "%" => Rem,
-    "==" => Eq,
-    "<" => LT,
-    ">" => GT,
-    "<=" => LTE,
-    ">=" => GTE,
-    "!" => Not,
-    _ => return None,
-  };
-  Some(op)
 }
 
 fn binary_op_type(c : &CoreTypes, op : Operator, a : TypeHandle, b : TypeHandle) -> Option<TypeHandle> {
@@ -923,4 +880,17 @@ fn compile_expr_value(b : &mut Builder, expr : Expr) -> Var {
   let e = InstrExpr::LiteralI64(Ptr::to_ptr(expr) as i64);
   let expr_tag = b.c.expr_tag;
   push_expr(b, e, expr_tag)
+}
+
+fn resolve_cell_value(b : &mut Builder, id : CellId) -> CellValue {
+  if let Some((uid, status, v)) = b.resolver.get_cell_value(id) {
+    if status == CellStatus::Broken {
+      panic!("dependency {} is broken", id);
+    }
+    b.dependencies.insert(uid);
+    v      
+  }
+  else {
+    panic!("dependency {} not found", id);
+  }
 }

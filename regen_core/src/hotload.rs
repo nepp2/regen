@@ -1,51 +1,31 @@
 
-use crate::{
-  compile,
-  env::{self, Env, CellId, CellUid, CellValue, Namespace},
-  error::{Error, error, error_raw},
-  interpret,
-  parse::{self, CodeModule, Expr, ExprShape, ExprTag, SrcLocation},
-  perm_alloc::Ptr,
-  semantic::{self, ReferenceInfo},
-  types,
-};
+use crate::{compile, env::{self, CellId, CellUid, CellValue, Env, Namespace}, error::{Error, error_raw}, interpret, parse::{self, CodeModule, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::Ptr, types};
 
 use std::collections::{HashMap, HashSet};
 
 use CellId::*;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum CellStatus {
+pub enum CellStatus {
   New, Changed, Unchanged, Broken,
 }
 
-fn resolve_dependencies(
+pub struct CellResolver<'l> {
   env : Env,
   namespace : Namespace,
   current_module : Ptr<CodeModule>,
-  new_cells : &HashMap<CellUid, CellStatus>,
-  expr : Expr,
-  info : &ReferenceInfo,
-) -> Result<HashSet<CellUid>, Error>
-{
-  let mut resolved = HashSet::new();
-  let id = CellUid::expr(expr, namespace);
-  // check dependencies are available
-  for &dep_id in &info.dependencies {
-    let r = resolve_cell_uid(env, namespace, current_module, new_cells, dep_id);
-    if let Some((dep_uid, status)) = r {
-      resolved.insert(dep_uid);      
-      if status == CellStatus::Broken {
-        return error(expr.loc(),
-          format!("{} depends on broken dependency {}", id, dep_id));
-      }
-      // dependency found
-      continue;
+  new_cells : &'l HashMap<CellUid, CellStatus>,
+}
+
+impl <'l> CellResolver<'l> {
+  pub fn get_cell_value(&self, id : CellId) -> Option<(CellUid, CellStatus, CellValue)> {
+    let r = resolve_cell_uid(self.env, self.namespace, self.current_module, self.new_cells, id);
+    if let Some((uid, status)) = r {
+      let v = env::get_cell_value(self.env, uid).unwrap();
+      return Some((uid, status, v));
     }
-    return error(expr.loc(),
-      format!("{} is missing dependency {}", id, dep_id));
+    None
   }
-  Ok(resolved)
 }
 
 fn resolve_cell_uid(
@@ -152,23 +132,23 @@ fn load_expr(
   expr : Expr,
 ) -> Result<(CellValue, HashSet<CellUid>), Error>
 {
-  let info = semantic::get_semantic_info(expr);
-  let current_module = expr.loc().module;
-  let deps = resolve_dependencies(env, namespace, current_module, new_cells, expr, &info)?;
   // TODO: using catch unwind is very ugly. Replace with proper error handling.
   let v = std::panic::catch_unwind(|| {
-    eval_expr(env, expr, &info, &deps)
+    eval_expr(env, expr, namespace, new_cells)
   }).map_err(|_| error_raw(SrcLocation::zero(), "regen eval panic!"))?;
-  Ok((v, deps))
+  Ok(v)
 }
 
-fn eval_expr(env : Env, e : Expr, info : &ReferenceInfo, deps : &HashSet<CellUid>) -> CellValue {
-  let mut resolved_deps = HashMap::new();
-  for &uid in deps {
-    let v = env::get_cell_value(env, uid).unwrap();
-    resolved_deps.insert(uid.id, v);
-  }
-  let f = compile::compile_expr_to_function(env, info, &resolved_deps, e);
+fn eval_expr(
+  env : Env,
+  e : Expr,
+  namespace : Namespace,
+  new_cells : &HashMap<CellUid, CellStatus>,
+) -> (CellValue, HashSet<CellUid>)
+{
+  let current_module = e.loc().module;
+  let resolver = CellResolver { env, namespace, current_module, new_cells };
+  let (f, dependencies) = compile::compile_expr_to_function(env, &resolver, e);
   let expr_type = types::type_as_function(&f.t).unwrap().returns;
   // TODO: it's wasteful to allocate for types that are 64bits wide or smaller
   let ptr = {
@@ -176,7 +156,8 @@ fn eval_expr(env : Env, e : Expr, info : &ReferenceInfo, deps : &HashSet<CellUid
     unsafe { std::alloc::alloc(layout) as *mut () }
   };
   interpret::interpret_function(&f, &[], Some(ptr));
-  CellValue { e, t: expr_type, ptr }
+  let v = CellValue { e, t: expr_type, ptr };
+  (v, dependencies)
 }
 
 fn unload_cell(env : Env, uid : CellUid){
@@ -206,19 +187,6 @@ fn get_cell_status(
   }
 }
 
-fn hotload_nested_const_exprs(
-  env : Env,
-  namespace : Namespace,
-  expr : Expr,
-  new_cells : &mut HashMap<CellUid, CellStatus>,
-) {
-  let const_exprs = semantic::get_ordered_const_exprs(expr);
-  for e in const_exprs {
-    let uid = CellUid::expr(e, namespace);
-    hotload_cell(env, namespace, uid, e, new_cells);
-  }
-}
-
 fn hotload_cell(
   mut env : Env,
   namespace : Namespace,
@@ -238,8 +206,6 @@ fn hotload_cell(
       }
     }
   }
-  // make sure any nested const expressions have been loaded
-  hotload_nested_const_exprs(env, namespace, expr, new_cells);
   // check whether the def needs to be loaded/reloaded
   use CellStatus::*;
   let mut new_cell_state = get_cell_status(env, namespace, uid, expr, new_cells);
@@ -264,6 +230,35 @@ pub fn interpret_module(module_name : &str, code : &str, env : Env) {
   hotload_changes(module_name, &code, env);
 }
 
+struct NestedCells {
+  defs : Vec<Expr>,
+  const_exprs : Vec<Expr>,
+}
+
+fn get_nested_cells(expr : Expr) -> NestedCells {
+  fn find_nested_cells(nested_cells : &mut NestedCells, expr : Expr) {
+    use parse::ExprShape::*;
+    match expr.shape() {
+      List(ExprTag::Def, _) => {
+        nested_cells.defs.push(expr);
+        return;
+      }
+      List(ExprTag::ConstExpr, &[c]) => {
+        nested_cells.const_exprs.push(c);
+        return;
+      }
+      _ => (),
+    }
+    for &c in expr.children() {
+      find_nested_cells(nested_cells, c);
+    }
+  }
+
+  let mut nested_cells = NestedCells { defs: vec![], const_exprs: vec![] };
+  find_nested_cells(&mut nested_cells, expr);
+  nested_cells
+}
+
 fn hotload_cells(
   env : Env,
   namespace : Namespace,
@@ -273,20 +268,33 @@ fn hotload_cells(
 {
   for &e in cell_exprs {
     match e.shape() {
-      ExprShape::List(ExprTag::Def, &[name, _args, defs, value_expr]) => {
+      ExprShape::List(ExprTag::Def, &[name, _args, value_expr]) => {
         let name = name.as_symbol();
-        let uid = CellUid::def(name, namespace);
-        // a new nested namespace is only needed if the def has child defs
-        let nested_namespace = if defs.children().len() > 0 {
+        // hotload nested cells
+        let nested = get_nested_cells(value_expr);
+        // This nested namespace is sometimes wasteful. It causes const expressions such as
+        // argument types to be evaluated again in the new namespace, when they very
+        // rarely need to be.
+        let nested_namespace = if nested.defs.len() > 0 {
           namespace.extend(name)
         }
         else {
           namespace
         };
-        hotload_cells(env, nested_namespace, new_cells, defs.children());
+        hotload_cells(env, nested_namespace, new_cells, &nested.defs);
+        hotload_cells(env, nested_namespace, new_cells, &nested.const_exprs);
+        // hotload the def initialiser
+        let uid = CellUid::def(name, namespace);
         hotload_cell(env, nested_namespace, uid, value_expr, new_cells);
       }
       _ => {
+        // hotload nested cells
+        let nested = get_nested_cells(e);
+        if nested.defs.len() > 0 {
+          println!("error: can't define defs inside a constant expression ({})", nested.defs[0].loc());
+        }
+        hotload_cells(env, namespace, new_cells, &nested.const_exprs);
+        // hotload the const expression initialiser
         let uid = CellUid::expr(e, namespace);
         hotload_cell(env, namespace, uid, e, new_cells);
       }
