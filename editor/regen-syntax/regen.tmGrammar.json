@@ -13,7 +13,7 @@
     "main": {
       "patterns": [
         {
-          "match": "\\b(def|fun|if|while|for|graph|let|print|struct)\\s+",
+          "match": "\\b(def|fun|if|else|while|for|graph|let|print|struct|template)\\s+",
           "name": "keyword.regen"
         },
         {
@@ -103,7 +103,7 @@
           }
         },
         {
-          "match": "(;|:|\\+|=|>|<|,|\\*|/)",
+          "match": "(;|:|\\+|=|>|<|,|\\*|/|$|&&|.|!)",
           "name": "punctuation.regen"
         },
         {
