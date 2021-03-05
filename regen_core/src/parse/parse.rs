@@ -97,6 +97,7 @@ fn parse_config() -> ParseConfig<'static> {
   c.infix(&["(", "["]);
   c.infix(&["."]);
   c.prefix(&["#", "$"]);
+  c.infix(&["::"]);
   c
 }
 
@@ -400,6 +401,20 @@ fn parse_infix(ps : &mut ParseState, left_expr : Expr, precedence : i32) -> Resu
       let list = vec![left_expr, pratt_parse(ps, precedence)?];
       Ok(ps.list_expr(Set, list, infix_start))
     }
+    "::" => {
+      ps.pop_type(TokenType::Symbol)?;
+      let e = if ps.accept("[") {
+        let mut param_list = vec![];
+        parse_comma_expr_list(ps, &mut param_list)?;
+        ps.expect("]")?;
+        ps.list_expr(CellParams, param_list, infix_start)
+      }
+      else {
+        pratt_parse(ps, precedence)?
+      };
+      let list = vec![left_expr, e];
+      Ok(ps.list_expr(Namespace, list, infix_start))
+    }
     _ => {
       let operator = parse_operator(ps)?;
       let list = vec![operator, left_expr, pratt_parse(ps, precedence)?];
@@ -583,20 +598,11 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
     }
     "def" => {
       ps.pop_type(TokenType::Symbol)?;
-      let bracket_precedence = infix_precedence(ps, "[");
-      let name = pratt_parse_non_value(ps, bracket_precedence)?;
-      // arguments
-      let arg_start = ps.peek_marker();
-      let mut arg_exprs = vec![];
-      if ps.accept("[") {
-        parse_comma_list(ps, &mut arg_exprs, pratt_parse_non_value)?; // need to explicitly ignore symbols
-        ps.expect("]")?;
-      }
-      let args = ps.list_expr(Syntax, arg_exprs, arg_start);
+      let name = pratt_parse_non_value(ps, kp)?;
       // body
       ps.pop_syntax("=")?;
       let value = pratt_parse(ps, kp)?;
-      ps.list_expr(Def, vec![name, args, value], start)
+      ps.list_expr(Def, vec![name, value], start)
     }
     "let" => {
       ps.pop_type(TokenType::Symbol)?;

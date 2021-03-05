@@ -45,6 +45,8 @@ pub enum ExprTag {
   Def,
   Let,
   Name,
+  Namespace,
+  CellParams,
   StructInit,
   ZeroInit,
   ArrayInit,
@@ -180,9 +182,9 @@ pub enum ExprShape<'l> {
 use std::fmt;
 
 impl SrcLocation {
-  pub fn zero() -> Self {
+  pub fn zero(module : Ptr<CodeModule>) -> Self {
     SrcLocation {
-      start: 0, end: 0, module: Ptr { p : std::ptr::null_mut() },
+      start: 0, end: 0, module,
     }
   }
 

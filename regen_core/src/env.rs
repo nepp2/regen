@@ -19,20 +19,23 @@ pub struct Environment {
 pub type Env = Ptr<Environment>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Namespace {
-  pub names : SlicePtr<Symbol>,
+pub enum DefName { 
+  Simple(Symbol),
+  Params(Symbol, SlicePtr<CellUid>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CellId { 
-  DefCell(Symbol),
+  DefCell(DefName),
   ExprCell(Expr),
 }
 
+pub type Namespace = SlicePtr<DefName>;
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CellUid { 
+pub struct CellUid {
   pub id : CellId,
-  pub namespace : Namespace,
+  pub namespace : SlicePtr<DefName>,
 }
 use CellId::*;
 
@@ -43,20 +46,20 @@ pub struct CellValue {
   pub ptr : *const (),
 }
 
-impl Namespace {
-  pub fn new(names : &[Symbol]) -> Self {
-    Namespace { names: perm_slice(names) }
-  }
-
-  pub fn extend(&self, name : Symbol) -> Self {
-    let mut names = Vec::with_capacity(self.names.len() + 1);
-    names.push(name);
-    Namespace { names: perm_slice_from_vec(names) }
-  }
+pub fn new_namespace(names : &[DefName]) -> Namespace {
+  perm_slice(names)
 }
 
+pub fn extend_namespace(n : Namespace, name : DefName) -> Namespace {
+  let mut names = Vec::with_capacity(n.len() + 1);
+  names.extend_from_slice(n.as_slice());
+  names.push(name);
+  perm_slice_from_vec(names)
+}
+
+
 impl CellUid {
-  pub fn def(name : Symbol, namespace : Namespace) -> CellUid {
+  pub fn def(name : DefName, namespace : Namespace) -> CellUid {
     CellUid { id: DefCell(name), namespace }
   }
 
@@ -87,13 +90,10 @@ pub fn resolve_cell_uid(env : Env, id : CellId, mut namespace : Namespace)
     if let Some(value) = get_cell_value(env, uid) {
       return Some((uid, value));
     }
-    let len = namespace.names.len();
-    if len > 0 {
-      namespace = Namespace { 
-        names: namespace.names.slice_range(0..(len-1)) 
-      };
+    if namespace.len() == 0 {
+      break;
     }
-    else { break }
+    namespace = namespace.slice_range(0..namespace.len()-1)
   }
   None
 }
@@ -103,7 +103,7 @@ pub fn get_cell_value(env : Env, uid : CellUid) -> Option<CellValue> {
 }
 
 fn env_alloc_global(mut env : Env, e : Expr, name : Symbol, t : TypeHandle) -> *mut () {
-  let path = CellUid::def(name, Namespace::new(&[]));
+  let path = CellUid::def(DefName::Simple(name), new_namespace(&[]));
   if env.cells.contains_key(&path) {
     panic!("def {} already defined", name);
   }
@@ -168,10 +168,16 @@ pub fn new_env(st : SymbolTable) -> Env {
 
 impl fmt::Display for CellUid {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    for n in self.namespace.names {
+    for n in self.namespace {
       write!(f, "{}::", n)?;
     }
     write!(f, "{}", self.id)
+  }
+}
+
+impl fmt::Display for DefName {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    panic!("not yet implemented")
   }
 }
 

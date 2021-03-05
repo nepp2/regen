@@ -37,8 +37,8 @@ pub struct Error {
 }
 
 impl Error {
-  pub fn display(&self) -> UnsourcedError {
-    UnsourcedError{ e: self }
+  pub fn display(&self) -> ErrorDisplay {
+    ErrorDisplay{ e: self }
   }
 }
 
@@ -48,25 +48,28 @@ impl <'l> fmt::Debug for Error {
   }
 }
 
-pub struct UnsourcedError<'l> {
+pub struct ErrorDisplay<'l> {
   e : &'l Error,
 }
 
-impl <'l> fmt::Display for UnsourcedError<'l> {
+impl <'l> fmt::Display for ErrorDisplay<'l> {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    write!(f, "{}", self.e.location)?;
+    use ansi_term::Colour::RGB;
+    let red = RGB(255, 100, 100);
+    write!(f, "{}", red.prefix())?;
     match &self.e.message {
       ErrorContent::Message(m) => {
-        write!(f, ", message: {}", m)
+        write!(f, "error: {} ({})", m, self.e.location)?;
       },
       ErrorContent::InnerErrors(m, es) => {
-        writeln!(f, ", message: {}", m)?;
+        writeln!(f, "error: {} ({})", m, self.e.location)?;
         writeln!(f, "  inner errors:")?;
         for e in es.as_slice() {
           writeln!(f, "    {}", e.display())?
         }
-        Ok(())
       },
     }
+    write!(f, "{}", red.suffix())?;
+    Ok(())
   }
 }

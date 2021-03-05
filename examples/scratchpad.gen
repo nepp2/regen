@@ -9,22 +9,40 @@ print (typeof struct_type);
 // could use a special-case type matching algorithm to infer generic function calls
 // could also use a more conventional syntax to make this behaviour less surprising.
 
-def list[T] = {
-  def inner = struct { data : ptr T, length : i64, capacity : i64 };
-
-  ptr inner
+def add::[i64] = fun(a : i64, b : i64) {
+  a + b
 }
 
-def list_new[T] = fun() {
-  // create new list
+def add::[i32] = fun(a : i32, b : i32) {
+  a + b
 }
 
-def list_add[T] = fun(l : list[T], v : T){
-  // append an element
+def add::[i64, i64] = fun(a : i64, b : i64) {
+  a + b
 }
 
-let vs = list_new[i64]();
+print add::[i64](5, 6);
 
-list_add(vs, 6);
+print add::[i32](5 as i32, 6 as i32);
 
-list_len(vs);
+print add::[i64, i64](5, 6);
+
+// def list::[T] = {
+//   def inner = struct { data : ptr T, length : i64, capacity : i64 };
+
+//   ptr inner
+// }
+
+// def list_new::[T] = fun() {
+//   // create new list
+// }
+
+// def list_add::[T] = fun(l : list[T], v : T){
+//   // append an element
+// }
+
+// let vs = list_new::[i64]();
+
+// list_add(vs, 6);
+
+// list_len(vs);

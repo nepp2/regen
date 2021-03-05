@@ -477,13 +477,11 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
         Some(v.to_ref())
       }
       else {
-        let id = CellId::DefCell(sym);
-        let cell = resolve_cell_value(b, id);
-        let e = InstrExpr::StaticValue(cell.t, cell.ptr);
-        let pointer_type = types::pointer_type(cell.t);
-        let v = push_expr(b, e, pointer_type);
-        Some(pointer_to_locator(v, true))
+        Some(compile_def_reference(b, e))
       }
+    }
+    List(Namespace, &[_namespace, _params]) => {
+      Some(compile_def_reference(b, e))
     }
     List(ConstExpr, &[_]) => {
       let cev = const_value(b, e);
@@ -751,6 +749,15 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
   }
 }
 
+fn compile_def_reference(b : &mut Builder, e : Expr) -> Ref {
+  let uid = resolve_def_name(b, e);
+  let cell = get_cell_value(b, uid);
+  let e = InstrExpr::StaticValue(cell.t, cell.ptr);
+  let pointer_type = types::pointer_type(cell.t);
+  let v = push_expr(b, e, pointer_type);
+  pointer_to_locator(v, true)
+}
+
 fn compile_array_len(b : &mut Builder, array : Expr) -> Var {
   let r = compile_expr_to_ref(b, array);
   let info = types::type_as_array(&r.t).expect("expected array");
@@ -760,8 +767,8 @@ fn compile_array_len(b : &mut Builder, array : Expr) -> Var {
 
 fn const_value(b : &mut Builder, e : Expr) -> CellValue {
   if let ExprShape::List(ExprTag::ConstExpr, &[ce]) = e.shape() {
-    let id = CellId::ExprCell(ce);
-    let cell = resolve_cell_value(b, id);
+    let uid = resolve_cell_id(b, CellId::ExprCell(ce));
+    let cell = get_cell_value(b, uid);
     if cell.e != ce {
       panic!("const expressions '{}' and '{}' do not match", cell.e, ce);
     }
@@ -882,15 +889,30 @@ fn compile_expr_value(b : &mut Builder, expr : Expr) -> Var {
   push_expr(b, e, expr_tag)
 }
 
-fn resolve_cell_value(b : &mut Builder, id : CellId) -> CellValue {
-  if let Some((uid, status, v)) = b.resolver.get_cell_value(id) {
-    if status == CellStatus::Broken {
+fn resolve_def_name(b : &mut Builder, e : Expr) -> CellUid {
+  if let Some(uid) = b.resolver.resolve_name(e) {
+    return uid;
+  }
+  panic!("def not found ({})", e.loc());
+}
+
+fn resolve_cell_id(b : &mut Builder, id : CellId) -> CellUid {
+  if let Some(uid) = b.resolver.resolve_id(id) {
+    if b.resolver.cell_status(uid) == CellStatus::Broken {
       panic!("dependency {} is broken", id);
     }
     b.dependencies.insert(uid);
-    v      
+    uid
   }
   else {
     panic!("dependency {} not found", id);
   }
+}
+
+
+fn get_cell_value(b : &mut Builder, uid : CellUid) -> CellValue {
+  if let Some(v) = b.resolver.cell_value(uid) {
+    return v;
+  }
+  panic!("no value found for cell {}", uid);
 }
