@@ -559,7 +559,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       let offset = compile_expr_to_var(b, index).id;
       let e = InstrExpr::PtrOffset { ptr: ptr.id, offset };
       let ptr = push_expr(b, e, ptr.t);
-      Some(pointer_to_locator(ptr, v.mutable))
+      Some(pointer_to_locator(ptr, true))
     }
     // ptr index
     List(PtrIndex, &[ptr, index]) => {
@@ -567,7 +567,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       let offset = compile_expr_to_var(b, index).id;
       let e = InstrExpr::PtrOffset { ptr: ptr.id, offset };
       let ptr = push_expr(b, e, ptr.t);
-      Some(pointer_to_locator(ptr, ptr.mutable))
+      Some(pointer_to_locator(ptr, true))
     }
     // zero init
     List(ZeroInit, &[t]) => {
@@ -692,7 +692,10 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       let mut v = None;
       let num_locals = b.scoped_vars.len();
       for &c in exprs {
-        v = compile_expr(b, c);
+        // Ignore nested defs
+        if c.tag != Def {
+          v = compile_expr(b, c);
+        }
       }
       b.scoped_vars.drain(num_locals..).for_each(|_| ());
       let result = v.map(|v| v.to_var(b)); // Can't pass ref out of block scope
@@ -785,31 +788,36 @@ fn const_expr_to_type(b: &mut Builder, e : Expr) -> TypeHandle {
   unsafe { *(cev.ptr as *const TypeHandle) }
 }
 
-fn compile_function_call(b : &mut Builder, e : Expr, function : Expr, args : &[Expr]) -> Var {
-  let f = compile_expr_to_var(b, function);
+fn compile_function_call(b : &mut Builder, e : Expr, function_val : Expr, args : &[Expr]) -> Var {
+  let mut arg_values = vec![];
+  for &arg in args {
+    arg_values.push(compile_expr_to_var(b, arg).id);
+  }
+
+  let f = compile_expr_to_var(b, function_val);
   let info = if let Some(i) = types::type_as_function(&f.t) {
     i
   }
   else {
     panic!("expected function, found {} at ({})",
-      f.t, function.loc());
+      f.t, function_val.loc());
   };
   if args.len() != info.args.len() {
     panic!("expected {} args, found {}, at ({})",
       info.args.len(), args.len(), e.loc());
   }
-  let mut arg_values = vec![];
+  // Check the arg types
   for i in 0..args.len() {
     let arg = args[i];
-    let v = compile_expr_to_var(b, arg);
-    if info.args[i] != v.t  {
-      panic!("expected arg of type {}, found type {}, at ({})", info.args[i], v.t, arg.loc());
+    let arg_type = arg_values[i].t;
+    let expected_type = info.args[i];
+    if expected_type != arg_type  {
+      panic!("expected arg of type {}, found type {}, at ({})", expected_type, arg_type, arg.loc());
     }
-    if info.c_function && v.t.size_of > 8 {
+    if info.c_function && arg_type.size_of > 8 {
       panic!("types passed to a C function must be 64 bits wide or less; found type {} of width {} as ({})",
-        v.t, v.t.size_of, arg.loc());
+        arg_type, arg_type.size_of, arg.loc());
     }
-    arg_values.push(v.id);
   }
   let e = {
     if info.c_function {

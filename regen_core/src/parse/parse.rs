@@ -403,15 +403,7 @@ fn parse_infix(ps : &mut ParseState, left_expr : Expr, precedence : i32) -> Resu
     }
     "::" => {
       ps.pop_type(TokenType::Symbol)?;
-      let e = if ps.accept("[") {
-        let mut param_list = vec![];
-        parse_comma_expr_list(ps, &mut param_list)?;
-        ps.expect("]")?;
-        ps.list_expr(CellParams, param_list, infix_start)
-      }
-      else {
-        pratt_parse(ps, precedence)?
-      };
+      let e = pratt_parse(ps, precedence)?;
       let list = vec![left_expr, e];
       Ok(ps.list_expr(Namespace, list, infix_start))
     }
@@ -707,6 +699,15 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
     }
     "cfun" => {
       parse_function_type(ps, true)?
+    }
+    "ptr_index" => {
+      ps.pop_type(TokenType::Symbol)?;
+      ps.expect("(")?;
+      let ptr = pratt_parse(ps, kp)?;
+      ps.expect(",")?;
+      let index = pratt_parse(ps, kp)?;
+      ps.expect(")")?;
+      ps.list_expr(PtrIndex, vec![ptr, index], start)
     }
     "array_len" => {
       ps.pop_type(TokenType::Symbol)?;

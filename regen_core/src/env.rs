@@ -1,4 +1,4 @@
-use crate::{event_loop::{self, EventLoop, SignalId}, ffi_libs::*, parse::{self, CodeModule, Expr, ExprContent, ExprTag, SrcLocation, Val}, perm_alloc::{Ptr, SlicePtr, perm, perm_slice, perm_slice_from_vec}, symbols::{Symbol, SymbolTable, to_symbol}, types::{TypeHandle, CoreTypes, core_types }};
+use crate::{event_loop::{self, EventLoop, SignalId}, ffi_libs::*, parse::{self, CodeModule, Expr, ExprContent, ExprTag, SrcLocation, Val}, perm_alloc::{Ptr, SlicePtr, perm, perm_slice}, symbols::{Symbol, SymbolTable, to_symbol}, types::{TypeHandle, CoreTypes, core_types }};
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -19,23 +19,17 @@ pub struct Environment {
 pub type Env = Ptr<Environment>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub enum DefName { 
-  Simple(Symbol),
-  Params(Symbol, SlicePtr<CellUid>),
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CellId { 
-  DefCell(DefName),
+  DefCell(Symbol),
   ExprCell(Expr),
 }
 
-pub type Namespace = SlicePtr<DefName>;
+pub type Namespace = SlicePtr<Symbol>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CellUid {
   pub id : CellId,
-  pub namespace : SlicePtr<DefName>,
+  pub namespace : SlicePtr<Symbol>,
 }
 use CellId::*;
 
@@ -46,20 +40,12 @@ pub struct CellValue {
   pub ptr : *const (),
 }
 
-pub fn new_namespace(names : &[DefName]) -> Namespace {
+pub fn new_namespace(names : &[Symbol]) -> Namespace {
   perm_slice(names)
 }
 
-pub fn extend_namespace(n : Namespace, name : DefName) -> Namespace {
-  let mut names = Vec::with_capacity(n.len() + 1);
-  names.extend_from_slice(n.as_slice());
-  names.push(name);
-  perm_slice_from_vec(names)
-}
-
-
 impl CellUid {
-  pub fn def(name : DefName, namespace : Namespace) -> CellUid {
+  pub fn def(name : Symbol, namespace : Namespace) -> CellUid {
     CellUid { id: DefCell(name), namespace }
   }
 
@@ -82,28 +68,12 @@ pub fn unload_cell(mut env : Env, uid : CellUid) {
   env.dependencies.remove(&uid);
 }
 
-pub fn resolve_cell_uid(env : Env, id : CellId, mut namespace : Namespace)
-  -> Option<(CellUid, CellValue)>
-{
-  loop {
-    let uid = CellUid { id, namespace };
-    if let Some(value) = get_cell_value(env, uid) {
-      return Some((uid, value));
-    }
-    if namespace.len() == 0 {
-      break;
-    }
-    namespace = namespace.slice_range(0..namespace.len()-1)
-  }
-  None
-}
-
 pub fn get_cell_value(env : Env, uid : CellUid) -> Option<CellValue> {
   env.cells.get(&uid).cloned()
 }
 
 fn env_alloc_global(mut env : Env, e : Expr, name : Symbol, t : TypeHandle) -> *mut () {
-  let path = CellUid::def(DefName::Simple(name), new_namespace(&[]));
+  let path = CellUid::def(name, new_namespace(&[]));
   if env.cells.contains_key(&path) {
     panic!("def {} already defined", name);
   }
@@ -172,12 +142,6 @@ impl fmt::Display for CellUid {
       write!(f, "{}::", n)?;
     }
     write!(f, "{}", self.id)
-  }
-}
-
-impl fmt::Display for DefName {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    panic!("not yet implemented")
   }
 }
 

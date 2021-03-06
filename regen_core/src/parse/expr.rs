@@ -46,7 +46,6 @@ pub enum ExprTag {
   Let,
   Name,
   Namespace,
-  CellParams,
   StructInit,
   ZeroInit,
   ArrayInit,

@@ -13,7 +13,7 @@
     "main": {
       "patterns": [
         {
-          "match": "\\b(def|fun|if|else|while|for|graph|let|print|struct|template)\\s+",
+          "match": "\\b(def|fun|if|else|while|for|graph|let|print|struct|template|init)\\s+",
           "name": "keyword.regen"
         },
         {

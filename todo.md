@@ -20,27 +20,26 @@
 
 * **TODO:** some form of generic support!
 
-### Templates
+### Overloads
 
-Templated definitions are functions which run once, and then cache their output.
+I have syntax like this:
 
-**Question: isn't this just the same as a def binding? is there any reason for templated defs other than neater function calls?**
-  * Caching the value returned is important, but const expressions handle this
-  * 
+```
+  def add::[i64] = fun(a : i64, b : i64) {
+    a + b
+  }
+```
 
-What is required?
-  * pass type values to defs
-  * pass string values to include?
-  * infer type arguments from call-sites
+However, the def name must be inferred from callsites like `add(a, b)`.
 
-A template parameter can be any literal value or any global def reference. The point is just that it must have a single, consistent value everywhere it appears in the program.
+This means that the overloaded function must be indexed by type.
 
-Graph literals complicate the use of defs because they have a different namespace. It might be sensible to make graph literal defs a part of the global namespace too, but prefixed with some compiler-generated id. This could make name resolution harder.
+Templated defs are not indexed by type, they are indexed by cell UID.
 
-Alternatively a graph literal, when invoking a template, could check where its own defs are sourced from.
+This works as long as every type maps to the same cell UID, but that is not the case. Types are just values. You can create 50 of them in a single cell initialiser.
 
-# Template defs
+We need a mapping from type to cell UID. One possibility is:
 
-A templated def can be instantiated using any list of constant expressions.
+`type -> const expr -> CellUID`
 
-
+simplest solution: overloading only works with nominal types, and nominal types use cell UIDs.

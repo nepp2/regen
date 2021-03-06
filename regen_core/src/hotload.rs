@@ -1,5 +1,5 @@
 
-use crate::{compile, env::{self, CellId, DefName, CellUid, CellValue, Env, Namespace}, error::{Error, error_raw}, interpret, parse::{self, CodeModule, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm_slice_from_vec}, types};
+use crate::{symbols::Symbol, compile, env::{self, CellId, CellUid, CellValue, Env, Namespace}, error::{Error, error_raw}, interpret, parse::{self, CodeModule, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm_slice, perm_slice_from_vec}, types};
 
 use std::{collections::{HashMap, HashSet}};
 
@@ -33,25 +33,39 @@ impl <'l> CellResolver<'l> {
   }
 
   pub fn resolve_id(&self, id : CellId) -> Option<CellUid> {
+    self.resolve_partial_uid(CellUid { id, namespace: perm_slice(&[])})
+  }
+
+  pub fn resolve_partial_uid(&self, partial_uid : CellUid) -> Option<CellUid> {
     // Look for the id in the current module
-    let mut names = self.namespace;
+    let mut namespace_prefix = self.namespace;
     loop {
-      let uid = CellUid { id, namespace: names };
-      if self.new_cells.contains_key(&uid) {
-        return Some(uid);
-      }
-      if names.len() == 0 {
-        break;
-      }
-      names = names.slice_range(0..names.len()-1);
-    }
-    // Accept external defs
-    if let DefCell(_) = id {
-      if let Some((uid, cell)) = env::resolve_cell_uid(self.env, id, self.namespace) {
+      let namespace = {
+        if partial_uid.namespace.len() == 0 {
+          namespace_prefix
+        }
+        else {
+          let mut names = vec![];
+          names.extend_from_slice(namespace_prefix.as_slice());
+          names.extend_from_slice(partial_uid.namespace.as_slice());
+          perm_slice_from_vec(names)
+        }
+      };
+      let uid = CellUid { id: partial_uid.id, namespace };
+      if let Some(cell) = env::get_cell_value(self.env, uid) {
+        // Accept defs that appear before this one in the current module
+        if self.new_cells.contains_key(&uid) {
+          return Some(uid);
+        }
+        // Accept external defs
         if cell.e.loc().module.name != self.current_module.name {
           return Some(uid);
         }
       }
+      if namespace_prefix.len() == 0 {
+        break;
+      }
+      namespace_prefix = namespace_prefix.slice_range(0..namespace_prefix.len()-1);
     }
     None
   }
@@ -60,30 +74,25 @@ impl <'l> CellResolver<'l> {
     env::get_cell_value(self.env, uid)
   }
 
-  pub fn resolve_name(&self, e : Expr) -> Option<CellUid> {
+  fn expr_to_partial_uid(&self, mut names : Vec<Symbol>, e : Expr) -> Option<CellUid> {
     use ExprShape::*;
     match e.shape() {
       Sym(name) => {
-        let id = CellId::DefCell(DefName::Simple(name));
-        let uid = self.resolve_id(id)?;
-        return Some(uid);
+        Some(CellUid::def(name, perm_slice_from_vec(names)))
       }
-      List(ExprTag::Namespace, &[name, params_expr]) => {
-        match params_expr.shape() {
-          List(ExprTag::CellParams, param_names) => {
-            let mut params = vec![];
-            for &p in param_names {
-              params.push(self.resolve_name(p)?);
-            }
-            let def_name = DefName::Params(name.as_symbol(), perm_slice_from_vec(params));
-            return self.resolve_id(CellId::DefCell(def_name));
-          }
-          _ => (),
-        }
+      List(ExprTag::Namespace, &[name, tail]) => {
+        names.push(name.as_symbol());
+        self.expr_to_partial_uid(names, tail)
       },
-      _ => (),
+      _ => {
+        None
+      }
     }
-    None
+  }
+
+  pub fn resolve_name(&self, e : Expr) -> Option<CellUid> {
+    let partial_uid = self.expr_to_partial_uid(vec![], e)?;
+    self.resolve_partial_uid(partial_uid)
   }
 }
 
@@ -259,6 +268,20 @@ fn get_nested_cells(expr : Expr) -> NestedCells {
   nested_cells
 }
 
+pub fn nested_namespace(n : Namespace, name : Symbol) -> Namespace {
+  let mut names = Vec::with_capacity(n.len() + 1);
+  names.extend_from_slice(n.as_slice());
+  names.push(name);
+  perm_slice_from_vec(names)
+}
+
+pub fn append_namespace(a : Namespace, b : Namespace) -> Namespace {
+  let mut names = Vec::with_capacity(a.len() + b.len());
+  names.extend_from_slice(a.as_slice());
+  names.extend_from_slice(b.as_slice());
+  perm_slice_from_vec(names)
+}
+
 fn hotload_cells(
   env : Env,
   namespace : Namespace,
@@ -266,56 +289,18 @@ fn hotload_cells(
   cell_exprs : &[Expr],
 )
 {
-  fn new_def_name(resolver : &CellResolver, e : Expr) -> Result<DefName, Error> {
-    use ExprShape::*;
-    match e.shape() {
-      Sym(name) => {
-        return Ok(DefName::Simple(name));
-      }
-      List(ExprTag::Namespace, &[name, params_expr]) => {
-        match params_expr.shape() {
-          List(ExprTag::CellParams, param_names) => {
-            let mut params = vec![];
-            for &p in param_names {
-              let n =
-                resolver.resolve_name(p)
-                .ok_or_else(|| error_raw(p.loc(), "def not found"))?;
-              params.push(n);
-            }
-            return Ok(DefName::Params(name.as_symbol(), perm_slice_from_vec(params)));
-          }
-          _ => (),
-        }
-      },
-      _ => (),
-    }
-    Err(error_raw(e.loc(), "def name malformed"))
-  }
-
   for &e in cell_exprs {
     match e.shape() {
       ExprShape::List(ExprTag::Def, &[name, value_expr]) => {
-        let name = {
-          let resolver = CellResolver::new(env, namespace, e.loc().module, new_cells);
-          let r = new_def_name(&resolver, name);
-          match r {
-            Ok(name) => name,
-            Err(e) => {
-              println!("{}", e.display());
-              continue;
-            }
-          }
-        };
+        let name = name.as_symbol();
         // hotload nested cells
         let nested = get_nested_cells(value_expr);
         // This nested namespace is sometimes wasteful. It causes const expressions such as
         // argument types to be evaluated again in the new namespace, when they very
         // rarely need to be.
-        let nested_namespace = if nested.defs.len() > 0 {
-          env::extend_namespace(namespace, name)
-        }
-        else {
-          namespace
+        let nested_namespace = {
+          if nested.defs.len() > 0 { nested_namespace(namespace, name) }
+          else { namespace }
         };
         hotload_cells(env, nested_namespace, new_cells, &nested.defs);
         hotload_cells(env, nested_namespace, new_cells, &nested.const_exprs);
