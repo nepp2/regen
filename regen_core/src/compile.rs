@@ -484,9 +484,10 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       Some(compile_def_reference(b, e))
     }
     List(ConstExpr, &[_]) => {
-      let cev = const_value(b, e);
-      let e = InstrExpr::StaticValue(cev.t, cev.ptr);
-      let v = push_expr(b, e, types::pointer_type(cev.t));
+      let e = strip_const_wrapper(e);
+      let cev = const_expr_value(b, e);
+      let ie = InstrExpr::StaticValue(cev.t, cev.ptr);
+      let v = push_expr(b, ie, types::pointer_type(cev.t));
       Some(pointer_to_locator(v, false))
     }
     // literal i64
@@ -707,6 +708,15 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       b.bc.instrs.push(Instr::Debug(v.loc(), local.id, local.t));
       None
     }
+    // embed
+    List(Embed, &[e]) => {
+      let cev = const_expr_value(b, e);
+      if cev.t != b.c.expr_tag {
+        panic!("expected expression of type 'expr', found {}", cev.t);
+      }
+      let expr_value = unsafe { *(cev.ptr as *const Expr) };
+      compile_expr(b, expr_value)
+    }
     // typeof
     List(TypeOf, &[v]) => {
       // TODO: it's weird to codegen the expression when we only need its type
@@ -768,22 +778,27 @@ fn compile_array_len(b : &mut Builder, array : Expr) -> Var {
   push_expr(b, e, b.c.i64_tag)
 }
 
-fn const_value(b : &mut Builder, e : Expr) -> CellValue {
+fn strip_const_wrapper(e : Expr) -> Expr {
   if let ExprShape::List(ExprTag::ConstExpr, &[ce]) = e.shape() {
-    let uid = resolve_cell_id(b, CellId::ExprCell(ce));
-    let cell = get_cell_value(b, uid);
-    if cell.e != ce {
-      panic!("const expressions '{}' and '{}' do not match", cell.e, ce);
-    }
-    return cell;
+    return ce;
   }
   panic!("expected const expression, found '{}' at ({})", e, e.loc())
 }
 
+fn const_expr_value(b : &mut Builder, e : Expr) -> CellValue {
+  let uid = resolve_cell_id(b, CellId::ExprCell(e));
+  let cell = get_cell_value(b, uid);
+  if cell.e != e {
+    panic!("const expressions '{}' and '{}' do not match", cell.e, e);
+  }
+  return cell;
+}
+
 fn const_expr_to_type(b: &mut Builder, e : Expr) -> TypeHandle {
-  let cev = const_value(b, e);
+  let e = strip_const_wrapper(e);
+  let cev = const_expr_value(b, e);
   if cev.t != b.c.type_tag {
-    println!("expected a type expression, found {}", cev.t);
+    panic!("expected expression of type 'type', found {}", cev.t);
   }
   unsafe { *(cev.ptr as *const TypeHandle) }
 }
@@ -899,6 +914,7 @@ fn compile_expr_value(b : &mut Builder, expr : Expr) -> Var {
 
 fn resolve_def_name(b : &mut Builder, e : Expr) -> CellUid {
   if let Some(uid) = b.resolver.resolve_name(e) {
+    b.dependencies.insert(uid);
     return uid;
   }
   panic!("def not found ({})", e.loc());

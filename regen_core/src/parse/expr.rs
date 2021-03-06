@@ -44,6 +44,7 @@ pub enum ExprTag {
   ConstExpr,
   Def,
   Let,
+  Embed,
   Name,
   Namespace,
   StructInit,

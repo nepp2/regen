@@ -603,6 +603,11 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       let value = pratt_parse(ps, kp)?;
       ps.list_expr(Let, vec![name, value], start)
     }
+    "embed" => {
+      ps.pop_type(TokenType::Symbol)?;
+      let expr_value = pratt_parse(ps, kp)?;
+      ps.list_expr(Embed, vec![expr_value], start)
+    }
     "quote" => {
       ps.pop_type(TokenType::Symbol)?;
       let quoted = pratt_parse(ps, kp)?;

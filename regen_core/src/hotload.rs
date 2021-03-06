@@ -242,6 +242,7 @@ pub fn interpret_module(module_name : &str, code : &str, env : Env) {
 struct NestedCells {
   defs : Vec<Expr>,
   const_exprs : Vec<Expr>,
+  embeds : Vec<Expr>,
 }
 
 fn get_nested_cells(expr : Expr) -> NestedCells {
@@ -256,6 +257,14 @@ fn get_nested_cells(expr : Expr) -> NestedCells {
         nested_cells.const_exprs.push(c);
         return;
       }
+      List(ExprTag::Embed, &[e]) => {
+        nested_cells.embeds.push(e);
+        return;
+      }
+      List(ExprTag::Quote, _) => {
+        // expression literals should be ignored!
+        return;
+      }
       _ => (),
     }
     for &c in expr.children() {
@@ -263,12 +272,16 @@ fn get_nested_cells(expr : Expr) -> NestedCells {
     }
   }
 
-  let mut nested_cells = NestedCells { defs: vec![], const_exprs: vec![] };
+  let mut nested_cells = NestedCells {
+    defs: vec![],
+    const_exprs: vec![],
+    embeds: vec![]
+  };
   find_nested_cells(&mut nested_cells, expr);
   nested_cells
 }
 
-pub fn nested_namespace(n : Namespace, name : Symbol) -> Namespace {
+pub fn create_nested_namespace(n : Namespace, name : Symbol) -> Namespace {
   let mut names = Vec::with_capacity(n.len() + 1);
   names.extend_from_slice(n.as_slice());
   names.push(name);
@@ -280,6 +293,30 @@ pub fn append_namespace(a : Namespace, b : Namespace) -> Namespace {
   names.extend_from_slice(a.as_slice());
   names.extend_from_slice(b.as_slice());
   perm_slice_from_vec(names)
+}
+
+fn hotload_embedded(
+  env : Env,
+  namespace : Namespace,
+  new_cells : &mut HashMap<CellUid, CellStatus>,
+  embeds : &[Expr],
+)
+{
+  hotload_cells(env, namespace, new_cells, embeds);
+  for &e in embeds {
+    let uid = CellUid::expr(e, namespace);
+    let cell = env::get_cell_value(env, uid).unwrap();
+    if cell.t == env.c.expr_tag {
+      let e = unsafe { *(cell.ptr as *const Expr) };
+      let nested = get_nested_cells(e);
+      hotload_cells(env, namespace, new_cells, &nested.defs);
+      hotload_cells(env, namespace, new_cells, &nested.const_exprs);
+      hotload_embedded(env, namespace, new_cells, &nested.embeds);
+    }
+    else {
+      println!("expected expression of type 'expr', found {}", cell.t);
+    }
+  }
 }
 
 fn hotload_cells(
@@ -298,12 +335,14 @@ fn hotload_cells(
         // This nested namespace is sometimes wasteful. It causes const expressions such as
         // argument types to be evaluated again in the new namespace, when they very
         // rarely need to be.
-        let nested_namespace = {
-          if nested.defs.len() > 0 { nested_namespace(namespace, name) }
-          else { namespace }
-        };
+        // let nested_namespace = {
+        //   if nested.defs.len() > 0 { create_nested_namespace(namespace, name) }
+        //   else { namespace }
+        // };
+        let nested_namespace = create_nested_namespace(namespace, name);
         hotload_cells(env, nested_namespace, new_cells, &nested.defs);
         hotload_cells(env, nested_namespace, new_cells, &nested.const_exprs);
+        hotload_embedded(env, nested_namespace, new_cells, &nested.embeds);
         // hotload the def initialiser
         let uid = CellUid::def(name, namespace);
         hotload_cell(env, nested_namespace, uid, value_expr, new_cells);
@@ -313,6 +352,9 @@ fn hotload_cells(
         let nested = get_nested_cells(e);
         if nested.defs.len() > 0 {
           println!("error: can't define defs inside a constant expression ({})", nested.defs[0].loc());
+        }
+        if nested.embeds.len() > 0 {
+          println!("error: can't embed exprs inside a constant expression ({})", nested.embeds[0].loc());
         }
         hotload_cells(env, namespace, new_cells, &nested.const_exprs);
         // hotload the const expression initialiser
