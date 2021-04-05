@@ -1,0 +1,48 @@
+
+// example usage:
+// def list_i32 = embed new_list_type(#i32);
+
+def new_list_type = fun(t : expr) {
+  #{
+    def T = $t;
+
+    def inner = struct { data : ptr T, length : i64, capacity : i64 };
+
+    def list = ptr inner;
+
+    def new = fun() {
+      let list = malloc(type_sizeof(inner)) as ptr inner;
+      *list = init inner(0 as ptr T, 0, 0);
+      list
+    };
+
+    def add = fun(l : list, v : T) {
+      if l.length == l.capacity {
+        let new_cap =
+          if l.capacity == 0 { 8 }
+          else { l.capacity * 2 };
+        let new_data = malloc(type_sizeof(T) * (new_cap as u64)) as ptr T;
+        for i in 0 to l.length {
+          ptr_index(new_data, i) = ptr_index(l.data, i);
+        }
+        if l.capacity > 0 {
+          free(l.data as ptr void)
+        }
+        l.data = new_data;
+        l.capacity = new_cap;
+      }
+      ptr_index(l.data, l.length) = v;
+      l.length = l.length + 1;
+    };
+
+    def get = fun(l : list, i : i64) {
+      ptr_index(l.data, i)
+    }
+
+    def set = fun(l : list, i : i64, v : T) {
+      ptr_index(l.data, i) = v;
+    }
+
+    list
+  };
+};

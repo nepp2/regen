@@ -1,8 +1,15 @@
 # Kanban issue
 
-* Figure out how to compile/evaluate graph templates
+* Support signal defs
 
 # Roadmap
+
+## Demo
+
+* is hotloading external modules important? NO
+* signal into def - why?
+* def into signal - why?
+* nodes for storing state - why?
 
 ## New features
 
@@ -19,27 +26,3 @@
 * open keyword for importing symbols from embedded graph
 
 * **TODO:** some form of generic support!
-
-### Overloads
-
-I have syntax like this:
-
-```
-  def add::[i64] = fun(a : i64, b : i64) {
-    a + b
-  }
-```
-
-However, the def name must be inferred from callsites like `add(a, b)`.
-
-This means that the overloaded function must be indexed by type.
-
-Templated defs are not indexed by type, they are indexed by cell UID.
-
-This works as long as every type maps to the same cell UID, but that is not the case. Types are just values. You can create 50 of them in a single cell initialiser.
-
-We need a mapping from type to cell UID. One possibility is:
-
-`type -> const expr -> CellUID`
-
-simplest solution: overloading only works with nominal types, and nominal types use cell UIDs.
