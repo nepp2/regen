@@ -1,13 +1,13 @@
 use crate::{event_loop::{self, EventLoop, SignalId}, ffi_libs::*, parse::{self, CodeModule, Expr, ExprContent, ExprTag, SrcLocation, Val}, perm_alloc::{Ptr, SlicePtr, perm, perm_slice}, symbols::{Symbol, SymbolTable, to_symbol}, types::{TypeHandle, CoreTypes, core_types }};
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 
 /// Environment for regen editing session
 #[derive(Clone)]
 pub struct Environment {
   pub cells : HashMap<CellUid, CellValue>,
-  pub dependencies : HashMap<CellUid, HashSet<CellUid>>,
+  pub dependencies : HashMap<CellUid, HashMap<CellUid, Expr>>,
   signals : HashMap<CellUid, Vec<SignalId>>,
   pub event_loop : Ptr<EventLoop>,
   pub st : SymbolTable,

@@ -1,6 +1,44 @@
 
 include(env, ref "examples/lib/prelude.gen");
 include(env, ref "examples/lib/game.gen");
+include(env, ref "examples/lib/list.gen");
+
+def state_signal_builder = fun(state : expr, event : expr) {
+  #{
+    def update_fn = fn(state : ptr $state, event : ptr $event) => void;
+
+    def builder = fun(
+      input_signal : signal,
+      initial_state : (ptr $state),
+      update_function : update_fn)
+    {
+      register_state_signal(
+        env, event_loop, input_signal,
+        $state, initial_state as (ptr void),
+        update_function as update_fn_type)
+    };
+
+    builder
+  };
+};
+
+def game_event_list = embed new_list_type(#game_event);
+
+def game_event_buffer = struct {
+  list : game_event_list,
+  capacity : i64,
+}
+
+def create_game_event_buffer = fun(capacity : i64) {
+  let list = game_event_list::new();
+  init game_event_buffer(list, capacity)
+}
+
+def buffer_update = fun(buffer : ptr game_event_buffer, e : ptr game_event) {
+  if buffer.list.length < buffer.capacity {
+    game_event_list::add(buffer.list, *e);
+  }
+}
 
 def width = 800;
 def height = 600;
@@ -18,6 +56,7 @@ def ball = struct { pos : vec2, vel : vec2 };
 def paddle = struct { pos : i64, vel : i64 };
 
 def game = struct {
+  event_count : i64,
   p1 : paddle,
   p2 : paddle,
   b : ball,
@@ -30,6 +69,7 @@ def initial_game_state = {
     init vec2(5, 5),
   );
   init game(
+    0,
     init paddle(ypos, 0),
     init paddle(ypos, 0),
     b,
@@ -42,6 +82,7 @@ def ARROW_DOWN = 81 as u32;
 def ARROW_UP = 82 as u32;
 
 def game_update = fun(state : ptr game, e : ptr game_event) {
+  state.event_count = state.event_count + 1;
   // handle input events
   let input = e.input;
   if input as i64 != 0 {
@@ -118,19 +159,36 @@ def render_game = fun(renderer : ptr sdl_renderer_handle, state : ptr game) {
   sdl_present(r);
 };
 
-def game_events =
+def min = fun(a : i64, b : i64) { if a < b { a } else { b } }
+
+def buffered_game_update = fun(state : ptr game, buffer : ptr game_event_buffer) {
+  let len = min(buffer.list.length, buffer.capacity);
+  for i in state.event_count to len {
+    let e = game_event_list::get_ptr(buffer.list, i);
+    game_update(state, e);
+  }
+}
+
+def event_signal =
   game_input_signal(sdl_input_signal(), tick_signal(1000 / 60));
 
-def game_state = {
-  state_signal(game_events, game,
-    (ref initial_game_state) as (ptr void),
-    game_update as update_fn_type)
+def buffered_event_signal = {
+  print "new event buffer";
+  def builder = embed state_signal_builder(#game_event_buffer, #game_event);
+  let buffer = create_game_event_buffer(1000);
+  builder(event_signal, ref buffer, buffer_update)
+};
+
+def game_state_signal = {
+  print "new game state";
+  def builder = embed state_signal_builder(#game, #game_event_buffer);
+  builder(buffered_event_signal, ref initial_game_state, buffered_game_update)
 };
 
 def renderer = create_renderer(window);
 
 def render_signal = {
-  let game_sample = sample_signal(tick_signal(1000 / 60), game_state, game);
+  let game_sample = sample_signal(tick_signal(1000 / 60), game_state_signal, game);
   state_signal(
     game_sample,
     sdl_renderer_handle, (ref renderer) as ptr void,

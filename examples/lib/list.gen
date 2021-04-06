@@ -39,6 +39,10 @@ def new_list_type = fun(t : expr) {
       ptr_index(l.data, i)
     }
 
+    def get_ptr = fun(l : list, i : i64) {
+      ref ptr_index(l.data, i)
+    }
+
     def set = fun(l : list, i : i64, v : T) {
       ptr_index(l.data, i) = v;
     }

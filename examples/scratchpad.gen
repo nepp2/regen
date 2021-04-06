@@ -15,4 +15,3 @@ print b;
 print c;
 print typeof(foo);
 print foo(a, c);
-

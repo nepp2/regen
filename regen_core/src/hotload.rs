@@ -1,7 +1,7 @@
 
 use crate::{symbols::Symbol, compile, env::{self, CellId, CellUid, CellValue, Env, Namespace}, error::{Error, error_raw}, interpret, parse::{self, CodeModule, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm_slice, perm_slice_from_vec}, types};
 
-use std::{collections::{HashMap, HashSet}};
+use std::collections::HashMap;
 
 use CellId::*;
 
@@ -100,10 +100,18 @@ fn get_dependencies_status(resolver : &CellResolver, uid : CellUid) -> CellStatu
   use CellStatus::*;
   if let Some(deps) = resolver.env.dependencies.get(&uid) {
     let mut changed = false;
-    for &prev_dep_uid in deps {
-      let r = resolver.resolve_id(prev_dep_uid.id);
+    for (&prev_dep_uid, &e) in deps {
+      let r = match prev_dep_uid.id {
+        CellId::DefCell(_) => {
+          resolver.resolve_name(e)
+        }
+        CellId::ExprCell(_) => {
+          resolver.resolve_id(CellId::ExprCell(e))
+        }
+      };
       if let Some(dep_uid) = r {
         if dep_uid != prev_dep_uid {
+          println!("Changed uid from {} to {}", prev_dep_uid, dep_uid);
           changed = true;
         }
         match resolver.cell_status(dep_uid) {
@@ -117,6 +125,7 @@ fn get_dependencies_status(resolver : &CellResolver, uid : CellUid) -> CellStatu
         }
       }
       else {
+        println!("Failed to resolve existing uid {}", prev_dep_uid);
         changed = true;
       }
     }
@@ -154,7 +163,7 @@ fn load_cell(
 }
 
 /// Returns the evaluated expr value, and the cell's resolved dependencies
-fn load_expr(resolver : &CellResolver, expr : Expr) -> Result<(CellValue, HashSet<CellUid>), Error> {
+fn load_expr(resolver : &CellResolver, expr : Expr) -> Result<(CellValue, HashMap<CellUid, Expr>), Error> {
   // TODO: using catch unwind is very ugly. Replace with proper error handling.
   let v = std::panic::catch_unwind(|| {
     eval_expr(resolver, expr)
@@ -162,7 +171,7 @@ fn load_expr(resolver : &CellResolver, expr : Expr) -> Result<(CellValue, HashSe
   Ok(v)
 }
 
-fn eval_expr(resolver : &CellResolver, e : Expr) -> (CellValue, HashSet<CellUid>) {
+fn eval_expr(resolver : &CellResolver, e : Expr) -> (CellValue, HashMap<CellUid, Expr>) {
   let (f, dependencies) = compile::compile_expr_to_function(resolver.env, &resolver, e);
   let expr_type = types::type_as_function(&f.t).unwrap().returns;
   // TODO: it's wasteful to allocate for types that are 64bits wide or smaller

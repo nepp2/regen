@@ -2,7 +2,7 @@
 /// Compiles core language into bytecode
 
 use crate::{bytecode, env::{CellId, CellUid, CellValue, Env}, hotload::{CellResolver, CellStatus}, parse, perm_alloc, symbols::{self, SymbolTable}, types};
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use bytecode::{
   SequenceHandle, SequenceInfo, InstrExpr, FunctionBytecode,
@@ -21,9 +21,9 @@ use parse::{Expr, ExprShape, ExprTag, Val};
 pub fn compile_expr_to_function(
   env : Env,
   resolver : &CellResolver,
-  root : Expr) -> (Function, HashSet<CellUid>)
+  root : Expr) -> (Function, HashMap<CellUid, Expr>)
 {
-  let mut dependencies = HashSet::new();
+  let mut dependencies = HashMap::new();
   let f = compile_function(Builder::new(resolver, &mut dependencies, &env.c, env.st), root, &[], None);
   (f, dependencies)
 }
@@ -57,7 +57,7 @@ struct Builder<'l> {
 
   resolver : &'l CellResolver<'l>,
 
-  dependencies : &'l mut HashSet<CellUid>,
+  dependencies : &'l mut HashMap<CellUid, Expr>,
 
   c : &'l CoreTypes,
 
@@ -67,7 +67,7 @@ struct Builder<'l> {
 impl <'l> Builder<'l> {
   fn new(
     resolver : &'l CellResolver<'l>,
-    dependencies : &'l mut HashSet<CellUid>,
+    dependencies : &'l mut HashMap<CellUid, Expr>,
     c : &'l CoreTypes,
     st : SymbolTable,
   ) -> Self
@@ -287,7 +287,7 @@ fn function_to_var(b : &mut Builder, f : Function) -> Var {
 
 fn compile_function_def(
   resolver : &CellResolver,
-  dependencies : &mut HashSet<CellUid>,
+  dependencies : &mut HashMap<CellUid, Expr>,
   c : &CoreTypes,
   st : SymbolTable,
   args : &[Expr],
@@ -786,7 +786,17 @@ fn strip_const_wrapper(e : Expr) -> Expr {
 }
 
 fn const_expr_value(b : &mut Builder, e : Expr) -> CellValue {
-  let uid = resolve_cell_id(b, CellId::ExprCell(e));
+  let id = CellId::ExprCell(e);
+  let uid = if let Some(uid) = b.resolver.resolve_id(id) {
+    if b.resolver.cell_status(uid) == CellStatus::Broken {
+      panic!("dependency {} is broken", id);
+    }
+    b.dependencies.insert(uid, e);
+    uid
+  }
+  else {
+    panic!("dependency {} not found", id);
+  };
   let cell = get_cell_value(b, uid);
   if cell.e != e {
     panic!("const expressions '{}' and '{}' do not match", cell.e, e);
@@ -914,25 +924,11 @@ fn compile_expr_value(b : &mut Builder, expr : Expr) -> Var {
 
 fn resolve_def_name(b : &mut Builder, e : Expr) -> CellUid {
   if let Some(uid) = b.resolver.resolve_name(e) {
-    b.dependencies.insert(uid);
+    b.dependencies.insert(uid, e);
     return uid;
   }
   panic!("def not found ({})", e.loc());
 }
-
-fn resolve_cell_id(b : &mut Builder, id : CellId) -> CellUid {
-  if let Some(uid) = b.resolver.resolve_id(id) {
-    if b.resolver.cell_status(uid) == CellStatus::Broken {
-      panic!("dependency {} is broken", id);
-    }
-    b.dependencies.insert(uid);
-    uid
-  }
-  else {
-    panic!("dependency {} not found", id);
-  }
-}
-
 
 fn get_cell_value(b : &mut Builder, uid : CellUid) -> CellValue {
   if let Some(v) = b.resolver.cell_value(uid) {
