@@ -1,6 +1,8 @@
 # Regen
 
-This repository contains the compiler & runtime for the [Regen programming language](https://regen.live).
+This repository contains the compiler & runtime for the Regen programming language.
+
+Regen is an research prototype aiming to provide a reliable, live, value-based feedback loop for general-purpose programming.
 
 # Project structure
 
