@@ -1,17 +1,75 @@
 
-def a = 50;
+include(env, ref "examples/lib/prelude.gen");
+include(env, ref "examples/lib/game.gen");
 
-def b = 100;
+def width = 800;
+def height = 600;
 
-def c = a + b;
+def window = create_game_window("SDL Example", width, height);
 
-def foo = fun(a : i64, b : i64) {
-  let blah = a + b;
-  blah
+def poll_event = fun(tick : ptr tick_event, output_event : ptr sdl_event) {
+  sdl_poll_event(output_event) == (1 as i32)
+};
+
+def sdl_event_stream = struct {
+  trigger : signal sdl_event,
+  poll : typeof(poll_event),
+};
+
+print event;
+
+def game = struct {
+  ticker : i64,
 }
 
-print a;
-print b;
-print c;
-print typeof(foo);
-print foo(a, c);
+def game_update = fun(state : ptr game, e : ptr sdl_event) {
+  // handle input events
+  if e.event_type == SDL_QUIT {
+    sdl_destroy_window(window);
+  }
+  state.ticker = state.ticker + 4;
+  if state.ticker > 200 {
+    state.ticker = 0;
+  } 
+};
+
+def app = struct {
+  events : signal sdl_event,
+  state : game,
+  update : typeof(game_update),
+};
+
+def initial_game_state = init game(0);
+
+def renderer =
+  sdl_create_renderer(window, -1 as i32, SDL_RENDERER_ACCELERATED);
+
+def render_game = fun(r : sdl_renderer_handle, event : ptr tick_event) {
+  // render
+  sdl_set_draw_color(r, 0 as u8, 0 as u8, 0 as u8, 0 as u8);
+  sdl_clear(r);
+
+  sdl_set_draw_color(r, 255 as u8, 0 as u8, 0 as u8, 255 as u8);
+
+  let x = 50 + game_state.ticker;
+
+  let rect = init sdl_rect(x as i32, 50 as i32, 300 as i32, 200 as i32);
+
+  sdl_fill_rect(r, ref rect);
+  sdl_present(r);
+};
+
+def event = poll(tick_signal(1), poll_event);
+
+def game_state = container(lift event, init game(0), game_update);
+
+def render_sample = poll(
+  tick_signal(1000 / 60),
+  fun(tick : ptr tick_event, output : ptr game) {
+    *output = game_state;
+    true
+  }
+);
+
+render_game(renderer, render_sample);
+
