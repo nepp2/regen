@@ -21,7 +21,7 @@ def poll_input = fun(source : ptr void, e : ptr sdl_event, tick : ptr void) {
 def sdl_input_signal = fun() {
   // the `poll_signal` function defines a new event source
   poll_signal(
-    tick_signal(1),                    // the sample rate
+    tick_signal(1) as signal,          // the sample rate
     i64,                               // event source type
     (ref 0) as (ptr void),             // event source
     sdl_event,                         // event type
@@ -47,8 +47,8 @@ def tick_to_game_event = fun(output : ptr game_event, tick : ptr tick_event) {
   *output = e;
 };
 
-def game_input_signal = fun(input_signal : signal, tick_signal : signal) {
+def game_input_signal = fun(input_signal : signal, tick_signal : tick_event_signal) {
   let input = map_signal(input_signal, game_event, input_to_game_event as map_fn_type);
-  let ticks = map_signal(tick_signal, game_event, tick_to_game_event as map_fn_type);
+  let ticks = map_signal(tick_signal as signal, game_event, tick_to_game_event as map_fn_type);
   merge_signal(input, ticks, game_event)
 };

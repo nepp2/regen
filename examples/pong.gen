@@ -188,7 +188,9 @@ def game_state_signal = {
 def renderer = create_renderer(window);
 
 def render_signal = {
-  let game_sample = sample_signal(tick_signal(1000 / 60), game_state_signal, game);
+  let game_sample = sample_signal(
+    tick_signal(1000 / 60) as signal,
+    game_state_signal, game);
   state_signal(
     game_sample,
     sdl_renderer_handle, (ref renderer) as ptr void,

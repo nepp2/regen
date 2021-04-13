@@ -59,16 +59,23 @@ impl fmt::Display for DebugDisplay {
       Kind::Array => {
         write!(f, "array")
       }
-      Kind::Macro => {
-        write!(f, "macro")
+      Kind::Named => {
+        let i = types::type_as_named(&self.t).unwrap();
+        if i.name.as_str() == "expr" {
+          let e = unsafe { *(self.p as *const Expr) };
+          write!(f, "{}", e)
+        }
+        else {
+          write!(f, "{}", i.name)
+        }
       }
       Kind::Type => {
         let v = unsafe{ *(self.p as *const TypeHandle) };
         write!(f, "{}", v)
       }
-      Kind::Expr => {
-        let e = unsafe { *(self.p as *const Expr) };
-        write!(f, "{}", e)
+      Kind::Poly => {
+        let i = types::type_as_poly(&self.t).unwrap();
+        write!(f, "poly({}, {})", display(self.p, i.t), i.param)
       }
     }
   }

@@ -31,8 +31,8 @@ pub enum Kind {
   Function = 4,
   Pointer = 5,
   Array = 6,
-  Macro = 7,
-  Expr = 8,
+  Named = 7,
+  Poly = 8,
 }
 
 #[derive(Copy, Clone)]
@@ -48,7 +48,9 @@ impl PartialEq for TypeInfo {
     (self.kind == rhs.kind) && (self.size_of == rhs.size_of) && {
       match self.kind {
         Kind::Primitive => self.info == rhs.info,
-        Kind::Macro | Kind::Type | Kind::Expr => true,
+        Kind::Named => type_as_named(self) == type_as_named(rhs),
+        Kind::Poly => type_as_poly(self) == type_as_poly(rhs),
+        Kind::Type => true,
         Kind::Array => type_as_array(self) == type_as_array(rhs),
         Kind::Function => type_as_function(self) == type_as_function(rhs),
         Kind::Pointer =>
@@ -64,6 +66,20 @@ impl PartialEq for TypeInfo {
 pub struct ArrayInfo {
   pub inner : TypeHandle,
   pub length : i64,
+}
+
+#[derive(Copy, Clone, PartialEq)]
+#[repr(C)]
+pub struct NamedInfo {
+  pub inner : TypeHandle,
+  pub name : Symbol,
+}
+
+#[derive(Copy, Clone, PartialEq)]
+#[repr(C)]
+pub struct PolyInfo {
+  pub t : TypeHandle,
+  pub param : TypeHandle,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -103,6 +119,7 @@ pub struct CoreTypes {
   pub expr_tag : TypeHandle,
   pub expr_slice_tag : TypeHandle,
   pub symbol_tag : TypeHandle,
+  pub signal_tag : TypeHandle,
 
   pub core_types : Vec<(&'static str, TypeHandle)>,
 }
@@ -157,9 +174,16 @@ pub fn deref_pointer_type(t : TypeHandle) -> Option<TypeHandle> {
   None
 }
 
-pub fn type_as_macro(t : &TypeInfo) -> Option<TypeHandle> {
-  if let Kind::Macro = t.kind {
-    return Some(Ptr::from_ptr(t.info as *mut TypeInfo))
+pub fn type_as_named(t : &TypeInfo) -> Option<&NamedInfo> {
+  if let Kind::Named = t.kind {
+    return Some(unsafe { &*(t.info as *const NamedInfo) })
+  }
+  None
+}
+
+pub fn type_as_poly(t : &TypeInfo) -> Option<&PolyInfo> {
+  if let Kind::Poly = t.kind {
+    return Some(unsafe { &*(t.info as *const PolyInfo) })
   }
   None
 }
@@ -220,8 +244,14 @@ pub fn pointer_type(inner : TypeHandle) -> TypeHandle {
   new_type(Kind::Pointer, 8, Ptr::to_u64(inner))
 }
 
-pub fn macro_type(inner : TypeHandle) -> TypeHandle {
-  new_type(Kind::Macro, 8, Ptr::to_u64(inner))
+pub fn named_type(name : Symbol, inner : TypeHandle) -> TypeHandle {
+  let info = Box::into_raw(Box::new(NamedInfo { inner, name })) as u64;
+  new_type(Kind::Named, inner.size_of, info)
+}
+
+pub fn poly_type(t : TypeHandle, param : TypeHandle) -> TypeHandle {
+  let info = Box::into_raw(Box::new(PolyInfo { t, param })) as u64;
+  new_type(Kind::Poly, t.size_of, info)
 }
 
 fn function_type_inner(args : &[TypeHandle], returns : TypeHandle, c_function : bool) -> TypeHandle {
@@ -254,7 +284,7 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
   let data_sym = to_symbol(st, "data");
   let len_sym = to_symbol(st, "len");
 
-  let expr_tag = new_type(Kind::Expr, 8, 0);
+  let expr_tag = named_type(to_symbol(st, "expr"), u64_tag);
   let expr_slice_tag = struct_type(
     perm_slice(&[data_sym, len_sym]),
     perm_slice(&[pointer_type(expr_tag), u64_tag]),
@@ -262,8 +292,8 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
 
   let type_tag = new_type(Kind::Type, 8, 0);
 
-  let TODO = (); // give symbol a proper type
-  let symbol_tag = u64_tag;
+  let symbol_tag = named_type(to_symbol(st, "symbol"), u64_tag);
+  let signal_tag = named_type(to_symbol(st, "signal"), u64_tag);
 
   let string_tag = struct_type(
     perm_slice(&[data_sym, len_sym]),
@@ -278,7 +308,7 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
   CoreTypes {
     type_tag, i64_tag, i32_tag, u64_tag, u32_tag, u16_tag,
     u8_tag, void_tag, bool_tag, string_tag,
-    expr_tag, expr_slice_tag, symbol_tag,
+    expr_tag, expr_slice_tag, symbol_tag, signal_tag,
 
     core_types:
       vec![
@@ -297,6 +327,7 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
         ("node_slice", expr_slice_tag),
         ("string", string_tag),
         ("symbol", symbol_tag),
+        ("signal", signal_tag),
       ],
   }
 }
@@ -341,14 +372,16 @@ impl fmt::Display for TypeInfo {
         let t = unsafe { &*(self.info as *const ArrayInfo) };
         write!(f, "(sized_array {} {})", t.inner, t.length)?;
       }
-      Kind::Expr => {
-        write!(f, "expr")?;
-      }
-      Kind::Macro => {
-        write!(f, "macro")?;
+      Kind::Named => {
+        let t = unsafe { &*(self.info as *const NamedInfo) };
+        write!(f, "{}", t.name)?;
       }
       Kind::Type => {
         write!(f, "type")?;
+      }
+      Kind::Poly => {
+        let t = unsafe { &*(self.info as *const PolyInfo) };
+        write!(f, "{}({})", t.t, t.param)?;
       }
     }
     Ok(())

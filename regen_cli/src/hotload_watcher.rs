@@ -27,7 +27,7 @@ fn hotload_file(env : Env, path : &str) {
   let code =
     fs::read_to_string(path)
     .expect("Something went wrong reading the file");
-  hotload::hotload_changes(path, &code, env);
+  hotload::hotload_module(path, &code, env);
 }
 
 struct WatchState {

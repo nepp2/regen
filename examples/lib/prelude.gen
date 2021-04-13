@@ -4,11 +4,11 @@ def tick_event = struct {
   current_millisecond : i64,
 };
 
-def tick_signal = fun(millisecond_interval : i64) {
-  register_tick_signal(env, event_loop, millisecond_interval);
-};
+def tick_event_signal = poly_type(signal, tick_event);
 
-def signal = ptr void;
+def tick_signal = fun(millisecond_interval : i64) {
+  register_tick_signal(env, event_loop, millisecond_interval) as tick_event_signal;
+};
 
 def update_fn_type = fn(state : ptr void, event : ptr void) => void;
 

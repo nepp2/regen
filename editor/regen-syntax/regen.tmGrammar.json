@@ -13,7 +13,7 @@
     "main": {
       "patterns": [
         {
-          "match": "\\b(def|fun|if|else|while|for|graph|let|print|struct|template|init|embed)\\s+",
+          "match": "\\b(def|fun|if|else|while|for|let|as|print|struct|init|embed|true|false|ptr|ref|quote|typeof|return|break|label|repeat|sym|fn|cfun|ptr_index|array_len|sized_array|reactive|container|sampler|onchange)\\b",
           "name": "keyword.regen"
         },
         {
@@ -22,6 +22,9 @@
         },
         {
           "include": "#multi_line_comment"
+        },
+        {
+          "include": "#string_literal"
         },
         {
           "match": "(//.*)",
@@ -107,21 +110,6 @@
           "name": "punctuation.regen"
         },
         {
-          "begin": "(\\\")",
-          "beginCaptures": {
-            "1": {
-              "name": "punctuation.regen"
-            }
-          },
-          "contentName": "text.regen",
-          "end": "(\\\")",
-          "endCaptures": {
-            "1": {
-              "name": "punctuation.regen"
-            }
-          }
-        },
-        {
           "match": "([^\\s])",
           "name": "invalid.regen"
         }
@@ -150,6 +138,21 @@
     },
     "main__4": {
       "patterns": []
+    },
+    "string_literal": {
+      "begin": "(\")",
+      "beginCaptures": {
+        "1": {
+          "name": "string.quoted.double.rust"
+        }
+      },
+      "contentName": "string.quoted.double.rust",
+      "end": "(\")",
+      "endCaptures": {
+        "1": {
+          "name": "string.quoted.double.rust"
+        }
+      }
     },
     "multi_line_comment": {
       "patterns": [

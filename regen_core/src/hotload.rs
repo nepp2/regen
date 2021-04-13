@@ -245,7 +245,7 @@ fn hotload_cell(
 }
 
 pub fn interpret_module(module_name : &str, code : &str, env : Env) {
-  hotload_changes(module_name, &code, env);
+  hotload_module(module_name, &code, env);
 }
 
 struct NestedCells {
@@ -374,7 +374,11 @@ fn hotload_cells(
   }
 }
 
-pub fn hotload_changes(module_name : &str, code : &str, env : Env) {
+pub fn hotload_value(uid : CellUid, env : Env) {
+
+}
+
+pub fn hotload_module(module_name : &str, code : &str, env : Env) {
   // Parse file
   let exprs = {
     let r = std::panic::catch_unwind(|| {

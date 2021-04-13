@@ -81,6 +81,14 @@ pub extern "C" fn sized_array_type(t : TypeHandle, length : i64) -> TypeHandle{
   types::array_type(t, length)
 }
 
+pub extern "C" fn named_type(name : Symbol, inner : TypeHandle) -> TypeHandle{
+  types::named_type(name, inner)
+}
+
+pub extern "C" fn poly_type(t : TypeHandle, param : TypeHandle) -> TypeHandle{
+  types::poly_type(t, param)
+}
+
 pub extern "C" fn struct_type(
   num_fields : u64,
   names_ptr : *const Symbol,
@@ -125,7 +133,7 @@ pub fn load_ffi_libs(e : Env) {
   let u32 = e.c.u32_tag;
   let void = e.c.void_tag;
   let void_ptr = types::pointer_type(void);
-  let signal_ptr = void_ptr;
+  let signal_tag = e.c.signal_tag;
   let env_ptr = void_ptr;
   let event_loop_ptr = void_ptr;
   let expr = e.c.expr_tag;
@@ -163,6 +171,12 @@ pub fn load_ffi_libs(e : Env) {
   define_global(e, "struct_type", struct_type as u64,
     c_function_type(&[i64, symbol_ptr, type_tag_ptr], type_tag));
 
+  define_global(e, "named_type", named_type as u64,
+    c_function_type(&[symbol, type_tag], type_tag));
+
+  define_global(e, "poly_type", poly_type as u64,
+    c_function_type(&[type_tag, type_tag], type_tag));
+
   // ----------- Bind core system functions ------------
 
   define_global(e, "fail", fail as u64,
@@ -185,38 +199,38 @@ pub fn load_ffi_libs(e : Env) {
   define_global(e, "register_tick_signal", register_tick_signal as u64,
     c_function_type(
       &[env_ptr, event_loop_ptr, i64],
-        signal_ptr));
+        signal_tag));
 
   let update_fn_type =
     function_type(&[void_ptr, void_ptr], void);
   define_global(e, "register_state_signal", register_state_signal as u64,
     c_function_type(
-      &[env_ptr, event_loop_ptr, signal_ptr, type_tag, void_ptr, update_fn_type],
-        signal_ptr));
+      &[env_ptr, event_loop_ptr, signal_tag, type_tag, void_ptr, update_fn_type],
+        signal_tag));
 
   let poll_fn_type =
     function_type(&[void_ptr, void_ptr, void_ptr], bool_type);
   define_global(e, "register_poll_signal", register_poll_signal as u64,
     c_function_type(
-      &[env_ptr, event_loop_ptr, signal_ptr, type_tag, void_ptr, type_tag, poll_fn_type],
-        signal_ptr));
+      &[env_ptr, event_loop_ptr, signal_tag, type_tag, void_ptr, type_tag, poll_fn_type],
+        signal_tag));
 
   let map_fn_type =
     function_type(&[void_ptr, void_ptr], void);
   define_global(e, "register_map_signal", register_map_signal as u64,
     c_function_type(
-      &[env_ptr, event_loop_ptr, signal_ptr, type_tag, map_fn_type],
-        signal_ptr));
+      &[env_ptr, event_loop_ptr, signal_tag, type_tag, map_fn_type],
+        signal_tag));
 
   define_global(e, "register_merge_signal", register_merge_signal as u64,
     c_function_type(
-      &[env_ptr, event_loop_ptr, signal_ptr, signal_ptr, type_tag],
-        signal_ptr));
+      &[env_ptr, event_loop_ptr, signal_tag, signal_tag, type_tag],
+        signal_tag));
 
   define_global(e, "register_sample_signal", register_sample_signal as u64,
     c_function_type(
-      &[env_ptr, event_loop_ptr, signal_ptr, signal_ptr, type_tag],
-        signal_ptr));
+      &[env_ptr, event_loop_ptr, signal_tag, signal_tag, type_tag],
+        signal_tag));
 
   // ----------- Bind language introspection functions ------------
 
