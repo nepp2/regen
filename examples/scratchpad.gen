@@ -7,3 +7,6 @@ def int_signal = poly_type(signal, i64);
 def blah = fun(s : signal) {
 
 }
+
+//reactive tick = tick_signal(1); // 1
+

@@ -7,12 +7,12 @@ use crate::ffi_libs;
 
 use regen_core::{
   new_env,
-  env::{Env, get_event_loop},
+  env::Env,
   hotload,
+  perm_alloc::{perm, Ptr},
   event_loop::{
-    self, TimerState,
-    native_poll_signal,
-    native_state_signal,
+    self,
+    add_native_hook,
   },
 };
 use std::fs;
@@ -33,10 +33,6 @@ fn hotload_file(env : Env, path : &str) {
 struct WatchState {
   rx : Receiver<DebouncedEvent>,
   watcher : RecommendedWatcher,
-}
-
-struct CompilerState {
-  env : Env,
   path : String,
 }
 
@@ -47,42 +43,33 @@ pub fn watch_file(path : &str) {
   let (tx, rx) = channel();
   let mut watcher = watcher(tx, Duration::from_millis(500)).unwrap();
   watcher.watch(path, RecursiveMode::Recursive).unwrap();
-  let watch_state = WatchState { rx, watcher };
-
-  let event_loop = get_event_loop(env);
-
-  let timer = event_loop::create_timer(event_loop, 0, 10);
-  let file_changes = native_poll_signal(event_loop, timer, watch_state,
-    |ws : &mut WatchState, _output : &mut i64, _input : &TimerState| {
+  let watch_state = perm(
+    WatchState { rx, watcher, path: path.to_string() }
+  );
+  let timer = event_loop::create_timer(env, 0, 10);
+  add_native_hook(env, timer, watch_state,
+    |env, ws : Ptr<WatchState>| {
       match ws.rx.try_recv() {
         Ok(event) => {
           match event {
             DebouncedEvent::Write(_) => {
-              true
+              hotload_file(env, &ws.path);
             }
-            _ => false,
+            _ => (),
           }
         },
         Err(e) => match e {
           TryRecvError::Disconnected => {
             println!("watch error: {:?}", e);
-            false
           }
-          TryRecvError::Empty => false,
+          TryRecvError::Empty => (),
         },
       }
     }
   );
 
   hotload_file(env, path);
-  let cs = CompilerState { env, path: path.to_string() };
-
-  native_state_signal(event_loop, file_changes, cs,
-    |cs : &mut CompilerState, _ : &WatchState| {
-      hotload_file(cs.env, &cs.path);
-    }
-  );
   
-  event_loop::start_loop(event_loop);
+  event_loop::start_loop(env);
 }
 

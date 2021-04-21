@@ -16,3 +16,14 @@
 - [ ] support onchange
 - [ ] trigger hot reloading from container updates
 
+
+
+thoughts:
+
+* "reactive" just expects a typed signal
+
+* container and stream create signals
+* I want to get rid of observers, because they don't obey the graph ordering
+* what does container do?
+* what does stream do?
+

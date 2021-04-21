@@ -599,8 +599,26 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       ps.pop_type(TokenType::Symbol)?;
       let name = pratt_parse_non_value(ps, kp)?;
       ps.pop_syntax("=")?;
-      let reactive_expr = parse_reactive_expr(ps)?;
-      ps.list_expr(Def, vec![name, reactive_expr], start)
+      let value = pratt_parse(ps, kp)?;
+      ps.list_expr(Reactive, vec![name, value], start)
+    }
+    "container" => {
+      let start = ps.peek_marker();
+      ps.pop_type(TokenType::Symbol)?;
+      ps.expect("(")?;
+      let mut es = vec![];
+      parse_comma_expr_list(ps, &mut es)?;
+      ps.expect(")")?;
+      ps.list_expr(Container, es, start)
+    }
+    "stream" => {
+      let start = ps.peek_marker();
+      ps.pop_type(TokenType::Symbol)?;
+      ps.expect("(")?;
+      let mut es = vec![];
+      parse_comma_expr_list(ps, &mut es)?;
+      ps.expect(")")?;
+      ps.list_expr(Stream, es, start)
     }
     "onchange" => {
       ps.pop_type(TokenType::Symbol)?;
@@ -745,24 +763,6 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
     _ => return Ok(None),
   };
   Ok(Some(expr))
-}
-
-fn parse_reactive_expr(ps : &mut ParseState) -> Result<Expr, Error> {
-  let start = ps.peek_marker();
-  let t = ps.peek()?;
-  let tag = {
-    if t.string == "container" { Ok(Container) }
-    else if t.string == "stream" { Ok(Stream) }
-    else {
-      error(t.loc, "expected stream or container")
-    }
-  }?;
-  ps.skip();
-  ps.expect("(")?;
-  let mut es = vec![];
-  parse_comma_expr_list(ps, &mut es)?;
-  ps.expect(")")?;
-  Ok(ps.list_expr(tag, es, start))
 }
 
 fn parse_function_arg_list(ps : &mut ParseState, args : &mut Vec<Expr>) -> Result<(), Error> {

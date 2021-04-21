@@ -740,13 +740,21 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       let v = compile_expr_to_var(b, value);
       Some(compile_cast(b, v, t).to_ref())
     }
+    // container
+    List(Container, exprs) => {
+      panic!("not implemented")
+    }
+    // stream
+    List(Stream, exprs) => {
+      panic!("not implemented")
+    }
     // instrinsic op
     List(InstrinicOp, exprs) => {
       let op = exprs[0].as_operator_literal();
       let args = &exprs[1..];
       Some(compile_intrinic_op(b, e, op, args).to_ref())
     }
-    // Call
+    // call
     List(Call, exprs) => {
       let function_expr = exprs[0];
       let arg_exprs = &exprs[1..];

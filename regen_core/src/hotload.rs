@@ -1,5 +1,5 @@
 
-use crate::{symbols::Symbol, compile, env::{self, CellId, CellUid, CellValue, Env, Namespace}, error::{Error, error_raw}, interpret, parse::{self, CodeModule, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm_slice, perm_slice_from_vec}, types};
+use crate::{compile, env::{self, CellId, CellUid, CellValue, Env, Namespace}, error::{Error, error_raw}, event_loop::{self, Signal}, interpret, parse::{self, CodeModule, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm_slice, perm_slice_from_vec}, symbols::Symbol, types::{self, TypeHandle}};
 
 use std::collections::HashMap;
 
@@ -258,7 +258,7 @@ fn get_nested_cells(expr : Expr) -> NestedCells {
   fn find_nested_cells(nested_cells : &mut NestedCells, expr : Expr) {
     use parse::ExprShape::*;
     match expr.shape() {
-      List(ExprTag::Def, _) => {
+      List(ExprTag::Def, _) | List(ExprTag::Reactive, _) => {
         nested_cells.defs.push(expr);
         return;
       }
@@ -328,6 +328,46 @@ fn hotload_embedded(
   }
 }
 
+fn hotload_def(
+  env : Env,
+  namespace : Namespace,
+  new_cells : &mut HashMap<CellUid, CellStatus>,
+  name : Expr, value_expr : Expr,
+) -> CellUid
+{
+  let name = name.as_symbol();
+  // hotload nested cells
+  let nested = get_nested_cells(value_expr);
+  let nested_namespace = create_nested_namespace(namespace, name);
+  hotload_cells(env, nested_namespace, new_cells, &nested.defs);
+  hotload_cells(env, nested_namespace, new_cells, &nested.const_exprs);
+  hotload_embedded(env, nested_namespace, new_cells, &nested.embeds);
+  // hotload the def initialiser
+  let uid = CellUid::def(name, namespace);
+  hotload_cell(env, nested_namespace, uid, value_expr, new_cells);
+  uid
+}
+
+fn register_reactive_signal(
+  env : Env,
+  new_cells : &mut HashMap<CellUid, CellStatus>,
+  uid : CellUid,
+  expr : Expr,
+)
+{
+  if new_cells[&uid] != CellStatus::Broken {
+    let v = env.cells.get(&uid).unwrap();
+    if let Some(poly) = types::type_as_poly(&v.t) {
+      if poly.t == env.c.signal_tag {
+        let signal = unsafe { *(v.ptr as *const Ptr<Signal>) };
+        event_loop::register_signal(env, signal, uid);
+        return;
+      }
+    }
+    panic!("expected signal type, found {} at ({})", v.t, expr.loc())
+  }
+}
+
 fn hotload_cells(
   env : Env,
   namespace : Namespace,
@@ -338,23 +378,11 @@ fn hotload_cells(
   for &e in cell_exprs {
     match e.shape() {
       ExprShape::List(ExprTag::Def, &[name, value_expr]) => {
-        let name = name.as_symbol();
-        // hotload nested cells
-        let nested = get_nested_cells(value_expr);
-        // This nested namespace is sometimes wasteful. It causes const expressions such as
-        // argument types to be evaluated again in the new namespace, when they very
-        // rarely need to be.
-        // let nested_namespace = {
-        //   if nested.defs.len() > 0 { create_nested_namespace(namespace, name) }
-        //   else { namespace }
-        // };
-        let nested_namespace = create_nested_namespace(namespace, name);
-        hotload_cells(env, nested_namespace, new_cells, &nested.defs);
-        hotload_cells(env, nested_namespace, new_cells, &nested.const_exprs);
-        hotload_embedded(env, nested_namespace, new_cells, &nested.embeds);
-        // hotload the def initialiser
-        let uid = CellUid::def(name, namespace);
-        hotload_cell(env, nested_namespace, uid, value_expr, new_cells);
+        hotload_def(env, namespace, new_cells, name, value_expr);
+      }
+      ExprShape::List(ExprTag::Reactive, &[name, value_expr]) => {
+        let uid = hotload_def(env, namespace, new_cells, name, value_expr);
+        register_reactive_signal(env, new_cells, uid, value_expr);
       }
       _ => {
         // hotload nested cells
@@ -374,8 +402,8 @@ fn hotload_cells(
   }
 }
 
-pub fn hotload_value(uid : CellUid, env : Env) {
-
+pub fn hotload_value(uid : CellUid, env : Env, value : *const (), value_type : TypeHandle) {
+  panic!("not implemented")
 }
 
 pub fn hotload_module(module_name : &str, code : &str, env : Env) {

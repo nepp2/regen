@@ -1,14 +1,10 @@
 
 use std::{hash::Hash};
 use std::time::{Duration, Instant};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::alloc::{alloc, Layout};
 
-use crate::{
-  types::TypeHandle,
-  compile::Function, env::{self, Env}, interpret,
-  perm_alloc::{Ptr, perm},
-};
+use crate::{compile::Function, env::{self, CellUid, Env}, hotload::hotload_value, interpret, perm_alloc::{Ptr, perm}, types::TypeHandle};
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct SignalId(pub u64);
@@ -17,27 +13,25 @@ pub struct SignalId(pub u64);
 pub struct Signal {
   pub id : SignalId,
   pub event_loop : Ptr<EventLoop>,
+  pub output_type : TypeHandle,
   pub output : *mut (),
   pub operation : StreamOperation,
   pub last_update : u64,
-}
-
-#[derive(Copy, Clone)]
-struct Observer {
-  signal : Ptr<Signal>,
-  push_changes : bool,
 }
 
 #[derive(Clone)]
 pub struct EventLoop {
   start_time : Instant,
   id_counter : u64,
-  observers : HashMap<SignalId, Vec<Observer>>,
-  timers : Vec<Ptr<Signal>>,
+  observers : HashMap<SignalId, Vec<SignalId>>,
+  signals : HashMap<SignalId, Ptr<Signal>>,
+  signal_cell_map : HashMap<SignalId, CellUid>,
+  timers : HashSet<SignalId>,
   update_count : u64,
 }
 
 #[derive(Copy, Clone)]
+#[repr(C)]
 pub struct TimerState {
   pub millisecond_interval : i64,
   pub next_tick_millisecond : i64,
@@ -51,53 +45,26 @@ pub enum StreamOperation {
   Timer,
   Poll{ input_signal: Ptr<Signal>, event_source : *mut (), poll_function : RegenCallback },
   State(Ptr<Signal>, RegenCallback),
-  Map(Ptr<Signal>, RegenCallback),
-  Sample(Ptr<Signal>),
-  Merge(Ptr<Signal>, Ptr<Signal>),
-
-  NativePoll{
-    input_signal: Ptr<Signal>,
-    event_source : *mut (),
-    poll_function : fn(*mut (), *mut (), *const ()) -> bool,
-  },
-  NativeState(Ptr<Signal>, fn(*mut (), *const ())),
+  NativeHook(fn(Env, *mut ())),
 }
 
-pub fn native_poll_signal<EventSource, OutputEvent, InputEvent>(
-  el : Ptr<EventLoop>,
+pub fn add_native_hook<Data>(
+  env : Env,
   input_signal : Ptr<Signal>,
-  event_source : EventSource,
-  f : fn(&mut EventSource, &mut OutputEvent, &InputEvent) -> bool
-) -> Ptr<Signal>
+  data : Ptr<Data>,
+  f : fn(Env, Ptr<Data>),
+)
 {
-  let event_source = alloc_val(event_source);
-  let op = StreamOperation::NativePoll {
-    input_signal,
-    event_source,
-    poll_function: unsafe { std::mem::transmute(f as *const ()) },
+  let op = {
+    let f_ptr = unsafe { std::mem::transmute(f as *const ()) };
+    StreamOperation::NativeHook(f_ptr)
   };
-  let output = alloc_bytes(std::mem::size_of::<OutputEvent>(), None);
-  let s = create_signal(el, output, op);
-  add_push_observer(el, input_signal, s);
-  s
+  let data_ptr = Ptr::to_ptr(data) as *mut ();
+  let s = create_signal(env.event_loop, env.c.void_tag, data_ptr, op);
+  add_observer(env.event_loop, input_signal, s);
 }
 
-pub fn native_state_signal<State, Event>(
-  el : Ptr<EventLoop>,
-  parent : Ptr<Signal>,
-  state : State,
-  f : fn(&mut State, &Event)
-) -> Ptr<Signal>
-{
-  let state = alloc_val(state);
-  let op = StreamOperation::NativeState(parent, unsafe { std::mem::transmute(f as *const ()) });
-  let s = create_signal(el, state, op);
-  add_push_observer(el, parent, s);
-  s
-}
-
-
-fn update_signal(update_number : u64, mut signal : Ptr<Signal>) -> bool {
+fn update_signal(env : Env, update_number : u64, mut signal : Ptr<Signal>) -> bool {
   use StreamOperation::*;
   signal.last_update = update_number;
   match signal.operation {
@@ -114,8 +81,9 @@ fn update_signal(update_number : u64, mut signal : Ptr<Signal>) -> bool {
         Some((&mut return_val) as *mut bool as *mut ()));
       return_val
     }
-    NativePoll { input_signal, event_source, poll_function } => {
-      poll_function(event_source, signal.output, input_signal.output)
+    NativeHook(f) => {
+      f(env, signal.output);
+      true
     }
     State(parent, f) => {
       let event = parent.output;
@@ -125,42 +93,6 @@ fn update_signal(update_number : u64, mut signal : Ptr<Signal>) -> bool {
         None);
       true
     }
-    NativeState(parent, f) => {
-      let event = parent.output;
-      f(signal.output, event);
-      true
-    }
-    Map(parent, f) => {
-      let event = parent.output;
-      interpret::interpret_function(
-        f.f as *const Function,
-        &[signal.output as u64, event as u64],
-        None);
-      true
-    }
-    Sample(sample_from) => {
-      // this can just be done once when the signal is created,
-      // as long as signals never reallocate their state pointers?
-      // what happens if the state being sampled from doesn't _have_
-      // a value yet?
-      let TODO = ();
-      signal.output = sample_from.output;
-      true
-    }
-    Merge(signal_a, signal_b) => {
-      // check if signal A has a new event
-      if signal_a.last_update == update_number {
-        signal.output = signal_a.output;
-        return true;
-      }
-      // check if signal B has a new event
-      if signal_b.last_update == update_number {
-        signal.output = signal_b.output;
-        return true;
-      }
-      // panic if neither of them do
-      panic!("merge was triggered, but no events are available")
-    }
   }
 }
 
@@ -168,8 +100,10 @@ pub fn create_event_loop() -> Ptr<EventLoop> {
   perm(EventLoop {
     start_time: Instant::now(),
     id_counter: 0,
+    signals: HashMap::new(),
     observers: HashMap::new(),
-    timers: vec![],
+    signal_cell_map: HashMap::new(),
+    timers: HashSet::new(),
     update_count: 0,
   })
 }
@@ -181,7 +115,8 @@ fn next_id(mut el : Ptr<EventLoop>) -> SignalId {
 }
 
 fn create_signal(
-  el : Ptr<EventLoop>,
+  mut el : Ptr<EventLoop>,
+  output_type : TypeHandle,
   output_addr : *mut (),
   operation : StreamOperation,
 ) -> Ptr<Signal>
@@ -189,28 +124,33 @@ fn create_signal(
   let signal = perm(Signal {
     id : next_id(el),
     event_loop: el,
+    output_type,
     output: output_addr,
     operation,
     last_update: 0,
   });
+  el.signals.insert(signal.id, signal);
   signal
 }
 
 pub fn destroy_signal(mut el : Ptr<EventLoop>, id : SignalId) {
-  el.observers.remove(&id);
+  el.signals.remove(&id);
+  el.signal_cell_map.remove(&id);
+  el.timers.remove(&id);
   for (_, obs) in el.observers.iter_mut() {
-    obs.retain(|ob| ob.signal.id != id);
+    obs.retain(|&ob| ob != id);
   }
 }
 
-pub fn create_timer(mut el : Ptr<EventLoop>, current_millisecond : i64, millisecond_interval : i64) -> Ptr<Signal> {
+pub fn create_timer(env : Env, current_millisecond : i64, millisecond_interval : i64) -> Ptr<Signal> {
   let timer_state = TimerState {
     millisecond_interval,
     next_tick_millisecond: current_millisecond + millisecond_interval,
   };
   let state = alloc_val(timer_state);
-  let s = create_signal(el, state, StreamOperation::Timer);
-  el.timers.push(s);
+  let mut el = env.event_loop;
+  let s = create_signal(el, env.c.tick_event_tag, state, StreamOperation::Timer);
+  el.timers.insert(s.id);
   s
 }
 
@@ -218,28 +158,34 @@ fn current_millisecond(start : Instant) -> i64 {
   Instant::now().duration_since(start).as_millis() as i64
 }
 
-fn handle_signal_input(event_loop : Ptr<EventLoop>, signal : Ptr<Signal>) {
-  let TODO = (); // doesn't solve the diamond/glitch problem yet
-  let should_push = update_signal(event_loop.update_count, signal);
+fn handle_signal_input(env : Env, id : SignalId) {
+  let el = env.event_loop;
+  let signal = el.signals[&id];
+  let should_push = update_signal(env, el.update_count, signal);
   if should_push {
-    push_to_observers(event_loop, signal);
+    push_new_value(env, signal);
   }
 }
 
-fn push_to_observers(event_loop : Ptr<EventLoop>, signal : Ptr<Signal>) {
-  if let Some(observers) = event_loop.observers.get(&signal.id) {
-    for &ob in observers {
-      if ob.push_changes {
-        handle_signal_input(event_loop, ob.signal);
-      }
+fn push_new_value(env : Env, signal : Ptr<Signal>) {
+  if let Some(cell_uid) = env.event_loop.signal_cell_map.get(&signal.id) {
+    hotload_value(*cell_uid, env, signal.output, signal.output_type);
+  }
+  if let Some(observers) = env.event_loop.observers.get(&signal.id) {
+    for &id in observers {
+      handle_signal_input(env, id);
     }
   }
 }
 
-fn handle_timer_pulse(mut event_loop : Ptr<EventLoop>, signal : Ptr<Signal>, current_time : i64) {
+fn add_observer(mut el : Ptr<EventLoop>, parent : Ptr<Signal>, signal : Ptr<Signal>) {
+  el.observers.entry(parent.id).or_insert(vec![]).push(signal.id);
+}
+
+fn handle_timer_pulse(mut env : Env, signal : Ptr<Signal>, current_time : i64) {
   if let StreamOperation::Timer = signal.operation {
-    event_loop.update_count += 1;
-    push_to_observers(event_loop, signal);
+    env.event_loop.update_count += 1;
+    push_new_value(env, signal);
     let timer : &mut TimerState = unsafe {
       &mut *(signal.output as *mut TimerState)
     };
@@ -250,7 +196,8 @@ fn handle_timer_pulse(mut event_loop : Ptr<EventLoop>, signal : Ptr<Signal>, cur
   }
 }
 
-pub fn start_loop(event_loop : Ptr<EventLoop>) {
+pub fn start_loop(env : Env) {
+  let event_loop = env.event_loop;
   let start = event_loop.start_time;
   loop {
     if event_loop.timers.is_empty() {
@@ -259,9 +206,10 @@ pub fn start_loop(event_loop : Ptr<EventLoop>) {
     }
     // figure out which timer will tick next
     let (signal, mut timer) =
-      event_loop.timers.iter().map(|&s| {
-        let t : Ptr<TimerState> = Ptr::from_ptr(s.output as *mut TimerState);
-        (s, t)
+      event_loop.timers.iter().map(|s| {
+        let sig = event_loop.signals[s];
+        let t : Ptr<TimerState> = Ptr::from_ptr(sig.output as *mut TimerState);
+        (sig, t)
       })
       .min_by_key(|x| x.1.next_tick_millisecond)
       .unwrap();
@@ -274,18 +222,14 @@ pub fn start_loop(event_loop : Ptr<EventLoop>) {
     // handle the timer event
     let now = current_millisecond(start);
     timer.next_tick_millisecond = now + timer.millisecond_interval;
-    handle_timer_pulse(event_loop, signal, now);
+    handle_timer_pulse(env, signal, now);
   }
 }
 
-fn add_push_observer(mut el : Ptr<EventLoop>, parent : Ptr<Signal>, signal : Ptr<Signal>) {
-  let ob = Observer { signal, push_changes: true };
-  el.observers.entry(parent.id).or_insert(vec![]).push(ob);
-}
-
-fn add_sample_observer(mut el : Ptr<EventLoop>, parent : Ptr<Signal>, signal : Ptr<Signal>) {
-  let ob = Observer { signal, push_changes: false };
-  el.observers.entry(parent.id).or_insert(vec![]).push(ob);
+pub fn register_signal(env : Env, signal : Ptr<Signal>, cell : CellUid) {
+  let mut el = env.event_loop;
+  el.signals.insert(signal.id, signal);
+  el.signal_cell_map.insert(signal.id, cell);
 }
 
 fn alloc_val<V>(v : V) -> *mut () {
@@ -305,20 +249,13 @@ fn alloc_bytes(bytes : usize, initial_value : Option<*const ()>) -> *mut () {
 
 fn create_regen_signal(
   env : Env,
-  el : Ptr<EventLoop>,
   output_type : TypeHandle,
   initial_value : Option<*const ()>,
   operation : StreamOperation,
 ) -> Ptr<Signal>
 {
   let output = alloc_bytes(output_type.size_of as usize, initial_value);
-  let signal = perm(Signal {
-    id: next_id(el),
-    event_loop: el,
-    output,
-    operation,
-    last_update: 0,
-  });
+  let signal = create_signal(env.event_loop, output_type, output, operation);
   env::register_signal(env, signal.id);
   signal
 }
@@ -330,19 +267,17 @@ pub mod ffi {
 
   pub extern "C" fn register_tick_signal(
     env : Env,
-    el : Ptr<EventLoop>,
     millisecond_interval : i64,
   ) -> Ptr<Signal>
   {
-    let now = current_millisecond(el.start_time);
-    let signal = create_timer(el, now, millisecond_interval);
+    let now = current_millisecond(env.event_loop.start_time);
+    let signal = create_timer(env, now, millisecond_interval);
     env::register_signal(env, signal.id);
     signal
   }
 
   pub extern "C" fn register_state_signal(
     env : Env,
-    el : Ptr<EventLoop>,
     input_signal : Ptr<Signal>,
     state_type : TypeHandle,
     initial_state : *const (),
@@ -350,14 +285,13 @@ pub mod ffi {
   ) -> Ptr<Signal>
   {
     let op = StreamOperation::State(input_signal, RegenCallback { f: update_function });
-    let signal = create_regen_signal(env, el, state_type, Some(initial_state), op);
-    add_push_observer(el, input_signal, signal);
+    let signal = create_regen_signal(env, state_type, Some(initial_state), op);
+    add_observer(env.event_loop, input_signal, signal);
     signal
   }
 
   pub extern "C" fn register_poll_signal(
     env : Env,
-    el : Ptr<EventLoop>,
     input_signal : Ptr<Signal>,
     event_source_type : TypeHandle,
     event_source : *const (),
@@ -371,52 +305,8 @@ pub mod ffi {
       event_source,
       poll_function: RegenCallback { f: poll_function },
     };
-    let signal = create_regen_signal(env, el, event_type, None, op);
-    add_push_observer(el, input_signal, signal);
-    signal
-  }
-
-  pub extern "C" fn register_map_signal(
-    env : Env,
-    el : Ptr<EventLoop>,
-    input_signal : Ptr<Signal>,
-    output_type : TypeHandle,
-    map_function : *const Function,
-  ) -> Ptr<Signal>
-  {
-    let op = StreamOperation::Map(input_signal, RegenCallback { f: map_function });
-    let signal = create_regen_signal(env, el, output_type, None, op);
-    add_push_observer(el, input_signal, signal);
-    signal
-  }
-
-  pub extern "C" fn register_merge_signal(
-    env : Env,
-    el : Ptr<EventLoop>,
-    signal_a : Ptr<Signal>,
-    signal_b : Ptr<Signal>,
-    output_type : TypeHandle,
-  ) -> Ptr<Signal>
-  {
-    let op = StreamOperation::Merge(signal_a, signal_b);
-    let signal = create_regen_signal(env, el, output_type, None, op);
-    add_push_observer(el, signal_a, signal);
-    add_push_observer(el, signal_b, signal);
-    signal
-  }
-
-  pub extern "C" fn register_sample_signal(
-    env : Env,
-    el : Ptr<EventLoop>,
-    trigger_signal : Ptr<Signal>,
-    state_signal : Ptr<Signal>,
-    output_type : TypeHandle,
-  ) -> Ptr<Signal>
-  {
-    let op = StreamOperation::Sample(state_signal);
-    let signal = create_regen_signal(env, el, output_type, None, op);
-    add_push_observer(el, trigger_signal, signal);
-    add_sample_observer(el, state_signal, signal);
+    let signal = create_regen_signal(env, event_type, None, op);
+    add_observer(env.event_loop, input_signal, signal);
     signal
   }
 }

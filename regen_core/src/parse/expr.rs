@@ -43,6 +43,7 @@ pub struct ExprData {
 pub enum ExprTag {
   ConstExpr,
   Def,
+  Reactive,
   OnChange,
   Container,
   Stream,

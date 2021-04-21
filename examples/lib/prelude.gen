@@ -1,13 +1,8 @@
 
-def tick_event = struct {
-  tick_interval : i64,
-  current_millisecond : i64,
-};
-
 def tick_event_signal = poly_type(signal, tick_event);
 
 def tick_signal = fun(millisecond_interval : i64) {
-  register_tick_signal(env, event_loop, millisecond_interval) as tick_event_signal;
+  register_tick_signal(env, millisecond_interval) as tick_event_signal;
 };
 
 def update_fn_type = fn(state : ptr void, event : ptr void) => void;
@@ -19,7 +14,7 @@ def state_signal = fun(
   update_function : update_fn_type)
 {
   register_state_signal(
-    env, event_loop, input_signal,
+    env, input_signal,
     state_type, initial_state,
     update_function)
 };
@@ -36,34 +31,7 @@ def poll_signal = fun(
   poll_function : poll_fn_type)
 {
   register_poll_signal(
-    env, event_loop, input_signal,
+    env, input_signal,
     event_source_type, event_source,
     event_type, poll_function)
-};
-
-def map_fn_type =
-  fn (output : ptr void, event : ptr void) => void;
-
-def map_signal = fun (
-  input_signal : signal,
-  output_type : type,
-  map_function : map_fn_type)
-{
-  register_map_signal(env, event_loop, input_signal, output_type, map_function)
-};
-
-def merge_signal = fun(
-  a : signal,
-  b : signal,
-  output_type : type)
-{
-  register_merge_signal(env, event_loop, a, b, output_type)
-};
-
-def sample_signal = fun(
-  trigger_signal : signal,
-  state_signal : signal,
-  output_type : type)
-{
-  register_sample_signal(env, event_loop, trigger_signal, state_signal, output_type)
 };
