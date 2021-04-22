@@ -4,14 +4,14 @@ use std::time::{Duration, Instant};
 use std::collections::{HashMap, HashSet};
 use std::alloc::{alloc, Layout};
 
-use crate::{compile::Function, env::{self, CellUid, Env}, hotload::hotload_value, interpret, perm_alloc::{Ptr, perm}, types::TypeHandle};
+use crate::{compile::Function, env::{CellUid, Env}, hotload_diff, interpret, perm_alloc::{Ptr, perm}, types::TypeHandle};
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
-pub struct SignalId(pub u64);
+struct SignalId(pub u64);
 
 #[derive(Copy, Clone)]
 pub struct Signal {
-  pub id : SignalId,
+  id : SignalId,
   pub event_loop : Ptr<EventLoop>,
   pub output_type : TypeHandle,
   pub output : *mut (),
@@ -46,22 +46,6 @@ pub enum StreamOperation {
   Poll{ input_signal: Ptr<Signal>, event_source : *mut (), poll_function : RegenCallback },
   State(Ptr<Signal>, RegenCallback),
   NativeHook(fn(Env, *mut ())),
-}
-
-pub fn add_native_hook<Data>(
-  env : Env,
-  input_signal : Ptr<Signal>,
-  data : Ptr<Data>,
-  f : fn(Env, Ptr<Data>),
-)
-{
-  let op = {
-    let f_ptr = unsafe { std::mem::transmute(f as *const ()) };
-    StreamOperation::NativeHook(f_ptr)
-  };
-  let data_ptr = Ptr::to_ptr(data) as *mut ();
-  let s = create_signal(env.event_loop, env.c.void_tag, data_ptr, op);
-  add_observer(env.event_loop, input_signal, s);
 }
 
 fn update_signal(env : Env, update_number : u64, mut signal : Ptr<Signal>) -> bool {
@@ -115,7 +99,7 @@ fn next_id(mut el : Ptr<EventLoop>) -> SignalId {
 }
 
 fn create_signal(
-  mut el : Ptr<EventLoop>,
+  el : Ptr<EventLoop>,
   output_type : TypeHandle,
   output_addr : *mut (),
   operation : StreamOperation,
@@ -129,17 +113,56 @@ fn create_signal(
     operation,
     last_update: 0,
   });
-  el.signals.insert(signal.id, signal);
   signal
 }
 
-pub fn destroy_signal(mut el : Ptr<EventLoop>, id : SignalId) {
-  el.signals.remove(&id);
-  el.signal_cell_map.remove(&id);
-  el.timers.remove(&id);
-  for (_, obs) in el.observers.iter_mut() {
-    obs.retain(|&ob| ob != id);
+pub fn register_signal(env : Env, signal : Ptr<Signal>, cell : CellUid) {
+  let mut el = env.event_loop;
+  el.signals.insert(signal.id, signal);
+  if let StreamOperation::Timer = signal.operation {
+    el.timers.insert(signal.id);
   }
+  el.signal_cell_map.insert(signal.id, cell);
+}
+
+pub fn remove_signal(mut el : Ptr<EventLoop>, sig : Ptr<Signal>) {
+  el.signals.remove(&sig.id);
+  el.signal_cell_map.remove(&sig.id);
+  el.timers.remove(&sig.id);
+  for (_, obs) in el.observers.iter_mut() {
+    obs.retain(|&ob| ob != sig.id);
+  }
+}
+
+pub fn register_native_hook<Data>(
+  env : Env,
+  current_millisecond : i64,
+  millisecond_interval : i64,
+  data : Ptr<Data>,
+  f : fn(Env, Ptr<Data>),
+)
+{
+  let timer_signal = create_timer(env, current_millisecond, millisecond_interval);
+  let mut el = env.event_loop;
+  let op = {
+    let f_ptr = unsafe { std::mem::transmute(f as *const ()) };
+    StreamOperation::NativeHook(f_ptr)
+  };
+  let data_ptr = Ptr::to_ptr(data) as *mut ();
+  let native_signal = create_signal(el, env.c.void_tag, data_ptr, op);
+
+  el.signals.insert(timer_signal.id, timer_signal);
+  el.timers.insert(timer_signal.id);
+  el.signals.insert(native_signal.id, native_signal);
+  add_observer(el, timer_signal, native_signal);
+}
+
+pub fn create_registered_timer(env : Env, current_millisecond : i64, millisecond_interval : i64) -> Ptr<Signal> {
+  let s = create_timer(env, current_millisecond, millisecond_interval);
+  let mut el = env.event_loop;
+  el.signals.insert(s.id, s);
+  el.timers.insert(s.id);
+  s
 }
 
 pub fn create_timer(env : Env, current_millisecond : i64, millisecond_interval : i64) -> Ptr<Signal> {
@@ -148,9 +171,7 @@ pub fn create_timer(env : Env, current_millisecond : i64, millisecond_interval :
     next_tick_millisecond: current_millisecond + millisecond_interval,
   };
   let state = alloc_val(timer_state);
-  let mut el = env.event_loop;
-  let s = create_signal(el, env.c.tick_event_tag, state, StreamOperation::Timer);
-  el.timers.insert(s.id);
+  let s = create_signal(env.event_loop, env.c.tick_event_tag, state, StreamOperation::Timer);
   s
 }
 
@@ -169,7 +190,7 @@ fn handle_signal_input(env : Env, id : SignalId) {
 
 fn push_new_value(env : Env, signal : Ptr<Signal>) {
   if let Some(cell_uid) = env.event_loop.signal_cell_map.get(&signal.id) {
-    hotload_value(*cell_uid, env, signal.output, signal.output_type);
+    hotload_diff::update_reactive_cell(env, *cell_uid);
   }
   if let Some(observers) = env.event_loop.observers.get(&signal.id) {
     for &id in observers {
@@ -226,12 +247,6 @@ pub fn start_loop(env : Env) {
   }
 }
 
-pub fn register_signal(env : Env, signal : Ptr<Signal>, cell : CellUid) {
-  let mut el = env.event_loop;
-  el.signals.insert(signal.id, signal);
-  el.signal_cell_map.insert(signal.id, cell);
-}
-
 fn alloc_val<V>(v : V) -> *mut () {
   Ptr::to_ptr(perm(v)) as *mut ()
 }
@@ -256,7 +271,6 @@ fn create_regen_signal(
 {
   let output = alloc_bytes(output_type.size_of as usize, initial_value);
   let signal = create_signal(env.event_loop, output_type, output, operation);
-  env::register_signal(env, signal.id);
   signal
 }
 
@@ -265,18 +279,17 @@ fn create_regen_signal(
 pub mod ffi {
   use super::*;
 
-  pub extern "C" fn register_tick_signal(
+  pub extern "C" fn create_tick_signal(
     env : Env,
     millisecond_interval : i64,
   ) -> Ptr<Signal>
   {
     let now = current_millisecond(env.event_loop.start_time);
-    let signal = create_timer(env, now, millisecond_interval);
-    env::register_signal(env, signal.id);
+    let signal = create_registered_timer(env, now, millisecond_interval);
     signal
   }
 
-  pub extern "C" fn register_state_signal(
+  pub extern "C" fn create_state_signal(
     env : Env,
     input_signal : Ptr<Signal>,
     state_type : TypeHandle,
@@ -290,7 +303,7 @@ pub mod ffi {
     signal
   }
 
-  pub extern "C" fn register_poll_signal(
+  pub extern "C" fn create_poll_signal(
     env : Env,
     input_signal : Ptr<Signal>,
     event_source_type : TypeHandle,

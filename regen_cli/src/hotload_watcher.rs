@@ -8,12 +8,9 @@ use crate::ffi_libs;
 use regen_core::{
   new_env,
   env::Env,
-  hotload,
+  hotload_diff,
   perm_alloc::{perm, Ptr},
-  event_loop::{
-    self,
-    add_native_hook,
-  },
+  event_loop,
 };
 use std::fs;
 
@@ -27,7 +24,7 @@ fn hotload_file(env : Env, path : &str) {
   let code =
     fs::read_to_string(path)
     .expect("Something went wrong reading the file");
-  hotload::hotload_module(path, &code, env);
+  hotload_diff::hotload_live_module(env, path, &code);
 }
 
 struct WatchState {
@@ -46,8 +43,7 @@ pub fn watch_file(path : &str) {
   let watch_state = perm(
     WatchState { rx, watcher, path: path.to_string() }
   );
-  let timer = event_loop::create_timer(env, 0, 10);
-  add_native_hook(env, timer, watch_state,
+  event_loop::register_native_hook(env, 0, 10, watch_state,
     |env, ws : Ptr<WatchState>| {
       match ws.rx.try_recv() {
         Ok(event) => {

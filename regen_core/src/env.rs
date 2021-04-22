@@ -1,20 +1,67 @@
-use crate::{event_loop::{self, EventLoop, SignalId}, ffi_libs::*, parse::{self, CodeModule, Expr, ExprContent, ExprTag, SrcLocation, Val}, perm_alloc::{Ptr, SlicePtr, perm, perm_slice}, symbols::{Symbol, SymbolTable, to_symbol}, types::{TypeHandle, CoreTypes, core_types }};
+use crate::{event_loop::{self, EventLoop, Signal}, ffi_libs::*, parse::{self, CodeModule, Expr, ExprContent, ExprTag, SrcLocation, Val}, perm_alloc::{Ptr, SlicePtr, perm, perm_slice}, symbols::{Symbol, SymbolTable, to_symbol}, types::{TypeHandle, CoreTypes, core_types }};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 /// Environment for regen editing session
 #[derive(Clone)]
 pub struct Environment {
+  pub live_exprs : Vec<Expr>,
   pub cells : HashMap<CellUid, CellValue>,
-  pub dependencies : HashMap<CellUid, HashMap<CellUid, Expr>>,
-  signals : HashMap<CellUid, Vec<SignalId>>,
+  pub graph : CellGraph,
+  pub signals : HashMap<CellUid, Ptr<Signal>>,
   pub event_loop : Ptr<EventLoop>,
   pub st : SymbolTable,
   pub c : CoreTypes,
-  pub active_definition : Option<CellUid>,
   builtin_dummy_expr : Expr,
 }
+
+#[derive(Clone, Default)]
+pub struct CellGraph {
+  /// The Uids of symbol dependencies are stored alongside the expression
+  /// the Uid was calculated from, because these expressions are sensitive
+  /// to namespacing. When the code changes they have to be re-checked in
+  /// case they resolve to a different Uid.
+  dependency_graph : HashMap<CellUid, HashMap<CellUid, UidExpr>>,
+
+  /// The cell observer graph is just the symbol dependency graph inverted
+  observer_graph : HashMap<CellUid, HashSet<CellUid>>,
+}
+
+impl CellGraph {
+  pub fn dependencies(&self, uid : CellUid) -> Option<&HashMap<CellUid, UidExpr>> {
+    self.dependency_graph.get(&uid)
+  }
+
+  pub fn observers(&self, uid : CellUid) -> Option<&HashSet<CellUid>> {
+    self.observer_graph.get(&uid)
+  }
+
+  pub fn unload_cell(&mut self, uid : CellUid) {
+    if let Some(deps) = self.dependency_graph.remove(&uid) {
+      for dep_uid in deps.keys() {
+        if let Some(observers) = self.observer_graph.get_mut(dep_uid) {
+          observers.remove(&uid);
+        }
+      }
+    }
+  }
+
+  pub fn set_cell_dependencies(&mut self, uid : CellUid, deps : HashMap<CellUid, UidExpr>) {
+    // make sure any old data is removed
+    self.unload_cell(uid);
+    // add the observers
+    for &dep_uid in deps.keys() {
+      let observers = self.observer_graph.entry(dep_uid).or_insert_with(|| HashSet::new());
+      observers.insert(uid);
+    }
+    self.dependency_graph.insert(uid, deps);
+  }
+}
+
+#[derive(Copy, Clone)]
+// the expression that a CellUID was derived from
+pub struct UidExpr(pub Expr);
 
 pub type Env = Ptr<Environment>;
 
@@ -35,7 +82,8 @@ use CellId::*;
 
 #[derive(Clone, Copy)]
 pub struct CellValue {
-  pub e : Expr,
+  pub full_expr : Expr,
+  pub value_expr : Expr,
   pub t : TypeHandle,
   pub ptr : *const (),
 }
@@ -57,48 +105,32 @@ impl CellUid {
 pub fn unload_cell(mut env : Env, uid : CellUid) {
   if let DefCell(_) = uid.id {
     let el = env.event_loop;
-    if let Some(signals) = env.signals.get(&uid) {
-      for &id in signals {
-        event_loop::destroy_signal(el, id);
-      }
+    if let Some(&signal) = env.signals.get(&uid) {
+      event_loop::remove_signal(el, signal);
     }
     env.signals.remove(&uid);
   }
   env.cells.remove(&uid);
-  env.dependencies.remove(&uid);
+  env.graph.unload_cell(uid);
 }
 
 pub fn get_cell_value(env : Env, uid : CellUid) -> Option<CellValue> {
   env.cells.get(&uid).cloned()
 }
 
-fn env_alloc_global(mut env : Env, e : Expr, name : Symbol, t : TypeHandle) -> *mut () {
+pub fn define_global(mut env : Env, s : &str, v : u64, t : TypeHandle) {
+  let name = to_symbol(env.st, s);
   let path = CellUid::def(name, new_namespace(&[]));
   if env.cells.contains_key(&path) {
     panic!("def {} already defined", name);
   }
   let layout = std::alloc::Layout::from_size_align(t.size_of as usize, 8).unwrap();
   let ptr = unsafe { std::alloc::alloc(layout) as *mut () };
-  env.cells.insert(path, CellValue { e, t, ptr });
-  ptr
-}
-
-pub fn define_global(e : Env, s : &str, v : u64, t : TypeHandle) {
-  let name = to_symbol(e.st, s);
-  let p = env_alloc_global(e, e.builtin_dummy_expr, name, t);
+  let e = env.builtin_dummy_expr;
+  env.cells.insert(path, CellValue { full_expr: e, value_expr: e, t, ptr });
   unsafe {
-    *(p as *mut u64) = v;
+    *(ptr as *mut u64) = v;
   }
-}
-
-pub fn set_active_definition(mut env : Env, def : Option<CellUid>) {
-  env.active_definition = def;
-}
-
-pub fn register_signal(mut env : Env, id : SignalId) {
-  let name = env.active_definition.expect("can't register a signal; no active definition");
-  let signals = env.signals.entry(name).or_insert_with(|| vec![]);
-  signals.push(id);
 }
 
 pub fn get_cell_type(e : Env, uid : CellUid) -> Option<TypeHandle> {
@@ -113,7 +145,7 @@ pub fn new_env(st : SymbolTable) -> Env {
   let builtin_dummy_expr = {
     let module = perm(CodeModule {
       code: "".into(),
-      name: "__internal".into(),
+      name: to_symbol(st, "__internal"),
     });
     parse::expr(
       ExprTag::Omitted,
@@ -123,13 +155,13 @@ pub fn new_env(st : SymbolTable) -> Env {
   };
 
   let env = perm(Environment {
+    live_exprs: vec![],
     cells: HashMap::new(),
-    dependencies: HashMap::new(),
+    graph: Default::default(),
     signals: HashMap::new(),
     event_loop: event_loop::create_event_loop(),
     st,
     c: core_types(st),
-    active_definition: None,
     builtin_dummy_expr,
   });
   load_ffi_libs(env);

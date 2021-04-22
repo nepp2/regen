@@ -195,21 +195,21 @@ pub fn load_ffi_libs(e : Env) {
   
   // ----------- Bind signal functions ------------
 
-  define_global(e, "register_tick_signal", register_tick_signal as u64,
+  define_global(e, "create_tick_signal", create_tick_signal as u64,
     c_function_type(
       &[env_ptr, i64],
         signal_tag));
 
   let update_fn_type =
     function_type(&[void_ptr, void_ptr], void);
-  define_global(e, "register_state_signal", register_state_signal as u64,
+  define_global(e, "create_state_signal", create_state_signal as u64,
     c_function_type(
       &[env_ptr, signal_tag, type_tag, void_ptr, update_fn_type],
         signal_tag));
 
   let poll_fn_type =
     function_type(&[void_ptr, void_ptr, void_ptr], bool_type);
-  define_global(e, "register_poll_signal", register_poll_signal as u64,
+  define_global(e, "create_poll_signal", create_poll_signal as u64,
     c_function_type(
       &[env_ptr, signal_tag, type_tag, void_ptr, type_tag, poll_fn_type],
         signal_tag));

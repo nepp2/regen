@@ -1,5 +1,5 @@
 
-use regen_core::{env, env::{CellUid, Env, define_global}, ffi_libs::RegenString, hotload, symbols::{Symbol, to_symbol}, types, types::c_function_type};
+use regen_core::{env, env::{CellUid, Env, define_global}, ffi_libs::RegenString, hotload_diff, symbols::{Symbol, to_symbol}, types, types::c_function_type};
 use std::fs;
 use std::path::Path;
 use std::ffi::CString;
@@ -20,7 +20,7 @@ pub extern "C" fn include(env : Env, file_name : &RegenString) {
     let code =
       fs::read_to_string(&path)
       .expect("Something went wrong reading the file");
-    hotload::interpret_module(file_name, &code, env);
+    hotload_diff::interpret_module(env, file_name, &code);
     let u64 = env.c.u64_tag;
     define_global(env, path_symbol.as_str(), path_symbol.as_u64(), u64);
   }

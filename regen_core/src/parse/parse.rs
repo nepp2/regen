@@ -8,14 +8,14 @@ use std::str::FromStr;
 
 use ExprTag::*;
 
-pub fn parse_module(st : SymbolTable, module_name : &str, code : &str) -> Result<Vec<Expr>, Error> {
-  let module = perm(CodeModule { name: module_name.into(), code: code.into() });
+pub fn parse_module(st : SymbolTable, module_name : Symbol, code : &str) -> Result<Vec<Expr>, Error> {
+  let module = perm(CodeModule { name: module_name, code: code.into() });
   let tokens = lex(&module)?;
   parse_top_level(module, tokens, st)
 }
 
-pub fn parse_expression(st : SymbolTable, module_name : &str, code : &str) -> Result<Expr, Error> {
-  let module = perm(CodeModule { name: module_name.into(), code: code.into() });
+pub fn parse_expression(st : SymbolTable, module_name : Symbol, code : &str) -> Result<Expr, Error> {
+  let module = perm(CodeModule { name: module_name, code: code.into() });
   let tokens = lex(&module)?;
   let es = parse_top_level(module, tokens, st)?;
   if let &[e] = es.as_slice() {

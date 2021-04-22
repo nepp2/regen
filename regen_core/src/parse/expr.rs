@@ -3,7 +3,7 @@ use crate::{bytecode::Operator, ffi_libs::RegenString, perm_alloc::{Ptr, SlicePt
 
 #[derive(Clone)]
 pub struct CodeModule {
-  pub name : String,
+  pub name : Symbol,
   pub code : String,
 }
 

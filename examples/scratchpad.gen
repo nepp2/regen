@@ -1,12 +1,14 @@
 
 include(env, ref "examples/lib/prelude.gen");
 
-// asdasa
-def int_signal = poly_type(signal, i64);
+reactive tick = tick_signal(1000);
 
-def blah = fun(s : signal) {
+def a = tick;
 
-}
+def b = tick;
 
-//reactive tick = tick_signal(1); // 1
+def c = if true { a } else { b };
 
+def d = a;
+
+print d.current_millisecond / 1000;

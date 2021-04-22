@@ -7,7 +7,7 @@ mod hotload_watcher;
 #[cfg(test)]
 mod test;
 
-use regen_core::{new_env, hotload};
+use regen_core::{new_env, hotload_diff};
 use std::fs;
 
 pub fn run_file(path : &str) {
@@ -16,7 +16,7 @@ pub fn run_file(path : &str) {
     .expect("Something went wrong reading the file");
   let env = new_env();
   ffi_libs::bind_libs(env);
-  hotload::interpret_module(path, &code, env);
+  hotload_diff::interpret_module(env, path, &code);
 }
 
 fn main(){

@@ -46,7 +46,7 @@ impl ExprBuilder {
   }
 
   fn parse(&self, s : &str) -> Expr {
-    let e = parse::parse_expression(self.st, &self.loc.module.name, s).unwrap();
+    let e = parse::parse_expression(self.st, self.loc.module.name, s).unwrap();
     self.set_loc(e);
     e
   }

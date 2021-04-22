@@ -12,9 +12,9 @@
   - [x] onchange
   - [x] container
   - [x] stream
+- [ ] trigger hot reloading from reactive cell updates
 - [ ] compile container and stream
 - [ ] support onchange
-- [ ] trigger hot reloading from container updates
 
 
 

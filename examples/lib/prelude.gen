@@ -2,7 +2,7 @@
 def tick_event_signal = poly_type(signal, tick_event);
 
 def tick_signal = fun(millisecond_interval : i64) {
-  register_tick_signal(env, millisecond_interval) as tick_event_signal;
+  create_tick_signal(env, millisecond_interval) as tick_event_signal;
 };
 
 def update_fn_type = fn(state : ptr void, event : ptr void) => void;
@@ -13,7 +13,7 @@ def state_signal = fun(
   initial_state : (ptr void),
   update_function : update_fn_type)
 {
-  register_state_signal(
+  create_state_signal(
     env, input_signal,
     state_type, initial_state,
     update_function)
@@ -30,7 +30,7 @@ def poll_signal = fun(
   event_type : type,
   poll_function : poll_fn_type)
 {
-  register_poll_signal(
+  create_poll_signal(
     env, input_signal,
     event_source_type, event_source,
     event_type, poll_function)
