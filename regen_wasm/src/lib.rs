@@ -2,7 +2,7 @@
 // Import the wasm-bindgen crate.
 use wasm_bindgen::prelude::*;
 
-use regen_core::hotload_diff;
+use regen_core::hotload;
 
 // Our Add function
 // wasm-pack requires "exported" functions
@@ -10,6 +10,6 @@ use regen_core::hotload_diff;
 #[wasm_bindgen]
 pub fn interpret(code : String) -> String {
   let env = regen_core::new_env();
-  hotload_diff::interpret_module(env, "wasm_test_module", &code);
+  hotload::interpret_module(env, "wasm_test_module", &code);
   format!("Regen launched")
 }

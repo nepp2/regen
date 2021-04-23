@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use std::collections::{HashMap, HashSet};
 use std::alloc::{alloc, Layout};
 
-use crate::{compile::Function, env::{CellUid, Env}, hotload_diff, interpret, perm_alloc::{Ptr, perm}, types::TypeHandle};
+use crate::{compile::Function, env::{CellUid, Env}, hotload, interpret, perm_alloc::{Ptr, perm}, types::TypeHandle};
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 struct SignalId(pub u64);
@@ -190,7 +190,7 @@ fn handle_signal_input(env : Env, id : SignalId) {
 
 fn push_new_value(env : Env, signal : Ptr<Signal>) {
   if let Some(cell_uid) = env.event_loop.signal_cell_map.get(&signal.id) {
-    hotload_diff::update_reactive_cell(env, *cell_uid);
+    hotload::update_reactive_cell(env, *cell_uid);
   }
   if let Some(observers) = env.event_loop.observers.get(&signal.id) {
     for &id in observers {

@@ -10,8 +10,7 @@ pub mod ffi_libs;
 pub mod types;
 pub mod debug;
 pub mod event_loop;
-pub mod hotload_diff;
-pub mod hotload_reactive;
+pub mod hotload;
 mod error;
 
 // TODO: is this needed?

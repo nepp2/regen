@@ -1,7 +1,7 @@
 
 /// Compiles core language into bytecode
 
-use crate::{bytecode, env::{CellId, CellUid, CellValue, Env, UidExpr}, hotload_diff::{CellResolver, CellStatus}, parse, perm_alloc, symbols::{self, SymbolTable}, types};
+use crate::{bytecode, env::{CellId, CellUid, CellValue, Env, UidExpr}, hotload::{CellResolver, CellStatus}, parse, perm_alloc, symbols::{self, SymbolTable}, types};
 use std::collections::HashMap;
 
 use bytecode::{

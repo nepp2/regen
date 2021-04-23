@@ -8,7 +8,7 @@ use crate::ffi_libs;
 use regen_core::{
   new_env,
   env::Env,
-  hotload_diff,
+  hotload,
   perm_alloc::{perm, Ptr},
   event_loop,
 };
@@ -24,7 +24,7 @@ fn hotload_file(env : Env, path : &str) {
   let code =
     fs::read_to_string(path)
     .expect("Something went wrong reading the file");
-  hotload_diff::hotload_live_module(env, path, &code);
+  hotload::hotload_live_module(env, path, &code);
 }
 
 struct WatchState {

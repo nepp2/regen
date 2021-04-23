@@ -18,12 +18,13 @@
 
 
 
-thoughts:
+problems:
 
-* "reactive" just expects a typed signal
+* existing hotloading system needs to cooperate with the new one
+* should store defs even if they are broken
 
-* container and stream create signals
-* I want to get rid of observers, because they don't obey the graph ordering
-* what does container do?
-* what does stream do?
 
+
+namespaces and metaprogramming make everything very complicated. the value is that we get things like lists.
+
+the embed problem is currently just an edge-case.
