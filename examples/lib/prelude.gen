@@ -20,7 +20,7 @@ def create_container = fun(
 def poll_fn =
   fn(event_source : ptr void, output_event : ptr void, input_event : ptr void) => bool;
 
-def poll_signal = fun(
+def create_poll = fun(
   input_signal : signal,
   state_type : type,
   poll_function : poll_fn)

@@ -36,7 +36,7 @@ pub struct CellGraph {
   /// the Uid was calculated from, because these expressions are sensitive
   /// to namespacing. When the code changes they have to be re-checked in
   /// case they resolve to a different Uid.
-  dependency_graph : HashMap<CellUid, HashMap<CellUid, UidExpr>>,
+  dependency_graph : HashMap<CellUid, HashSet<CellUid>>,
 
   /// The output graph is just the dependency graph inverted
   output_graph : HashMap<CellUid, HashSet<CellUid>>,
@@ -46,7 +46,7 @@ pub struct CellGraph {
 }
 
 impl CellGraph {
-  pub fn dependencies(&self, uid : CellUid) -> Option<&HashMap<CellUid, UidExpr>> {
+  pub fn dependencies(&self, uid : CellUid) -> Option<&HashSet<CellUid>> {
     self.dependency_graph.get(&uid)
   }
 
@@ -56,7 +56,7 @@ impl CellGraph {
 
   fn clear_dependencies(&mut self, uid : CellUid) {
     if let Some(deps) = self.dependency_graph.remove(&uid) {
-      for dep_uid in deps.keys() {
+      for dep_uid in &deps {
         if let Some(outputs) = self.output_graph.get_mut(dep_uid) {
           outputs.remove(&uid);
         }
@@ -69,21 +69,17 @@ impl CellGraph {
     self.reactive_observers.remove(&uid);
   }
 
-  pub fn set_cell_dependencies(&mut self, uid : CellUid, deps : HashMap<CellUid, UidExpr>) {
+  pub fn set_cell_dependencies(&mut self, uid : CellUid, deps : HashSet<CellUid>) {
     // make sure any old data is removed
     self.clear_dependencies(uid);
     // add the outputs
-    for &dep_uid in deps.keys() {
+    for &dep_uid in &deps {
       let outputs = self.output_graph.entry(dep_uid).or_insert_with(|| HashSet::new());
       outputs.insert(uid);
     }
     self.dependency_graph.insert(uid, deps);
   }
 }
-
-#[derive(Copy, Clone)]
-// the expression that a CellUID was derived from
-pub struct UidExpr(pub Expr);
 
 pub type Env = Ptr<Environment>;
 
@@ -108,6 +104,7 @@ pub struct CellValue {
   pub value_expr : Expr,
   pub t : TypeHandle,
   pub ptr : *const (),
+  pub has_value : bool,
 }
 
 pub fn new_namespace(names : &[Symbol]) -> Namespace {
@@ -149,7 +146,8 @@ pub fn define_global(mut env : Env, s : &str, v : u64, t : TypeHandle) {
   let layout = std::alloc::Layout::from_size_align(t.size_of as usize, 8).unwrap();
   let ptr = unsafe { std::alloc::alloc(layout) as *mut () };
   let e = env.builtin_dummy_expr;
-  env.cells.insert(path, CellValue { full_expr: e, value_expr: e, t, ptr });
+  let cv = CellValue { full_expr: e, value_expr: e, t, ptr, has_value: true };
+  env.cells.insert(path, cv);
   unsafe {
     *(ptr as *mut u64) = v;
   }

@@ -1,8 +1,8 @@
 
 /// Compiles core language into bytecode
 
-use crate::{bytecode, env::{CellId, CellUid, CellValue, Env, UidExpr}, hotload::{CellResolver, CellStatus}, parse, perm_alloc, symbols::{self, SymbolTable}, types};
-use std::collections::HashMap;
+use crate::{bytecode, env::{CellId, CellUid, CellValue, Env}, hotload::{CellResolver, CellStatus}, parse, perm_alloc, symbols::{self, SymbolTable}, types};
+use std::collections::HashSet;
 
 use bytecode::{
   SequenceHandle, SequenceInfo, InstrExpr, FunctionBytecode,
@@ -21,9 +21,9 @@ use parse::{Expr, ExprShape, ExprTag, Val};
 pub fn compile_expr_to_function(
   env : Env,
   resolver : &CellResolver,
-  root : Expr) -> (Function, HashMap<CellUid, UidExpr>)
+  root : Expr) -> (Function, HashSet<CellUid>)
 {
-  let mut dependencies = HashMap::new();
+  let mut dependencies = HashSet::new();
   let f = compile_function(Builder::new(resolver, &mut dependencies, &env.c, env.st), root, &[], None);
   (f, dependencies)
 }
@@ -57,7 +57,7 @@ struct Builder<'l> {
 
   resolver : &'l CellResolver<'l>,
 
-  dependencies : &'l mut HashMap<CellUid, UidExpr>,
+  dependencies : &'l mut HashSet<CellUid>,
 
   c : &'l CoreTypes,
 
@@ -67,7 +67,7 @@ struct Builder<'l> {
 impl <'l> Builder<'l> {
   fn new(
     resolver : &'l CellResolver<'l>,
-    dependencies : &'l mut HashMap<CellUid, UidExpr>,
+    dependencies : &'l mut HashSet<CellUid>,
     c : &'l CoreTypes,
     st : SymbolTable,
   ) -> Self
@@ -287,7 +287,7 @@ fn function_to_var(b : &mut Builder, f : Function) -> Var {
 
 fn compile_function_def(
   resolver : &CellResolver,
-  dependencies : &mut HashMap<CellUid, UidExpr>,
+  dependencies : &mut HashSet<CellUid>,
   c : &CoreTypes,
   st : SymbolTable,
   args : &[Expr],
@@ -788,7 +788,7 @@ fn compile_def_reference(b : &mut Builder, e : Expr) -> Ref {
     if let Some(uid) = b.resolver.resolve_name(e) { uid }
     else { panic!("def not found ({})", e.loc()) }
   };
-  b.dependencies.insert(uid, UidExpr(e));
+  b.dependencies.insert(uid);
   let cell = get_cell_value(b, uid);
   let e = InstrExpr::StaticValue(cell.t, cell.ptr);
   let pointer_type = types::pointer_type(cell.t);
@@ -816,7 +816,7 @@ fn const_expr_value(b : &mut Builder, e : Expr) -> CellValue {
     if b.resolver.cell_status(uid) == CellStatus::Broken {
       panic!("dependency {} is broken", id);
     }
-    b.dependencies.insert(uid, UidExpr(e));
+    b.dependencies.insert(uid);
     uid
   }
   else {
@@ -949,7 +949,10 @@ fn compile_expr_value(b : &mut Builder, expr : Expr) -> Var {
 
 fn get_cell_value(b : &mut Builder, uid : CellUid) -> CellValue {
   if let Some(v) = b.resolver.cell_value(uid) {
-    return v;
+    if v.has_value {
+      return v;
+    }
+    panic!("cell {} does not have a value yet", uid);
   }
   panic!("no value found for cell {}", uid);
 }

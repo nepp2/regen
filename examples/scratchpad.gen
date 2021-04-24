@@ -5,11 +5,11 @@ reactive tick = create_timer(1000);
 
 def seconds = tick / 1000;
 
+def input = 12;
+
 def sum_fold = fun(sum : ptr i64, val : ptr i64) {
   *sum = *sum + *val;
 }
-
-def input = 30;
 
 reactive sum = create_container(
   (observe input) as signal,
@@ -19,3 +19,21 @@ reactive sum = create_container(
 );
 
 print sum;
+
+def even_poll = fun(val : ptr i64, input : ptr i64) {
+  let v = *input;
+  let even = (v / 2) * 2 == v;
+  if even {
+    *val = *input;
+  }
+  even
+}
+
+reactive evens = create_poll(
+  (observe input) as signal,
+  i64,
+  even_poll as poll_fn
+);
+
+print evens;
+
