@@ -1,7 +1,14 @@
-use crate::{event_loop::{self, EventLoop, Signal}, ffi_libs::*, parse::{self, CodeModule, Expr, ExprContent, ExprTag, SrcLocation, Val}, perm_alloc::{Ptr, SlicePtr, perm, perm_slice}, symbols::{Symbol, SymbolTable, to_symbol}, types::{TypeHandle, CoreTypes, core_types }};
+use crate::{event_loop::{self, EventLoop, LoopId}, ffi_libs::*, parse::{self, CodeModule, Expr, ExprContent, ExprTag, SrcLocation, Val}, perm_alloc::{Ptr, SlicePtr, perm, perm_slice}, symbols::{Symbol, SymbolTable, to_symbol}, types::{TypeHandle, CoreTypes, core_types }};
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+
+/// A heap allocated Regen value
+#[derive(Clone, Copy)]
+pub struct RegenValue {
+  pub ptr : *mut (),
+  pub t : TypeHandle,
+}
 
 /// Environment for regen editing session
 #[derive(Clone)]
@@ -9,7 +16,7 @@ pub struct Environment {
   pub live_exprs : Vec<Expr>,
   pub cells : HashMap<CellUid, CellValue>,
   pub graph : CellGraph,
-  pub signals : HashMap<CellUid, Ptr<Signal>>,
+  pub reactive_cells : HashMap<CellUid, LoopId>,
   pub event_loop : Ptr<EventLoop>,
   pub st : SymbolTable,
   pub c : CoreTypes,
@@ -105,10 +112,10 @@ impl CellUid {
 pub fn unload_cell(mut env : Env, uid : CellUid) {
   if let DefCell(_) = uid.id {
     let el = env.event_loop;
-    if let Some(&signal) = env.signals.get(&uid) {
+    if let Some(&signal) = env.reactive_cells.get(&uid) {
       event_loop::remove_signal(el, signal);
     }
-    env.signals.remove(&uid);
+    env.reactive_cells.remove(&uid);
   }
   env.cells.remove(&uid);
   env.graph.unload_cell(uid);
@@ -158,7 +165,7 @@ pub fn new_env(st : SymbolTable) -> Env {
     live_exprs: vec![],
     cells: HashMap::new(),
     graph: Default::default(),
-    signals: HashMap::new(),
+    reactive_cells: HashMap::new(),
     event_loop: event_loop::create_event_loop(),
     st,
     c: core_types(st),

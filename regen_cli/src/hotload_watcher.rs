@@ -43,7 +43,7 @@ pub fn watch_file(path : &str) {
   let watch_state = perm(
     WatchState { rx, watcher, path: path.to_string() }
   );
-  event_loop::register_native_hook(env, 0, 10, watch_state,
+  event_loop::register_native_hook(env, 10, watch_state,
     |env, ws : Ptr<WatchState>| {
       match ws.rx.try_recv() {
         Ok(event) => {

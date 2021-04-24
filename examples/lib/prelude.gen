@@ -1,37 +1,29 @@
 
-def tick_event_signal = poly_type(signal, tick_event);
+def timer_constructor = poly_type(reactive_constructor, i64);
 
-def tick_signal = fun(millisecond_interval : i64) {
-  create_tick_signal(env, millisecond_interval) as tick_event_signal;
+def create_timer = fun(millisecond_interval : i64) {
+  new_timer_constructor(millisecond_interval) as timer_constructor;
 };
 
-def update_fn_type = fn(state : ptr void, event : ptr void) => void;
+def update_fn = fn(state : ptr void, event : ptr void) => void;
 
-def state_signal = fun(
+def create_container = fun(
   input_signal : signal,
   state_type : type,
   initial_state : (ptr void),
-  update_function : update_fn_type)
+  update_function : update_fn)
 {
-  create_state_signal(
-    env, input_signal,
-    state_type, initial_state,
-    update_function)
+  new_state_constructor(input_signal, state_type, initial_state, update_function)
 };
 
 
-def poll_fn_type =
+def poll_fn =
   fn(event_source : ptr void, output_event : ptr void, input_event : ptr void) => bool;
 
 def poll_signal = fun(
   input_signal : signal,
-  event_source_type : type,
-  event_source : ptr void,
-  event_type : type,
-  poll_function : poll_fn_type)
+  state_type : type,
+  poll_function : poll_fn)
 {
-  create_poll_signal(
-    env, input_signal,
-    event_source_type, event_source,
-    event_type, poll_function)
+  new_poll_constructor(input_signal, state_type, poll_function)
 };

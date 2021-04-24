@@ -1,9 +1,10 @@
 
-use crate::{compile, env::{self, CellId, CellUid, CellValue, Env, Namespace, UidExpr}, error::{Error, error, error_raw}, event_loop::{self, Signal}, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm_slice, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
+use crate::{compile, env::{self, CellId, CellUid, CellValue, Env, Namespace, RegenValue, UidExpr}, error::{Error, error, error_raw}, event_loop::{self}, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm_slice, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
 
 use std::collections::{HashMap, HashSet};
 
 use CellId::*;
+use event_loop::ReactiveConstructor;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum CellStatus {
@@ -148,7 +149,7 @@ fn load_cell(
   let mut env = resolver.env;
   // TODO: using catch unwind is very ugly. Replace with proper error handling.
   let (v, deps) = std::panic::catch_unwind(|| {
-    eval_expr(resolver, full_expr, value_expr)
+    eval_expr(resolver, value_expr)
   }).map_err(|_|
     error_raw(SrcLocation::zero(value_expr.loc().module), "regen eval panic!")
   )?;
@@ -157,7 +158,13 @@ fn load_cell(
     load_reactive_cell(env, uid, full_expr, value_expr, v, deps)?;
   }
   else {
-    env.cells.insert(uid, v);
+    let cv = CellValue {
+      full_expr,
+      value_expr,
+      t: v.t,
+      ptr: v.ptr,
+    };
+    env.cells.insert(uid, cv);
     env.graph.set_cell_dependencies(uid, deps);
   }
   Ok(())
@@ -168,33 +175,36 @@ fn load_reactive_cell(
   uid : CellUid,
   full_expr : Expr,
   value_expr : Expr,
-  sig_val : CellValue,
+  constructor_val : RegenValue,
   deps : HashMap<CellUid, UidExpr>,
 ) -> Result<(), Error>
 {
   let TODO = (); // handle the case when a reactive cell doesn't have a value yet
-  if let Some(poly) = types::type_as_poly(&sig_val.t) {
-    if poly.t == env.c.signal_tag {
-      // get signal value
-      let signal = unsafe { *(sig_val.ptr as *const Ptr<Signal>) };
+  if let Some(poly) = types::type_as_poly(&constructor_val.t) {
+    if poly.t == env.c.reactive_constructor_tag {
+      // get container def
+      let container_def = unsafe { 
+        *(constructor_val.ptr as *const Ptr<ReactiveConstructor>)
+      };
+      let data = event_loop::register_reactive_cell(env, uid, container_def);
       let v = CellValue {
         full_expr,
         value_expr,
-        t: poly.param,
-        ptr: signal.output,
+        t: data.t,
+        ptr: data.ptr,
       };
       env.cells.insert(uid, v);
       env.graph.set_cell_dependencies(uid, deps);
-      env.signals.insert(uid, signal);
-      event_loop::register_signal(env, signal, uid);
+      let TODO = (); // register signal somewhere?
+      // env.reactive_cells.insert(uid, ???);
       return Ok(());
     }
   }
-  error(value_expr.loc(), format!("expected signal type, found {}", sig_val.t))
+  error(value_expr.loc(), format!("expected signal type, found {}", constructor_val.t))
 }
 
-fn eval_expr(resolver : &CellResolver, full_expr : Expr, value_expr : Expr) -> (CellValue, HashMap<CellUid, UidExpr>) {
-  let (f, dependencies) = compile::compile_expr_to_function(resolver.env, &resolver, value_expr);
+fn eval_expr(resolver : &CellResolver, expr : Expr) -> (RegenValue, HashMap<CellUid, UidExpr>) {
+  let (f, dependencies) = compile::compile_expr_to_function(resolver.env, &resolver, expr);
   let expr_type = types::type_as_function(&f.t).unwrap().returns;
   // TODO: it's wasteful to allocate for types that are 64bits wide or smaller
   let ptr = {
@@ -202,7 +212,7 @@ fn eval_expr(resolver : &CellResolver, full_expr : Expr, value_expr : Expr) -> (
     unsafe { std::alloc::alloc(layout) as *mut () }
   };
   interpret::interpret_function(&f, &[], Some(ptr));
-  let v = CellValue { full_expr, value_expr, t: expr_type, ptr };
+  let v = RegenValue { t: expr_type, ptr };
   (v, dependencies)
 }
 
@@ -468,10 +478,19 @@ pub fn interpret_module(env : Env, module_name : &str, code : &str) {
   hotload_module(env, module_name, &exprs, HashSet::new());
 }
 
-/// Called by the event loop when the value of a reactive cell has changed
-pub fn update_reactive_cell(env : Env, uid : CellUid) {
+/// Recalculate cell values in response to an updated cell
+pub fn cell_updated(env : Env, uid : CellUid) {
   let direct_observers = env.graph.observers(uid).unwrap();
   let forced_updates = direct_observers.clone();
   let module_name = env.cells[&uid].full_expr.loc().module.name;
   hotload_module(env, module_name, &env.live_exprs, forced_updates);
+}
+
+/// Called by the event loop when the value of a reactive cell has changed
+pub fn update_timer_cell(env : Env, uid : CellUid, millisecond : i64) {
+  let cv = env.cells[&uid];
+  unsafe {
+    *(cv.ptr as *mut i64) = millisecond;
+  }
+  cell_updated(env, uid);
 }

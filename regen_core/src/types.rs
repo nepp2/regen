@@ -120,7 +120,7 @@ pub struct CoreTypes {
   pub expr_slice_tag : TypeHandle,
   pub symbol_tag : TypeHandle,
   pub signal_tag : TypeHandle,
-  pub tick_event_tag : TypeHandle,
+  pub reactive_constructor_tag : TypeHandle,
 
   pub core_types : Vec<(&'static str, TypeHandle)>,
 }
@@ -295,18 +295,11 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
 
   let symbol_tag = named_type(to_symbol(st, "symbol"), u64_tag);
   let signal_tag = named_type(to_symbol(st, "signal"), u64_tag);
+  let reactive_constructor_tag = named_type(to_symbol(st, "reactive_constructor"), u64_tag);
 
   let string_tag = struct_type(
     perm_slice(&[data_sym, len_sym]),
     perm_slice(&[pointer_type(u8_tag), u64_tag]),
-  );
-
-  let tick_event_tag = struct_type(
-    perm_slice(&[
-      to_symbol(st, "tick_interval"),
-      to_symbol(st, "current_millisecond"),
-    ]),
-    perm_slice(&[i64_tag, i64_tag]),
   );
 
   let mut array_types = vec![];
@@ -318,7 +311,7 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
     type_tag, i64_tag, i32_tag, u64_tag, u32_tag, u16_tag,
     u8_tag, void_tag, bool_tag, string_tag,
     expr_tag, expr_slice_tag, symbol_tag,
-    signal_tag, tick_event_tag,
+    reactive_constructor_tag, signal_tag,
 
     core_types:
       vec![
@@ -337,8 +330,8 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
         ("node_slice", expr_slice_tag),
         ("string", string_tag),
         ("symbol", symbol_tag),
+        ("reactive_constructor", reactive_constructor_tag),
         ("signal", signal_tag),
-        ("tick_event", tick_event_tag),
       ],
   }
 }

@@ -1,14 +1,13 @@
 
 include(env, ref "examples/lib/prelude.gen");
 
-reactive tick = tick_signal(1000);
+reactive tick = create_timer(1000);
 
-def a = tick;
+def seconds = tick / 1000;
 
-def b = tick;
+def sum_fold = fun(sum : ptr i64, val : ptr i64) {
+  *sum = *sum + *val;
+}
 
-def c = if true { a } else { b };
-
-def d = a;
-
-print d.current_millisecond / 1000;
+reactive sum =
+  create_container(onchange seconds, i64, 0, sum_fold as update_fn);

@@ -131,10 +131,8 @@ pub fn load_ffi_libs(e : Env) {
   let u64 = e.c.u64_tag;
   let i64 = e.c.i64_tag;
   let u32 = e.c.u32_tag;
-  let void = e.c.void_tag;
-  let void_ptr = types::pointer_type(void);
   let signal_tag = e.c.signal_tag;
-  let env_ptr = void_ptr;
+  let reactive_constructor_tag = e.c.reactive_constructor_tag;
   let expr = e.c.expr_tag;
   let type_tag = e.c.type_tag;
   let type_tag_ptr = types::pointer_type(type_tag);
@@ -195,24 +193,24 @@ pub fn load_ffi_libs(e : Env) {
   
   // ----------- Bind signal functions ------------
 
-  define_global(e, "create_tick_signal", create_tick_signal as u64,
+  define_global(e, "new_timer_constructor", new_timer_constructor as u64,
     c_function_type(
-      &[env_ptr, i64],
-        signal_tag));
+      &[i64],
+      reactive_constructor_tag));
 
   let update_fn_type =
     function_type(&[void_ptr, void_ptr], void);
-  define_global(e, "create_state_signal", create_state_signal as u64,
+  define_global(e, "new_state_constructor", new_state_constructor as u64,
     c_function_type(
-      &[env_ptr, signal_tag, type_tag, void_ptr, update_fn_type],
-        signal_tag));
+      &[signal_tag, type_tag, void_ptr, update_fn_type],
+      reactive_constructor_tag));
 
   let poll_fn_type =
     function_type(&[void_ptr, void_ptr, void_ptr], bool_type);
-  define_global(e, "create_poll_signal", create_poll_signal as u64,
+  define_global(e, "new_poll_constructor", new_poll_constructor as u64,
     c_function_type(
-      &[env_ptr, signal_tag, type_tag, void_ptr, type_tag, poll_fn_type],
-        signal_tag));
+      &[signal_tag, type_tag, poll_fn_type],
+      reactive_constructor_tag));
 
   // ----------- Bind language introspection functions ------------
 
