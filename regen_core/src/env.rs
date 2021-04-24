@@ -24,8 +24,8 @@ pub struct Environment {
 }
 
 #[derive(Copy, Clone)]
-pub struct ReactiveLink {
-  pub observer : CellUid,
+pub struct ReactiveObserver {
+  pub uid : CellUid,
   pub input : CellUid,
   pub update_handler : *const Function,
 }
@@ -38,11 +38,11 @@ pub struct CellGraph {
   /// case they resolve to a different Uid.
   dependency_graph : HashMap<CellUid, HashMap<CellUid, UidExpr>>,
 
-  /// The cell observer graph is just the symbol dependency graph inverted
-  observer_graph : HashMap<CellUid, HashSet<CellUid>>,
+  /// The output graph is just the dependency graph inverted
+  output_graph : HashMap<CellUid, HashSet<CellUid>>,
 
   /// Maps from reactive cells to the cells they observe
-  pub reactive_links : HashMap<CellUid, ReactiveLink>,
+  pub reactive_observers : HashMap<CellUid, ReactiveObserver>,
 }
 
 impl CellGraph {
@@ -50,28 +50,32 @@ impl CellGraph {
     self.dependency_graph.get(&uid)
   }
 
-  pub fn observers(&self, uid : CellUid) -> Option<&HashSet<CellUid>> {
-    self.observer_graph.get(&uid)
+  pub fn outputs(&self, uid : CellUid) -> Option<&HashSet<CellUid>> {
+    self.output_graph.get(&uid)
   }
 
-  pub fn unload_cell(&mut self, uid : CellUid) {
+  fn clear_dependencies(&mut self, uid : CellUid) {
     if let Some(deps) = self.dependency_graph.remove(&uid) {
       for dep_uid in deps.keys() {
-        if let Some(observers) = self.observer_graph.get_mut(dep_uid) {
-          observers.remove(&uid);
+        if let Some(outputs) = self.output_graph.get_mut(dep_uid) {
+          outputs.remove(&uid);
         }
       }
     }
-    self.reactive_links.remove(&uid);
+  }
+
+  pub fn unload_cell(&mut self, uid : CellUid) {
+    self.clear_dependencies(uid);
+    self.reactive_observers.remove(&uid);
   }
 
   pub fn set_cell_dependencies(&mut self, uid : CellUid, deps : HashMap<CellUid, UidExpr>) {
     // make sure any old data is removed
-    self.unload_cell(uid);
-    // add the observers
+    self.clear_dependencies(uid);
+    // add the outputs
     for &dep_uid in deps.keys() {
-      let observers = self.observer_graph.entry(dep_uid).or_insert_with(|| HashSet::new());
-      observers.insert(uid);
+      let outputs = self.output_graph.entry(dep_uid).or_insert_with(|| HashSet::new());
+      outputs.insert(uid);
     }
     self.dependency_graph.insert(uid, deps);
   }

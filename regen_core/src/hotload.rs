@@ -1,5 +1,5 @@
 
-use crate::{compile, env::{self, CellId, CellUid, CellValue, Env, Namespace, ReactiveLink, RegenValue, UidExpr}, error::{Error, error, error_raw}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm, perm_slice, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
+use crate::{compile, env::{self, CellId, CellUid, CellValue, Env, Namespace, ReactiveObserver, RegenValue, UidExpr}, error::{Error, error, error_raw}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm, perm_slice, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
 
 use std::{alloc::{Layout, alloc}, collections::{HashMap, HashSet}};
 
@@ -8,7 +8,7 @@ use event_loop::ReactiveConstructor;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum CellStatus {
-  New, Changed, Unchanged, Broken,
+  Changed, Unchanged, Broken,
 }
 
 pub struct CellResolver<'l> {
@@ -28,7 +28,7 @@ impl <'l> CellResolver<'l> {
   }
 
   pub fn cell_status(&self, uid : CellUid) -> CellStatus {
-    self.hs.visited_cells.get(&uid).cloned().unwrap_or(CellStatus::Unchanged)
+    self.hs.cell_status(uid)
   }
 
   pub fn resolve_id(&self, id : CellId) -> Option<CellUid> {
@@ -117,7 +117,7 @@ fn get_dependencies_status(resolver : &CellResolver, uid : CellUid) -> CellStatu
           Broken => {
             return Broken;
           }
-          Changed | New => {
+          Changed => {
             changed = true;
           }
           Unchanged => (),
@@ -131,7 +131,7 @@ fn get_dependencies_status(resolver : &CellResolver, uid : CellUid) -> CellStatu
     if changed { Changed } else { Unchanged }
   }
   else {
-    New
+    Changed
   }
 }
 
@@ -179,31 +179,6 @@ fn initialise_normal_cell(
   env.graph.set_cell_dependencies(uid, deps);
 }
 
-fn update_observer(env : Env, link : ReactiveLink) -> bool {
-  let ob_val = env.cells[&link.observer];
-  let input_val = env.cells[&link.input];
-  let returns_bool = {
-    let f = unsafe { &*link.update_handler };
-    let return_type = types::type_as_function(&f.t).unwrap().returns;
-    return_type == env.c.bool_tag
-  };
-  if returns_bool {
-    let mut return_val = true;
-    interpret::interpret_function(
-      link.update_handler,
-      &[ob_val.ptr as u64, input_val.ptr as u64],
-      Some((&mut return_val) as *mut bool as *mut ()));
-    return_val
-  }
-  else {
-    interpret::interpret_function(
-      link.update_handler,
-      &[ob_val.ptr as u64, input_val.ptr as u64],
-      None);
-    true
-  }
-}
-
 fn initialise_reactive_cell(
   mut env : Env,
   uid : CellUid,
@@ -228,8 +203,9 @@ fn initialise_reactive_cell(
         t,
         ptr: alloc_bytes(t.size_of as usize, initial_value),
       };
-      let link = ReactiveLink { observer: uid, input: *input, update_handler: poll_function };
-      env.graph.reactive_links.insert(uid, link);
+      let ob = ReactiveObserver { uid, input: *input, update_handler: poll_function };
+      env.graph.reactive_observers.insert(uid, ob);
+      println!("num observers {}", env.graph.reactive_observers.len());
       state
     }
   };
@@ -315,7 +291,56 @@ fn get_cell_status(resolver : &CellResolver, uid : CellUid, value_expr : Expr) -
     }
   }
   else {
-    CellStatus::New
+    CellStatus::Changed
+  }
+}
+
+fn update_observer(env : Env, ob : ReactiveObserver) -> bool {
+  let state_val = env.cells[&ob.uid];
+  let input_val = env.cells[&ob.input];
+  let returns_bool = {
+    let f = unsafe { &*ob.update_handler };
+    let return_type = types::type_as_function(&f.t).unwrap().returns;
+    return_type == env.c.bool_tag
+  };
+  if returns_bool {
+    let mut return_val = true;
+    interpret::interpret_function(
+      ob.update_handler,
+      &[state_val.ptr as u64, input_val.ptr as u64],
+      Some((&mut return_val) as *mut bool as *mut ()));
+    return_val
+  }
+  else {
+    interpret::interpret_function(
+      ob.update_handler,
+      &[state_val.ptr as u64, input_val.ptr as u64],
+      None);
+    true
+  }
+}
+
+fn poll_observer_input(
+  mut env : Env,
+  hs : &mut HotloadState,
+  uid : CellUid
+)
+{
+  if let Some(ob) = env.graph.reactive_observers.get(&uid) {
+    use CellStatus::*;
+    if hs.cell_status(uid) == Broken {
+      return;
+    }
+    if !env.cells.contains_key(&ob.input) {
+      return;
+    }
+    match hs.cell_status(ob.input) {
+      Broken | Unchanged => (),
+      Changed => {
+        update_observer(env, *ob);
+        hs.visited_cells.insert(ob.uid, CellStatus::Changed);
+      }
+    }
   }
 }
 
@@ -347,7 +372,7 @@ fn hotload_cell(
   if new_cell_state == Changed {
     unload_cell(env, uid);
   }
-  if let New | Changed = new_cell_state {
+  if let Changed = new_cell_state {
     let r = load_cell(&resolver, uid, full_expr, value_expr, reactive_cell);
     if let Err(e) = r {
       println!("{}", e.display());
@@ -462,6 +487,8 @@ fn hotload_def(
   // hotload the def initialiser
   let uid = CellUid::def(name, namespace);
   hotload_cell(env, hs, nested_namespace, uid, full_expr, value_expr, reactive_cell);
+  // update observer
+  poll_observer_input(env, hs, uid);
 }
 
 fn hotload_cells(
@@ -501,6 +528,12 @@ struct HotloadState {
   whitelist : HashSet<CellUid>,
   visited_cells : HashMap<CellUid, CellStatus>,
   forced_updates : HashSet<CellUid>,
+}
+
+impl HotloadState {
+  fn cell_status(&self, uid : CellUid) -> CellStatus {
+    self.visited_cells.get(&uid).cloned().unwrap_or(CellStatus::Unchanged)
+  }
 }
 
 fn hotload_module(env : Env, module_name : Symbol, exprs : &[Expr], forced_updates : HashSet<CellUid>) {
@@ -558,8 +591,8 @@ pub fn interpret_module(env : Env, module_name : &str, code : &str) {
 
 /// Recalculate cell values in response to an updated cell
 pub fn cell_updated(env : Env, uid : CellUid) {
-  let direct_observers = env.graph.observers(uid).unwrap();
-  let forced_updates = direct_observers.clone();
+  let direct_outputs = env.graph.outputs(uid).unwrap();
+  let forced_updates = direct_outputs.clone();
   let module_name = env.cells[&uid].full_expr.loc().module.name;
   hotload_module(env, module_name, &env.live_exprs, forced_updates);
 }
