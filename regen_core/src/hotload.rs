@@ -1,7 +1,7 @@
 
-use crate::{compile, env::{self, CellId, CellUid, CellValue, Env, Namespace, RegenValue, UidExpr}, error::{Error, error, error_raw}, event_loop::{self}, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm_slice, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
+use crate::{compile, env::{self, CellId, CellUid, CellValue, Env, Namespace, ReactiveLink, RegenValue, UidExpr}, error::{Error, error, error_raw}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm, perm_slice, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
 
-use std::collections::{HashMap, HashSet};
+use std::{alloc::{Layout, alloc}, collections::{HashMap, HashSet}};
 
 use CellId::*;
 use event_loop::ReactiveConstructor;
@@ -145,62 +145,140 @@ fn load_cell(
   reactive_cell : bool,
 ) -> Result<(), Error>
 {
-  // Eval expression
-  let mut env = resolver.env;
   // TODO: using catch unwind is very ugly. Replace with proper error handling.
   let (v, deps) = std::panic::catch_unwind(|| {
     eval_expr(resolver, value_expr)
   }).map_err(|_|
     error_raw(SrcLocation::zero(value_expr.loc().module), "regen eval panic!")
   )?;
-  // Update env
   if reactive_cell {
-    load_reactive_cell(env, uid, full_expr, value_expr, v, deps)?;
+    initialise_reactive_cell(resolver.env, uid, full_expr, value_expr, v, deps)?;
   }
   else {
-    let cv = CellValue {
-      full_expr,
-      value_expr,
-      t: v.t,
-      ptr: v.ptr,
-    };
-    env.cells.insert(uid, cv);
-    env.graph.set_cell_dependencies(uid, deps);
+    initialise_normal_cell(resolver.env, uid, full_expr, value_expr, v, deps);
   }
   Ok(())
 }
 
-fn load_reactive_cell(
+fn initialise_normal_cell(
   mut env : Env,
   uid : CellUid,
   full_expr : Expr,
   value_expr : Expr,
-  constructor_val : RegenValue,
+  v : RegenValue,
+  deps : HashMap<CellUid, UidExpr>,
+)
+{
+  let cv = CellValue {
+    full_expr,
+    value_expr,
+    t: v.t,
+    ptr: v.ptr,
+  };
+  env.cells.insert(uid, cv);
+  env.graph.set_cell_dependencies(uid, deps);
+}
+
+fn update_observer(env : Env, link : ReactiveLink) -> bool {
+  let ob_val = env.cells[&link.observer];
+  let input_val = env.cells[&link.input];
+  let returns_bool = {
+    let f = unsafe { &*link.update_handler };
+    let return_type = types::type_as_function(&f.t).unwrap().returns;
+    return_type == env.c.bool_tag
+  };
+  if returns_bool {
+    let mut return_val = true;
+    interpret::interpret_function(
+      link.update_handler,
+      &[ob_val.ptr as u64, input_val.ptr as u64],
+      Some((&mut return_val) as *mut bool as *mut ()));
+    return_val
+  }
+  else {
+    interpret::interpret_function(
+      link.update_handler,
+      &[ob_val.ptr as u64, input_val.ptr as u64],
+      None);
+    true
+  }
+}
+
+fn initialise_reactive_cell(
+  mut env : Env,
+  uid : CellUid,
+  full_expr : Expr,
+  value_expr : Expr,
+  v : RegenValue,
   deps : HashMap<CellUid, UidExpr>,
 ) -> Result<(), Error>
 {
   let TODO = (); // handle the case when a reactive cell doesn't have a value yet
+  let constructor = to_reactive_constructor(env, value_expr, v)?;
+  let container_val = match constructor.variant {
+    ConstructorVariant::Timer { millisecond_interval } => {
+      let id = event_loop::register_cell_timer(env.event_loop, uid, millisecond_interval);
+      let now : i64 = event_loop::current_millisecond(env.event_loop);
+      env.timers.insert(uid, id);
+      RegenValue { t: env.c.i64_tag, ptr: alloc_val(now) }
+    }
+    ConstructorVariant::Poll { input, initial_value, poll_function } => {
+      let t = constructor.value_type;
+      let state = RegenValue {
+        t,
+        ptr: alloc_bytes(t.size_of as usize, initial_value),
+      };
+      let link = ReactiveLink { observer: uid, input: *input, update_handler: poll_function };
+      env.graph.reactive_links.insert(uid, link);
+      state
+    }
+  };
+  let cv = CellValue {
+    full_expr,
+    value_expr,
+    t: container_val.t,
+    ptr: container_val.ptr,
+  };
+  env.cells.insert(uid, cv);
+  env.graph.set_cell_dependencies(uid, deps);
+  Ok(())
+}
+
+fn alloc_val<V>(v : V) -> *mut () {
+  Ptr::to_ptr(perm(v)) as *mut ()
+}
+
+fn alloc_bytes(bytes : usize, initial_value : Option<*const ()>) -> *mut () {
+  let layout = Layout::from_size_align(bytes, 8).unwrap();
+  unsafe {
+    let ptr = alloc(layout) as *mut ();
+    if let Some(v) = initial_value {
+      std::ptr::copy_nonoverlapping(v as *const u8, ptr as *mut u8, bytes);
+    }
+    ptr as *mut ()
+  }
+}
+
+fn to_reactive_constructor(env : Env, value_expr : Expr, constructor_val : RegenValue)
+  -> Result<Ptr<ReactiveConstructor>, Error>
+{
   if let Some(poly) = types::type_as_poly(&constructor_val.t) {
     if poly.t == env.c.reactive_constructor_tag {
-      // get container def
-      let container_def = unsafe { 
+      let c = unsafe { 
         *(constructor_val.ptr as *const Ptr<ReactiveConstructor>)
       };
-      let data = event_loop::register_reactive_cell(env, uid, container_def);
-      let v = CellValue {
-        full_expr,
-        value_expr,
-        t: data.t,
-        ptr: data.ptr,
-      };
-      env.cells.insert(uid, v);
-      env.graph.set_cell_dependencies(uid, deps);
-      let TODO = (); // register signal somewhere?
-      // env.reactive_cells.insert(uid, ???);
-      return Ok(());
+      if c.value_type == poly.param {
+        return Ok(c);
+      }
     }
   }
-  error(value_expr.loc(), format!("expected signal type, found {}", constructor_val.t))
+  if constructor_val.t == env.c.reactive_constructor_tag {
+    let c = unsafe { 
+      *(constructor_val.ptr as *const Ptr<ReactiveConstructor>)
+    };
+    return Ok(c);
+  }
+  error(value_expr.loc(), format!("expected reactive constructor, found {}", constructor_val.t))
 }
 
 fn eval_expr(resolver : &CellResolver, expr : Expr) -> (RegenValue, HashMap<CellUid, UidExpr>) {

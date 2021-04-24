@@ -146,10 +146,9 @@ pub fn load_ffi_libs(e : Env) {
 
   let void = e.c.void_tag;
   let void_ptr = types::pointer_type(void);
+  let env_tag = void_ptr;
 
-  define_global(e, "env", Ptr::to_u64(e), void_ptr);
-
-  define_global(e, "region", 0, void_ptr);
+  define_global(e, "env", Ptr::to_u64(e), env_tag);
 
   define_global(e, "event_loop", Ptr::to_u64(e.event_loop), void_ptr);
 
@@ -195,7 +194,7 @@ pub fn load_ffi_libs(e : Env) {
 
   define_global(e, "new_timer_constructor", new_timer_constructor as u64,
     c_function_type(
-      &[i64],
+      &[env_tag, i64],
       reactive_constructor_tag));
 
   let update_fn_type =

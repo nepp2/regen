@@ -620,10 +620,10 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       ps.expect(")")?;
       ps.list_expr(Stream, es, start)
     }
-    "onchange" => {
+    "observe" => {
       ps.pop_type(TokenType::Symbol)?;
       let name = pratt_parse_non_value(ps, kp)?;
-      ps.list_expr(OnChange, vec![name], start)
+      ps.list_expr(Observe, vec![name], start)
     }
     "let" => {
       ps.pop_type(TokenType::Symbol)?;

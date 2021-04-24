@@ -2,19 +2,23 @@
 use std::{hash::Hash};
 use std::time::{Duration, Instant};
 use std::collections::HashMap;
-use std::alloc::{alloc, Layout};
 
-use crate::{compile::Function, env::{CellUid, Env, RegenValue}, hotload, interpret, perm_alloc::{Ptr, perm}, types::{self, TypeHandle}};
+use crate::{compile::Function, env::{CellUid, Env}, hotload, perm_alloc::{Ptr, perm}, types::TypeHandle};
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
-pub struct LoopId(pub u64);
+pub struct TriggerId(pub u64);
 
 #[derive(Clone, Copy)]
-pub enum ReactiveConstructor {
+pub struct ReactiveConstructor {
+  pub value_type : TypeHandle,
+  pub variant : ConstructorVariant,
+}
+
+#[derive(Clone, Copy)]
+pub enum ConstructorVariant {
   Timer{ millisecond_interval : i64 },
   Poll{
     input : SignalInput,
-    value_type : TypeHandle,
     initial_value : Option<*const ()>,
     poll_function : *const Function,
   }
@@ -29,19 +33,6 @@ pub enum UpdateVariant {
 pub type SignalInput = Ptr<CellUid>;
 
 #[derive(Copy, Clone)]
-pub struct CellMapping {
-  id : LoopId,
-  variant : UpdateVariant,
-  cell : CellUid,
-}
-
-#[derive(Copy, Clone)]
-pub struct Observer {
-  state : RegenValue,
-  poll_function : *const Function,
-}
-
-#[derive(Copy, Clone)]
 pub struct NativeHook {
   state : *mut (),
   callback: fn(Env, *mut ()),
@@ -52,10 +43,9 @@ pub struct NativeHook {
 pub struct EventLoop {
   start_time : Instant,
   id_counter : u64,
-  cell_mappings : HashMap<LoopId, Ptr<CellMapping>>,
-  native_hooks : HashMap<LoopId, NativeHook>,
-  observers : HashMap<LoopId, Observer>,
-  timers : HashMap<LoopId, TimerState>,
+  cell_mappings : HashMap<TriggerId, CellUid>,
+  native_hooks : HashMap<TriggerId, NativeHook>,
+  timers : HashMap<TriggerId, TimerState>,
 }
 
 #[derive(Copy, Clone)]
@@ -65,88 +55,41 @@ pub struct TimerState {
   pub next_tick_millisecond : i64,
 }
 
-pub fn update_container(env : Env, id : LoopId, input : RegenValue) -> bool {
-  let c = env.event_loop.observers[&id];
-  let returns_bool = {
-    let f = unsafe { &*c.poll_function };
-    let return_type = types::type_as_function(&f.t).unwrap().returns;
-    return_type == env.c.bool_tag
-  };
-  if returns_bool {
-    let mut return_val = true;
-    interpret::interpret_function(
-      c.poll_function,
-      &[c.state.ptr as u64, input.ptr as u64],
-      Some((&mut return_val) as *mut bool as *mut ()));
-    return_val
-  }
-  else {
-    interpret::interpret_function(
-      c.poll_function,
-      &[c.state.ptr as u64, input.ptr as u64],
-      None);
-    true
-  }
-}
-
 pub fn create_event_loop() -> Ptr<EventLoop> {
   perm(EventLoop {
     start_time: Instant::now(),
     id_counter: 0,
-    observers: HashMap::new(),
     cell_mappings: HashMap::new(),
     native_hooks: HashMap::new(),
     timers: HashMap::new(),
   })
 }
 
-fn next_id(mut el : Ptr<EventLoop>) -> LoopId {
-  let id = LoopId(el.id_counter);
+fn next_id(mut el : Ptr<EventLoop>) -> TriggerId {
+  let id = TriggerId(el.id_counter);
   el.id_counter += 1;
   id
 }
 
-pub fn register_reactive_cell(env : Env, cell : CellUid, constructor : Ptr<ReactiveConstructor>) -> RegenValue {
-  let mut el = env.event_loop;
-  match *constructor {
-    ReactiveConstructor::Timer { millisecond_interval } => {
-      let id = create_timer(env, millisecond_interval);
-      create_cell_mapping(el, id, UpdateVariant::Timer, cell);
-      let now : i64 = current_millisecond(el.start_time);
-      RegenValue { t: env.c.i64_tag, ptr: alloc_val(now) }
-    }
-    ReactiveConstructor::Poll { input, value_type, initial_value, poll_function } => {
-      let state = RegenValue {
-        t: value_type,
-        ptr: alloc_bytes(value_type.size_of as usize, initial_value),
-      };
-      let id = next_id(el);
-      let o = Observer {
-        state,
-        poll_function,
-      };
-      el.observers.insert(id, o);
-      create_cell_mapping(el, id, UpdateVariant::Container, cell);
-      state
-    }
-  }
-}
-
-pub fn remove_signal(mut el : Ptr<EventLoop>, id : LoopId) {
-  el.observers.remove(&id);
+pub fn remove_trigger(mut el : Ptr<EventLoop>, id : TriggerId) {
   el.cell_mappings.remove(&id);
   el.timers.remove(&id);
 }
 
+pub fn register_cell_timer(mut el : Ptr<EventLoop>, cell : CellUid, millisecond_interval : i64) -> TriggerId {
+  let id = create_timer(el, millisecond_interval);
+  el.cell_mappings.insert(id, cell);
+  id
+}
+
 pub fn register_native_hook<Data>(
-  env : Env,
+  mut el : Ptr<EventLoop>,
   millisecond_interval : i64,
   data : Ptr<Data>,
   f : fn(Env, Ptr<Data>),
 )
 {
-  let timer_id = create_timer(env, millisecond_interval);
-  let mut el = env.event_loop;
+  let timer_id = create_timer(el, millisecond_interval);
   let hook = {
     let state = Ptr::to_ptr(data) as *mut ();
     let callback = unsafe { std::mem::transmute(f as *const ()) };
@@ -155,44 +98,36 @@ pub fn register_native_hook<Data>(
   el.native_hooks.insert(timer_id, hook);
 }
 
-pub fn create_timer(env : Env, millisecond_interval : i64) -> LoopId {
-  let now = current_millisecond(env.event_loop.start_time);
+fn create_timer(mut el : Ptr<EventLoop>, millisecond_interval : i64) -> TriggerId {
+  let now = current_millisecond(el);
   let timer_state = TimerState {
     millisecond_interval,
     next_tick_millisecond: now + millisecond_interval,
   };
-  let mut el = env.event_loop;
   let id = next_id(el);
   el.timers.insert(id, timer_state);
   id
 }
 
-pub fn create_cell_mapping(mut el : Ptr<EventLoop>, id : LoopId, variant : UpdateVariant, cell : CellUid) -> Ptr<CellMapping> {
-  let s = perm(CellMapping { id, variant, cell });
-  el.cell_mappings.insert(id, s);
-  s
+pub fn current_millisecond(el : Ptr<EventLoop>) -> i64 {
+  Instant::now().duration_since(el.start_time).as_millis() as i64
 }
 
-fn current_millisecond(start : Instant) -> i64 {
-  Instant::now().duration_since(start).as_millis() as i64
-}
-
-fn handle_timer_pulse(env : Env, id : LoopId) {
+fn handle_timer_pulse(env : Env, id : TriggerId) {
   let mut el = env.event_loop;
-  let now = current_millisecond(el.start_time);
+  let now = current_millisecond(el);
   let timer = el.timers.get_mut(&id).unwrap();
   timer.next_tick_millisecond = now + timer.millisecond_interval;
   if let Some(nh) = el.native_hooks.get(&id) {
     (nh.callback)(env, nh.state);
   }
-  if let Some(signal) = env.event_loop.cell_mappings.get(&id) {
-    hotload::update_timer_cell(env, signal.cell, now);
+  if let Some(&cell) = env.event_loop.cell_mappings.get(&id) {
+    hotload::update_timer_cell(env, cell, now);
   }
 }
 
 pub fn start_loop(env : Env) {
   let event_loop = env.event_loop;
-  let start = event_loop.start_time;
   loop {
     if event_loop.timers.is_empty() {
       // there will never be another event
@@ -204,7 +139,7 @@ pub fn start_loop(env : Env) {
       .min_by_key(|x| x.1.next_tick_millisecond)
       .unwrap();
     // wait for it to tick
-    let now = current_millisecond(start);
+    let now = current_millisecond(event_loop);
     let wait_time = timer.next_tick_millisecond - now;
     if wait_time > 0 {
       spin_sleep::sleep(Duration::from_millis(wait_time as u64));
@@ -214,31 +149,20 @@ pub fn start_loop(env : Env) {
   }
 }
 
-fn alloc_val<V>(v : V) -> *mut () {
-  Ptr::to_ptr(perm(v)) as *mut ()
-}
-
-fn alloc_bytes(bytes : usize, initial_value : Option<*const ()>) -> *mut () {
-  let layout = Layout::from_size_align(bytes, 8).unwrap();
-  unsafe {
-    let ptr = alloc(layout) as *mut ();
-    if let Some(v) = initial_value {
-      std::ptr::copy_nonoverlapping(v as *const u8, ptr as *mut u8, bytes);
-    }
-    ptr as *mut ()
-  }
-}
-
 // ----------- Define FFI to call from regen -------------
 
 pub mod ffi {
   use super::*;
 
   pub extern "C" fn new_timer_constructor(
+    env : Env,
     millisecond_interval : i64,
   ) -> Ptr<ReactiveConstructor>
   {
-    perm(ReactiveConstructor::Timer { millisecond_interval })
+    perm(ReactiveConstructor {
+      value_type: env.c.i64_tag,
+      variant : ConstructorVariant::Timer { millisecond_interval }
+    })
   }
 
   pub extern "C" fn new_state_constructor(
@@ -248,11 +172,13 @@ pub mod ffi {
     poll_function : *const Function,
   ) -> Ptr<ReactiveConstructor>
   {
-    perm(ReactiveConstructor::Poll {
-      input,
+    perm(ReactiveConstructor {
       value_type,
-      initial_value: Some(initial_value),
-      poll_function,
+      variant: ConstructorVariant::Poll {
+        input,
+        initial_value: Some(initial_value),
+        poll_function,
+      }
     })
   }
 
@@ -262,11 +188,13 @@ pub mod ffi {
     poll_function : *const Function,
   ) -> Ptr<ReactiveConstructor>
   {
-    perm(ReactiveConstructor::Poll {
-      input,
+    perm(ReactiveConstructor {
       value_type,
-      initial_value: None,
-      poll_function,
+      variant: ConstructorVariant::Poll {
+        input,
+        initial_value: None,
+        poll_function,
+      }
     })
   }
 }

@@ -740,6 +740,19 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       let v = compile_expr_to_var(b, value);
       Some(compile_cast(b, v, t).to_ref())
     }
+    // observe
+    List(Observe, &[e]) => {
+      let uid = {
+        if let Some(uid) = b.resolver.resolve_name(e) { uid }
+        else { panic!("def not found ({})", e.loc()) }
+      };
+      let cell = get_cell_value(b, uid);
+      let signal_type = types::poly_type(b.c.signal_tag, cell.t);
+      let uid_ptr = Ptr::to_ptr(perm(uid)) as *const ();
+      let ie = InstrExpr::StaticValue(signal_type, uid_ptr);
+      let v = push_expr(b, ie, signal_type);
+      Some(v.to_ref())
+    }
     // container
     List(Container, exprs) => {
       panic!("not implemented")
@@ -771,7 +784,11 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
 }
 
 fn compile_def_reference(b : &mut Builder, e : Expr) -> Ref {
-  let uid = resolve_def_name(b, e);
+  let uid = {
+    if let Some(uid) = b.resolver.resolve_name(e) { uid }
+    else { panic!("def not found ({})", e.loc()) }
+  };
+  b.dependencies.insert(uid, UidExpr(e));
   let cell = get_cell_value(b, uid);
   let e = InstrExpr::StaticValue(cell.t, cell.ptr);
   let pointer_type = types::pointer_type(cell.t);
@@ -928,14 +945,6 @@ fn compile_expr_value(b : &mut Builder, expr : Expr) -> Var {
   let e = InstrExpr::LiteralI64(Ptr::to_ptr(expr) as i64);
   let expr_tag = b.c.expr_tag;
   push_expr(b, e, expr_tag)
-}
-
-fn resolve_def_name(b : &mut Builder, e : Expr) -> CellUid {
-  if let Some(uid) = b.resolver.resolve_name(e) {
-    b.dependencies.insert(uid, UidExpr(e));
-    return uid;
-  }
-  panic!("def not found ({})", e.loc());
 }
 
 fn get_cell_value(b : &mut Builder, uid : CellUid) -> CellValue {

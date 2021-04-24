@@ -2,7 +2,7 @@
 def timer_constructor = poly_type(reactive_constructor, i64);
 
 def create_timer = fun(millisecond_interval : i64) {
-  new_timer_constructor(millisecond_interval) as timer_constructor;
+  new_timer_constructor(env, millisecond_interval) as timer_constructor;
 };
 
 def update_fn = fn(state : ptr void, event : ptr void) => void;

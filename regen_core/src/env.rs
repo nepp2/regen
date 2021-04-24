@@ -1,4 +1,4 @@
-use crate::{event_loop::{self, EventLoop, LoopId}, ffi_libs::*, parse::{self, CodeModule, Expr, ExprContent, ExprTag, SrcLocation, Val}, perm_alloc::{Ptr, SlicePtr, perm, perm_slice}, symbols::{Symbol, SymbolTable, to_symbol}, types::{TypeHandle, CoreTypes, core_types }};
+use crate::{compile::Function, event_loop::{self, EventLoop, TriggerId}, ffi_libs::*, parse::{self, CodeModule, Expr, ExprContent, ExprTag, SrcLocation, Val}, perm_alloc::{Ptr, SlicePtr, perm, perm_slice}, symbols::{Symbol, SymbolTable, to_symbol}, types::{TypeHandle, CoreTypes, core_types }};
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -16,11 +16,18 @@ pub struct Environment {
   pub live_exprs : Vec<Expr>,
   pub cells : HashMap<CellUid, CellValue>,
   pub graph : CellGraph,
-  pub reactive_cells : HashMap<CellUid, LoopId>,
+  pub timers : HashMap<CellUid, TriggerId>,
   pub event_loop : Ptr<EventLoop>,
   pub st : SymbolTable,
   pub c : CoreTypes,
   builtin_dummy_expr : Expr,
+}
+
+#[derive(Copy, Clone)]
+pub struct ReactiveLink {
+  pub observer : CellUid,
+  pub input : CellUid,
+  pub update_handler : *const Function,
 }
 
 #[derive(Clone, Default)]
@@ -33,6 +40,9 @@ pub struct CellGraph {
 
   /// The cell observer graph is just the symbol dependency graph inverted
   observer_graph : HashMap<CellUid, HashSet<CellUid>>,
+
+  /// Maps from reactive cells to the cells they observe
+  pub reactive_links : HashMap<CellUid, ReactiveLink>,
 }
 
 impl CellGraph {
@@ -52,6 +62,7 @@ impl CellGraph {
         }
       }
     }
+    self.reactive_links.remove(&uid);
   }
 
   pub fn set_cell_dependencies(&mut self, uid : CellUid, deps : HashMap<CellUid, UidExpr>) {
@@ -112,10 +123,10 @@ impl CellUid {
 pub fn unload_cell(mut env : Env, uid : CellUid) {
   if let DefCell(_) = uid.id {
     let el = env.event_loop;
-    if let Some(&signal) = env.reactive_cells.get(&uid) {
-      event_loop::remove_signal(el, signal);
+    if let Some(&id) = env.timers.get(&uid) {
+      event_loop::remove_trigger(el, id);
     }
-    env.reactive_cells.remove(&uid);
+    env.timers.remove(&uid);
   }
   env.cells.remove(&uid);
   env.graph.unload_cell(uid);
@@ -165,7 +176,7 @@ pub fn new_env(st : SymbolTable) -> Env {
     live_exprs: vec![],
     cells: HashMap::new(),
     graph: Default::default(),
-    reactive_cells: HashMap::new(),
+    timers: HashMap::new(),
     event_loop: event_loop::create_event_loop(),
     st,
     c: core_types(st),

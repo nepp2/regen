@@ -61,7 +61,7 @@ def render_game = fun (r : sdl_renderer_handle, event : ptr tick_event) {
 
 reactive event = sampler(tick_signal(1), poll_event);
 
-reactive game_state = container(onchange event, init game(0), game_update);
+reactive game_state = container(observe event, init game(0), game_update);
 
 reactive render_sample = sampler(
   tick_signal(1000 / 60),

@@ -5,9 +5,16 @@ reactive tick = create_timer(1000);
 
 def seconds = tick / 1000;
 
+print seconds;
+
 def sum_fold = fun(sum : ptr i64, val : ptr i64) {
   *sum = *sum + *val;
 }
 
 reactive sum =
-  create_container(onchange seconds, i64, 0, sum_fold as update_fn);
+  create_container(
+    (observe seconds) as signal,
+    i64,
+    (ref 0) as ptr void,
+    sum_fold as update_fn
+  );
