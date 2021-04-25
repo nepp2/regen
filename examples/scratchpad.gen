@@ -14,22 +14,15 @@ reactive tick = create_timer(1000);
 
 def seconds = tick / 1000;
 
-def input = 40;
+def input = 10;
 
 def sum_fold = fun(sum : ptr i64, val : ptr i64) {
   *sum = *sum + *val;
 }
 
-reactive sum = create_container(
-  (observe input) as signal,
-  i64,
-  (ref 0) as ptr void,
-  sum_fold as update_fn
-);
+reactive sum = container(observe input, 0, sum_fold);
 
-print sum;
-
-def even_poll = fun(val : ptr i64, input : ptr i64) {
+def poll_evens = fun(val : ptr i64, input : ptr i64) {
   let v = *input;
   let even = (v / 2) * 2 == v;
   if even {
@@ -38,11 +31,9 @@ def even_poll = fun(val : ptr i64, input : ptr i64) {
   even
 }
 
-reactive evens = create_poll(
-  (observe input) as signal,
-  i64,
-  even_poll as poll_fn
-);
+reactive evens = stream(observe input, poll_evens);
 
 print evens;
+
+print seconds + evens;
 

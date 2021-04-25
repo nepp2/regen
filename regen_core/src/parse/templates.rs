@@ -40,6 +40,10 @@ pub struct ExprBuilder {
   
 impl ExprBuilder {
 
+  pub fn new(loc : SrcLocation, st : SymbolTable) -> Self {
+    Self { loc, st }
+  }
+
   fn set_loc(&self, mut e : Expr) {
     e.metadata.loc = self.loc;
     for &c in e.children() { self.set_loc(c) }
@@ -164,4 +168,12 @@ pub fn while_macro(nb : &ExprBuilder, cond : Expr, body : Expr) -> Expr {
     }
   ");
   template(loop_template, &[cond, body])
+}
+
+pub fn create_container_ref(nb : &ExprBuilder) -> Expr {
+  nb.parse("create_container")
+}
+
+pub fn create_stream_ref(nb : &ExprBuilder) -> Expr {
+  nb.parse("create_stream")
 }

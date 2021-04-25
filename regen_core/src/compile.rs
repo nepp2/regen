@@ -14,7 +14,7 @@ use types::{TypeHandle, CoreTypes, Kind};
 use perm_alloc::{Ptr, perm_slice_from_vec, perm_slice, perm};
 
 use symbols::Symbol;
-use parse::SrcLocation;
+use parse::{SrcLocation, templates::{self, ExprBuilder}};
 use parse::{Expr, ExprShape, ExprTag, Val};
 
 /// Compile expression to simple no-arg function
@@ -729,8 +729,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     List(TypeOf, &[v]) => {
       // TODO: it's weird to codegen the expression when we only need its type
       let var = compile_expr_to_var(b, v);
-      let e = InstrExpr::LiteralI64(Ptr::to_i64(var.t));
-      return Some(push_expr(b, e, b.c.type_tag).to_ref());
+      Some(compile_type_literal(b, var.t).to_ref())
     }
     // deref
     List(Deref, &[pointer]) => {
@@ -762,12 +761,14 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       Some(v.to_ref())
     }
     // container
-    List(Container, exprs) => {
-      panic!("not implemented")
+    List(Container, &[signal_expr, value_expr, function_expr]) => {
+      let c = compile_container(b, e, signal_expr, value_expr, function_expr);
+      Some(c.to_ref())
     }
     // stream
-    List(Stream, exprs) => {
-      panic!("not implemented")
+    List(Stream, &[signal_expr, function_expr]) => {
+      let s = compile_stream(b, e, signal_expr, function_expr);
+      Some(s.to_ref())
     }
     // instrinsic op
     List(InstrinicOp, exprs) => {
@@ -779,7 +780,11 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
     List(Call, exprs) => {
       let function_expr = exprs[0];
       let arg_exprs = &exprs[1..];
-      Some(compile_function_call(b, e, function_expr, arg_exprs).to_ref())
+      let mut arg_values = vec![];
+      for &arg in arg_exprs {
+        arg_values.push(compile_expr_to_var(b, arg).id);
+      }
+      Some(compile_function_call(b, e, function_expr, arg_exprs, arg_values).to_ref())
     }
     // literal node
     List(Quote, &[e]) => {
@@ -789,6 +794,11 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       panic!("encountered invalid expression '{}' at ({})", e.loc().src_snippet(), e.loc())
     }
   }
+}
+
+fn compile_type_literal(b : &mut Builder, t : TypeHandle) -> Var {
+  let e = InstrExpr::LiteralI64(Ptr::to_i64(t));
+  return push_expr(b, e, b.c.type_tag);
 }
 
 fn compile_def_reference(b : &mut Builder, e : Expr) -> Ref {
@@ -843,12 +853,14 @@ fn const_expr_to_type(b: &mut Builder, e : Expr) -> TypeHandle {
   unsafe { *(cev.ptr as *const TypeHandle) }
 }
 
-fn compile_function_call(b : &mut Builder, e : Expr, function_val : Expr, args : &[Expr]) -> Var {
-  let mut arg_values = vec![];
-  for &arg in args {
-    arg_values.push(compile_expr_to_var(b, arg).id);
-  }
-
+fn compile_function_call(
+  b : &mut Builder,
+  e : Expr,
+  function_val : Expr,
+  args : &[Expr],
+  arg_values : Vec<LocalHandle>
+) -> Var
+{
   let f = compile_expr_to_var(b, function_val);
   let info = if let Some(i) = types::type_as_function(&f.t) {
     i
@@ -883,6 +895,82 @@ fn compile_function_call(b : &mut Builder, e : Expr, function_val : Expr, args :
     }
   };
   return push_expr(b, e, info.returns);
+}
+
+fn compile_container(
+  b : &mut Builder,
+  e : Expr,
+  signal_expr : Expr,
+  value_expr : Expr,
+  function_expr : Expr,
+) -> Var
+{
+  let eb = ExprBuilder::new(e.loc(), b.st);
+  let container_function = templates::create_container_ref(&eb);
+  let signal = compile_expr_to_var(b, signal_expr);
+  let value = compile_expr_to_var(b, value_expr);
+  let function = compile_expr_to_var(b, function_expr);
+  // Check types
+  let fun = types::type_as_function(&function.t).unwrap();
+  let state_type = types::deref_pointer_type(fun.args[0]).unwrap();
+  let input_type = types::deref_pointer_type(fun.args[1]).unwrap();
+  let signal_param = types::type_as_poly(&signal.t).unwrap().param;
+  if state_type != value.t {
+    panic!("conflicting container state types {} and {} at ({})",
+      state_type, value.t, e.loc());
+  }
+  if signal_param != input_type {
+    panic!("conflicting container input types {} and {} at ({})",
+      signal_param, input_type, e.loc());
+  }
+  // Cast args
+  let void_ptr_tag = types::pointer_type(b.c.void_tag);
+  let signal_arg = compile_cast(b, signal, b.c.signal_tag);
+  let type_arg = compile_type_literal(b, value.t);
+  let value_arg = {
+    let v = value.to_ref().get_address(b);
+    compile_cast(b, v, void_ptr_tag)
+  };
+  let function_arg = compile_cast(b, function, void_ptr_tag);
+  compile_function_call(
+    b, e,
+    container_function,
+    &[signal_expr, value_expr, value_expr, function_expr],
+    vec![signal_arg.id, type_arg.id, value_arg.id, function_arg.id],
+  )
+}
+
+fn compile_stream(
+  b : &mut Builder,
+  e : Expr,
+  signal_expr : Expr,
+  function_expr : Expr,
+) -> Var
+{
+  let eb = ExprBuilder::new(e.loc(), b.st);
+  let stream_function = templates::create_stream_ref(&eb);
+  let signal = compile_expr_to_var(b, signal_expr);
+  let function = compile_expr_to_var(b, function_expr);
+  // Check types
+  let fun = types::type_as_function(&function.t).unwrap();
+  let state_type = types::deref_pointer_type(fun.args[0]).unwrap();
+  let input_type = types::deref_pointer_type(fun.args[1]).unwrap();
+  let signal_param = types::type_as_poly(&signal.t).unwrap().param;
+  if signal_param != input_type {
+    panic!("conflicting container input types {} and {} at ({})",
+      signal_param, input_type, e.loc());
+  }
+  // Cast args
+  let void_ptr_tag = types::pointer_type(b.c.void_tag);
+  let signal_arg = compile_cast(b, signal, b.c.signal_tag);
+  let type_arg = compile_type_literal(b, state_type);
+  let function_arg = compile_cast(b, function, void_ptr_tag);
+  compile_function_call(
+    b, e,
+    stream_function,
+    &[signal_expr, function_expr, function_expr],
+    vec![signal_arg.id, type_arg.id, function_arg.id],
+  )
 }
 
 fn binary_op_type(c : &CoreTypes, op : Operator, a : TypeHandle, b : TypeHandle) -> Option<TypeHandle> {

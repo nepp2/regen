@@ -1,7 +1,7 @@
 use core::panic;
 use std::hash::{Hash, Hasher};
 
-use crate::{env, event_loop::ffi::*, parse::templates::template, parse::Expr, perm_alloc, symbols::Symbol, types, types::{TypeHandle, c_function_type, function_type}};
+use crate::{env, event_loop::ffi::*, parse::templates::template, parse::Expr, perm_alloc, symbols::Symbol, types, types::{TypeHandle, c_function_type}};
 
 use env::{Env, define_global};
 use perm_alloc::{Ptr, SlicePtr, perm_slice_from_vec, perm_slice};
@@ -197,18 +197,14 @@ pub fn load_ffi_libs(e : Env) {
       &[env_tag, i64],
       reactive_constructor_tag));
 
-  let update_fn_type =
-    function_type(&[void_ptr, void_ptr], void);
   define_global(e, "new_state_constructor", new_state_constructor as u64,
     c_function_type(
-      &[signal_tag, type_tag, void_ptr, update_fn_type],
+      &[signal_tag, type_tag, void_ptr, void_ptr],
       reactive_constructor_tag));
 
-  let poll_fn_type =
-    function_type(&[void_ptr, void_ptr, void_ptr], bool_type);
   define_global(e, "new_poll_constructor", new_poll_constructor as u64,
     c_function_type(
-      &[signal_tag, type_tag, poll_fn_type],
+      &[signal_tag, type_tag, void_ptr],
       reactive_constructor_tag));
 
   // ----------- Bind language introspection functions ------------

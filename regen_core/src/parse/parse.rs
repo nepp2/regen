@@ -566,7 +566,7 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       ps.pop_type(TokenType::Symbol)?;
       let cond = pratt_parse(ps, kp)?;
       let body = parse_block_in_braces(ps)?;
-      let nb = ExprBuilder { loc: ps.loc(start), st: ps.st };
+      let nb = ExprBuilder::new(ps.loc(start), ps.st);
       templates::while_macro(&nb, cond, body)
     }
     "for" => {
@@ -577,7 +577,7 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       ps.pop_syntax("to")?;
       let end_val = pratt_parse(ps, kp)?;
       let body = parse_block_in_braces(ps)?;
-      let nb = ExprBuilder { loc: ps.loc(start), st: ps.st };
+      let nb = ExprBuilder::new(ps.loc(start), ps.st);
       templates::for_macro(&nb, loop_var, start_val, end_val, body)
     }
     "fun" => {
@@ -731,7 +731,7 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       parse_symbol_type_tuple(ps, &mut names, &mut types)?;
       ps.expect("}")?;
       let loc = ps.loc(start);
-      let nb = ExprBuilder { loc, st: ps.st };
+      let nb = ExprBuilder::new(loc, ps.st);
       templates::struct_type_macro(&nb, names, types)
     }
     "ptr" => {
@@ -825,7 +825,7 @@ fn parse_function_type(ps : &mut ParseState, is_cfun : bool) -> Result<Expr, Err
   let ret = pratt_parse(ps, kp)?;
   // apply template
   let loc = ps.loc(start);
-  let nb = ExprBuilder { loc, st: ps.st };
+  let nb = ExprBuilder::new(loc, ps.st);
   Ok(templates::fn_type_macro(&nb, types, ret, is_cfun))
 }
 
@@ -940,7 +940,7 @@ fn to_template_expr(st : SymbolTable, quoted : Expr) -> Expr {
   let mut template_args = vec![];
   find_template_arguments(quoted, &mut template_args);
   if template_args.len() > 0 {
-    let nb = ExprBuilder { loc: quoted.loc(), st };
+    let nb = ExprBuilder::new(quoted.loc(), st);
     template_macro(&nb, quoted, template_args)
   }
   else {
