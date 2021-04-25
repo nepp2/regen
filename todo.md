@@ -1,19 +1,9 @@
 # TODO
 
-- [x] new reactive def system
-  - [x] support observe keyword
-    - [x] compile observe expressions into CellUid pointers with poly "signal" types
-    - [x] register observer dependencies in env
-    - [x] check reactive defs for signal updates _after_ checking them against the normal graph
-  - [x] making polling work properly
-    - [x] don't compute defs unless the dependencies have values
-  - [ ] make compiler fail gracefully
-    - [ ] fail silently when a dependency is found, but is not ready for use
-    - [ ] leave a marker for cells whose values couldn't be calculated
-      - [ ] just log the expression and the missing dependency
-  - [x] make namespacing global, regardless of context
-    - [x] fix the list implementation
-- [x] magic polymorphic container and stream functions
+* [ ] make compiler fail gracefully
+  * [ ] fail silently when a dependency is found, but is not ready for use
+  * [ ] leave a marker for cells whose values couldn't be calculated
+  * [ ] just log the expression and the missing dependency
 
 
 

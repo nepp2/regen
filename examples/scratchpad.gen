@@ -1,14 +1,5 @@
 
 include(env, ref "examples/lib/prelude.gen");
-include(env, ref "examples/lib/list.gen");
-
-embed define_list_type(#list_i64, #i64);
-
-def vs = list_i64::new();
-
-list_i64::add(vs, 6);
-
-print list_i64::get(vs, 0);
 
 reactive tick = create_timer(1000);
 
