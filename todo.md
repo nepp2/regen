@@ -5,8 +5,12 @@
     - [x] compile observe expressions into CellUid pointers with poly "signal" types
     - [x] register observer dependencies in env
     - [x] check reactive defs for signal updates _after_ checking them against the normal graph
-  - [ ] making polling work properly
-    - [ ] don't compute defs unless the dependencies have values
+  - [x] making polling work properly
+    - [x] don't compute defs unless the dependencies have values
+  - [ ] make compiler fail gracefully
+    - [ ] fail silently when a dependency is found, but is not ready for use
+    - [ ] leave a marker for cells whose values couldn't be calculated
+      - [ ] just log the expression and the missing dependency
   - [ ] make namespacing global, regardless of context
     - [ ] this will break list
   - [ ] magic polymorphic container and stream functions

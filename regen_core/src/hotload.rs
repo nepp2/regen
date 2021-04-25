@@ -1,9 +1,9 @@
 
-use crate::{compile, env::{self, CellId, CellUid, CellValue, Env, Namespace, ReactiveObserver, RegenValue}, error::{Error, error, error_raw}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm, perm_slice, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
+use crate::{compile, env::{self, CellUid, CellValue, Env, Namespace, ReactiveObserver, RegenValue}, error::{Error, error, error_raw}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
 
 use std::{alloc::{Layout, alloc}, collections::{HashMap, HashSet}};
 
-use CellId::*;
+use CellUid::*;
 use event_loop::ReactiveConstructor;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -13,7 +13,6 @@ pub enum CellStatus {
 
 pub struct CellResolver<'l> {
   env : Env,
-  namespace : Namespace,
   hs : &'l HotloadState,
 }
 
@@ -21,10 +20,9 @@ impl <'l> CellResolver<'l> {
 
   fn new(
     env : Env,
-    namespace : Namespace,
     hs : &'l HotloadState,
   ) -> Self {
-    CellResolver { env, namespace, hs }
+    CellResolver { env, hs }
   }
 
   pub fn cell_status(&self, uid : CellUid) -> CellStatus {
@@ -39,57 +37,33 @@ impl <'l> CellResolver<'l> {
     }
   }
 
-  pub fn resolve_id(&self, id : CellId) -> Option<CellUid> {
-    self.resolve_partial_uid(CellUid { id, namespace: perm_slice(&[])})
-  }
-
-  pub fn resolve_partial_uid(&self, partial_uid : CellUid) -> Option<CellUid> {
-    // Look for the id in the current module
-    let mut namespace_prefix = self.namespace;
-    loop {
-      let namespace = {
-        if partial_uid.namespace.len() == 0 {
-          namespace_prefix
-        }
-        else {
-          let mut names = vec![];
-          names.extend_from_slice(namespace_prefix.as_slice());
-          names.extend_from_slice(partial_uid.namespace.as_slice());
-          perm_slice_from_vec(names)
-        }
-      };
-      let uid = CellUid { id: partial_uid.id, namespace };
-      if let Some(cv) = env::get_cell_value(self.env, uid) {
-        // Accept defs that appear before this one in the current pass
-        if self.hs.visited_cells.contains_key(&uid) {
-          return Some(uid);
-        }
-        // Accept defs that aren't part of the current pass
-        if !self.hs.active_cells.contains(&uid) {
-          return Some(uid);
-        }
+  pub fn check_uid(&self, uid : CellUid) -> bool {
+    if env::get_cell_value(self.env, uid).is_some() {
+      // Accept defs that appear before this one in the current pass
+      if self.hs.visited_cells.contains_key(&uid) {
+        return true;
       }
-      if namespace_prefix.len() == 0 {
-        break;
+      // Accept defs that aren't part of the current pass
+      if !self.hs.active_cells.contains(&uid) {
+        return true;
       }
-      namespace_prefix = namespace_prefix.slice_range(0..namespace_prefix.len()-1);
     }
-    None
+    false
   }
 
   pub fn cell_value(&self, uid : CellUid) -> Option<CellValue> {
     env::get_cell_value(self.env, uid)
   }
 
-  fn expr_to_partial_uid(&self, mut names : Vec<Symbol>, e : Expr) -> Option<CellUid> {
+  fn expr_to_uid(&self, mut names : Vec<Symbol>, e : Expr) -> Option<CellUid> {
     use ExprShape::*;
     match e.shape() {
       Sym(name) => {
-        Some(CellUid::def(name, perm_slice_from_vec(names)))
+        Some(CellUid::def(perm_slice_from_vec(names), name))
       }
       List(ExprTag::Namespace, &[name, tail]) => {
         names.push(name.as_symbol());
-        self.expr_to_partial_uid(names, tail)
+        self.expr_to_uid(names, tail)
       },
       _ => {
         None
@@ -98,8 +72,9 @@ impl <'l> CellResolver<'l> {
   }
 
   pub fn resolve_name(&self, e : Expr) -> Option<CellUid> {
-    let partial_uid = self.expr_to_partial_uid(vec![], e)?;
-    self.resolve_partial_uid(partial_uid)
+    let uid = self.expr_to_uid(vec![], e)?;
+    if self.check_uid(uid) { Some(uid) }
+    else { None }
   }
 }
 
@@ -377,7 +352,6 @@ fn poll_observer_input(
 fn hotload_cell(
   mut env : Env,
   hs : &mut HotloadState,
-  namespace : Namespace,
   uid : CellUid,
   full_expr : Expr,
   value_expr : Expr,
@@ -385,8 +359,8 @@ fn hotload_cell(
 )
 {
   if hs.visited_cells.contains_key(&uid) {
-    match uid.id {
-      DefCell(_) => {
+    match uid {
+      DefCell(_, _) => {
         println!("def {} defined twice!", uid);
         return;
       }
@@ -401,7 +375,7 @@ fn hotload_cell(
   let final_status = match status {
     NewValue => {
       unload_cell(env, uid);
-      let resolver = CellResolver::new(env, namespace, hs);
+      let resolver = CellResolver::new(env, hs);
       let r = load_cell(&resolver, uid, full_expr, value_expr, reactive_cell);
       match r {
         Ok(s) => s,
@@ -493,7 +467,7 @@ fn hotload_embedded(
 {
   hotload_cells(env, hs, namespace, embeds);
   for &e in embeds {
-    let uid = CellUid::expr(e, namespace);
+    let uid = CellUid::expr(e);
     let cell = env::get_cell_value(env, uid).unwrap();
     if cell.t == env.c.expr_tag {
       let e = unsafe { *(cell.ptr as *const Expr) };
@@ -525,8 +499,8 @@ fn hotload_def(
   hotload_cells(env, hs, nested_namespace, &nested.const_exprs);
   hotload_embedded(env, hs, nested_namespace, &nested.embeds);
   // hotload the def initialiser
-  let uid = CellUid::def(name, namespace);
-  hotload_cell(env, hs, nested_namespace, uid, full_expr, value_expr, reactive_cell);
+  let uid = CellUid::def(namespace, name);
+  hotload_cell(env, hs, uid, full_expr, value_expr, reactive_cell);
   // update observer
   poll_observer_input(env, hs, uid);
 }
@@ -549,16 +523,19 @@ fn hotload_cells(
       _ => {
         // hotload nested cells
         let nested = get_nested_cells(e);
-        if nested.defs.len() > 0 {
-          println!("error: can't define defs inside a constant expression ({})", nested.defs[0].loc());
-        }
-        if nested.embeds.len() > 0 {
-          println!("error: can't embed exprs inside a constant expression ({})", nested.embeds[0].loc());
-        }
+        let TODO = (); // was there a reason for this being prevented?
+        // if nested.defs.len() > 0 {
+        //   println!("error: can't define defs inside a constant expression ({})", nested.defs[0].loc());
+        // }
+        // if nested.embeds.len() > 0 {
+        //   println!("error: can't embed exprs inside a constant expression ({})", nested.embeds[0].loc());
+        // }
+        hotload_cells(env, hs, namespace, &nested.defs);
         hotload_cells(env, hs, namespace, &nested.const_exprs);
+        hotload_embedded(env, hs, namespace, &nested.embeds);
         // hotload the const expression initialiser
-        let uid = CellUid::expr(e, namespace);
-        hotload_cell(env, hs, namespace, uid, e, e, false);
+        let uid = CellUid::expr(e);
+        hotload_cell(env, hs, uid, e, e, false);
       }
     }
   }

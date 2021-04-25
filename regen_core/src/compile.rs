@@ -1,7 +1,7 @@
 
 /// Compiles core language into bytecode
 
-use crate::{bytecode, env::{CellId, CellUid, CellValue, Env}, hotload::{CellResolver, CellStatus}, parse, perm_alloc, symbols::{self, SymbolTable}, types};
+use crate::{bytecode, env::{CellUid, CellValue, Env}, hotload::{CellResolver, CellStatus}, parse, perm_alloc, symbols::{self, SymbolTable}, types};
 use std::collections::HashSet;
 
 use bytecode::{
@@ -694,13 +694,21 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Option<Ref> {
       let num_locals = b.scoped_vars.len();
       for &c in exprs {
         // Ignore nested defs
-        if c.tag != Def {
+        if c.tag != Def && c.tag != Reactive {
           v = compile_expr(b, c);
         }
       }
       b.scoped_vars.drain(num_locals..).for_each(|_| ());
       let result = v.map(|v| v.to_var(b)); // Can't pass ref out of block scope
       result.map(|x| x.to_ref())
+    }
+    List(Def, _) => {
+      // Ignore defs
+      None
+    }
+    List(Reactive, _) => {
+      // Ignore defs
+      None
     }
     // debug
     List(Debug, &[v]) => {
@@ -811,17 +819,14 @@ fn strip_const_wrapper(e : Expr) -> Expr {
 }
 
 fn const_expr_value(b : &mut Builder, e : Expr) -> CellValue {
-  let id = CellId::ExprCell(e);
-  let uid = if let Some(uid) = b.resolver.resolve_id(id) {
-    if b.resolver.cell_status(uid) == CellStatus::Broken {
-      panic!("dependency {} is broken", id);
-    }
-    b.dependencies.insert(uid);
-    uid
+  let uid = CellUid::expr(e);
+  if !b.resolver.check_uid(uid) {
+    panic!("dependency {} not found", uid);
   }
-  else {
-    panic!("dependency {} not found", id);
-  };
+  if b.resolver.cell_status(uid) == CellStatus::Broken {
+    panic!("dependency {} is broken", uid);
+  }
+  b.dependencies.insert(uid);
   let cell = get_cell_value(b, uid);
   if cell.value_expr != e {
     panic!("const expressions '{}' and '{}' do not match", cell.value_expr, e);

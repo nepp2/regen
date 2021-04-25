@@ -194,9 +194,12 @@ impl <'l> ParseState<'l> {
     SrcLocation { start, end, module: self.code_module }
   }
 
-  fn prev_token(&self) -> &Token {
-    let i = self.pos - 1;
-    &self.tokens[i]
+  fn prev_token(&self, s : &str) -> bool {
+    if self.pos > 0 {
+      let i = self.pos - 1;
+      return self.tokens[i].string == s;
+    }
+    false
   }
 
   fn pop_type(&mut self, token_type : TokenType) -> Result<&Token, Error> {
@@ -293,6 +296,15 @@ fn pratt_parse(ps : &mut ParseState, precedence : i32) -> Result<Expr, Error> {
         };
         ps.pop_type(TokenType::Symbol)?;
         expr = parse_list(ps, vec![expr], separator, tag)?;
+      }
+      else {
+        break;
+      }
+    }
+    else if ps.prev_token("}") {
+      let &next_precedence = ps.config.expression_separators.get(";").unwrap();
+      if next_precedence > precedence {
+        expr = parse_list(ps, vec![expr], ";", Do)?;
       }
       else {
         break;
@@ -423,7 +435,7 @@ fn parse_semicolon_expr_list(ps : &mut ParseState, list : &mut Vec<Expr>) -> Res
       break;
     }
     list.push(pratt_parse(ps, precedence)?);
-    if ps.accept(";") || ps.prev_token().string == "}" {
+    if ps.accept(";") || ps.prev_token("}") {
       continue;
     }
     break;

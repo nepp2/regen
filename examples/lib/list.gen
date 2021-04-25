@@ -2,51 +2,52 @@
 // example usage:
 // def list_i32 = embed new_list_type(#i32);
 
-def new_list_type = fun(t : expr) {
-  #{
-    def T = $t;
+def define_list_type = fun(name : expr, t : expr) {
+  #(def $name = {
+      def T = $t;
 
-    def inner = struct { data : ptr T, length : i64, capacity : i64 };
+      def inner = struct { data : ptr ($name)::T, length : i64, capacity : i64 };
 
-    def list = ptr inner;
+      def list = ptr ($name)::inner;
 
-    def new = fun() {
-      let list = malloc(type_sizeof(inner)) as ptr inner;
-      *list = init inner(0 as ptr T, 0, 0);
-      list
-    };
+      def new = fun() {
+        let list = malloc(type_sizeof(($name)::inner)) as ptr ($name)::inner;
+        *list = init ($name)::inner(0 as ptr ($name)::T, 0, 0);
+        list
+      };
 
-    def add = fun(l : list, v : T) {
-      if l.length == l.capacity {
-        let new_cap =
-          if l.capacity == 0 { 8 }
-          else { l.capacity * 2 };
-        let new_data = malloc(type_sizeof(T) * (new_cap as u64)) as ptr T;
-        for i in 0 to l.length {
-          ptr_index(new_data, i) = ptr_index(l.data, i);
+      def add = fun(l : ($name)::list, v : ($name)::T) {
+        if l.length == l.capacity {
+          let new_cap =
+            if l.capacity == 0 { 8 }
+            else { l.capacity * 2 };
+          let new_data = malloc(
+            type_sizeof(($name)::T) * (new_cap as u64)) as ptr ($name)::T;
+          for i in 0 to l.length {
+            ptr_index(new_data, i) = ptr_index(l.data, i);
+          }
+          if l.capacity > 0 {
+            free(l.data as ptr void)
+          }
+          l.data = new_data;
+          l.capacity = new_cap;
         }
-        if l.capacity > 0 {
-          free(l.data as ptr void)
-        }
-        l.data = new_data;
-        l.capacity = new_cap;
+        ptr_index(l.data, l.length) = v;
+        l.length = l.length + 1;
+      };
+
+      def get = fun(l : ($name)::list, i : i64) {
+        ptr_index(l.data, i)
       }
-      ptr_index(l.data, l.length) = v;
-      l.length = l.length + 1;
-    };
 
-    def get = fun(l : list, i : i64) {
-      ptr_index(l.data, i)
-    }
+      def get_ptr = fun(l : ($name)::list, i : i64) {
+        ref ptr_index(l.data, i)
+      }
 
-    def get_ptr = fun(l : list, i : i64) {
-      ref ptr_index(l.data, i)
-    }
+      def set = fun(l : ($name)::list, i : i64, v : ($name)::T) {
+        ptr_index(l.data, i) = v;
+      }
 
-    def set = fun(l : list, i : i64, v : T) {
-      ptr_index(l.data, i) = v;
-    }
-
-    list
-  };
+      ($name)::list
+  });
 };

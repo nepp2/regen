@@ -14,7 +14,7 @@ pub extern "C" fn include(env : Env, file_name : &RegenString) {
   let file_name = file_name.as_str();
   let module_namespace = to_symbol(env.st, "__module");
   let path_symbol = to_symbol(env.st, file_name);
-  let uid = CellUid::def(path_symbol, env::new_namespace(&[module_namespace]));
+  let uid = CellUid::def(env::new_namespace(&[module_namespace]), path_symbol);
   if env::get_cell_value(env, uid).is_none() {
     let path = format!("{}/{}", LIB_PATH, file_name);
     let code =

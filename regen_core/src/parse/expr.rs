@@ -133,7 +133,7 @@ impl ExprData {
     if let Sym(s) = self.content {
       return s;
     }
-    panic!("expected symbol, found '{}'", self)
+    panic!("expected symbol, found '{}' as ({})", self, self.loc())
   }
 
   pub fn as_operator_literal(&self) -> Operator {

@@ -83,20 +83,16 @@ impl CellGraph {
 
 pub type Env = Ptr<Environment>;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CellId { 
-  DefCell(Symbol),
-  ExprCell(Expr),
-}
-
 pub type Namespace = SlicePtr<Symbol>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CellUid {
-  pub id : CellId,
-  pub namespace : SlicePtr<Symbol>,
+pub enum CellUid { 
+  DefCell(Namespace, Symbol),
+  ExprCell(Expr),
 }
-use CellId::*;
+
+
+use CellUid::*;
 
 #[derive(Clone, Copy)]
 pub struct CellValue {
@@ -112,17 +108,17 @@ pub fn new_namespace(names : &[Symbol]) -> Namespace {
 }
 
 impl CellUid {
-  pub fn def(name : Symbol, namespace : Namespace) -> CellUid {
-    CellUid { id: DefCell(name), namespace }
+  pub fn def(namespace : Namespace, name : Symbol) -> CellUid {
+    CellUid::DefCell(namespace, name)
   }
 
-  pub fn expr(e : Expr, namespace : Namespace) -> CellUid {
-    CellUid { id: ExprCell(e), namespace }
+  pub fn expr(e : Expr) -> CellUid {
+    CellUid::ExprCell(e)
   }
 }
 
 pub fn unload_cell(mut env : Env, uid : CellUid) {
-  if let DefCell(_) = uid.id {
+  if let DefCell(_, _) = uid {
     let el = env.event_loop;
     if let Some(&id) = env.timers.get(&uid) {
       event_loop::remove_trigger(el, id);
@@ -139,7 +135,7 @@ pub fn get_cell_value(env : Env, uid : CellUid) -> Option<CellValue> {
 
 pub fn define_global(mut env : Env, s : &str, v : u64, t : TypeHandle) {
   let name = to_symbol(env.st, s);
-  let path = CellUid::def(name, new_namespace(&[]));
+  let path = CellUid::def(new_namespace(&[]), name);
   if env.cells.contains_key(&path) {
     panic!("def {} already defined", name);
   }
@@ -190,17 +186,13 @@ pub fn new_env(st : SymbolTable) -> Env {
 
 impl fmt::Display for CellUid {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    for n in self.namespace {
-      write!(f, "{}::", n)?;
-    }
-    write!(f, "{}", self.id)
-  }
-}
-
-impl fmt::Display for CellId {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
-      DefCell(name) => write!(f, "{}", name),
+      DefCell(namespace, name) => {
+        for n in namespace.as_slice() {
+          write!(f, "{}::", n)?;
+        }
+        write!(f, "{}", name)
+      },
       ExprCell(expr) => write!(f, "expr({})", expr.loc()),
     }
   }
