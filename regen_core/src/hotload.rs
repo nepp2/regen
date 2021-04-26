@@ -124,11 +124,8 @@ fn load_cell(
 ) -> Result<CellStatus, Error>
 {
   // TODO: using catch unwind is very ugly. Replace with proper error handling.
-  let (v, deps) = std::panic::catch_unwind(|| {
-    eval_expr(resolver, value_expr)
-  }).map_err(|_|
-    error_raw(SrcLocation::zero(value_expr.loc().module), "regen eval panic!")
-  )?;
+  let mut deps = HashSet::new();
+  let v = eval_expr(resolver, &mut deps, value_expr)?;
   if reactive_cell {
     initialise_reactive_cell(resolver.env, uid, full_expr, value_expr, v, deps)
   }
@@ -241,17 +238,26 @@ fn to_reactive_constructor(env : Env, value_expr : Expr, constructor_val : Regen
   error(value_expr.loc(), format!("expected reactive constructor, found {}", constructor_val.t))
 }
 
-fn eval_expr(resolver : &CellResolver, expr : Expr) -> (RegenValue, HashSet<CellUid>) {
-  let (f, dependencies) = compile::compile_expr_to_function(resolver.env, &resolver, expr);
+fn eval_expr(
+  resolver : &CellResolver,
+  dependencies : &mut HashSet<CellUid>,
+  expr : Expr,
+) -> Result<RegenValue, Error>
+{
+  let f = compile::compile_expr_to_function(resolver.env, &resolver, dependencies, expr)?;
   let expr_type = types::type_as_function(&f.t).unwrap().returns;
   // TODO: it's wasteful to allocate for types that are 64bits wide or smaller
   let ptr = {
     let layout = std::alloc::Layout::from_size_align(expr_type.size_of as usize, 8).unwrap();
     unsafe { std::alloc::alloc(layout) as *mut () }
   };
-  interpret::interpret_function(&f, &[], Some(ptr));
+  std::panic::catch_unwind(|| {
+    interpret::interpret_function(&f, &[], Some(ptr));
+  }).map_err(|_|
+    error_raw(SrcLocation::zero(expr.loc().module), "regen eval panic!")
+  )?;
   let v = RegenValue { t: expr_type, ptr };
-  (v, dependencies)
+  Ok(v)
 }
 
 fn unload_cell(env : Env, uid : CellUid){
@@ -523,13 +529,6 @@ fn hotload_cells(
       _ => {
         // hotload nested cells
         let nested = get_nested_cells(e);
-        let TODO = (); // was there a reason for this being prevented?
-        // if nested.defs.len() > 0 {
-        //   println!("error: can't define defs inside a constant expression ({})", nested.defs[0].loc());
-        // }
-        // if nested.embeds.len() > 0 {
-        //   println!("error: can't embed exprs inside a constant expression ({})", nested.embeds[0].loc());
-        // }
         hotload_cells(env, hs, namespace, &nested.defs);
         hotload_cells(env, hs, namespace, &nested.const_exprs);
         hotload_embedded(env, hs, namespace, &nested.embeds);
