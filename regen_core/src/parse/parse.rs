@@ -1,8 +1,8 @@
 
-use crate::{bytecode::Operator, error::{error_raw}, ffi_libs, perm_alloc::{Ptr, perm, perm_slice, perm_slice_from_vec}, symbols::{Symbol, SymbolTable, to_symbol}};
+use crate::{bytecode::Operator, error::{error}, ffi_libs, perm_alloc::{Ptr, perm, perm_slice, perm_slice_from_vec}, symbols::{Symbol, SymbolTable, to_symbol}};
 use super::{expr::*, lexer::{Token, TokenType, lex}, templates};
 use templates::{ExprBuilder, template_macro};
-use crate::error::{Error, error};
+use crate::error::{Error, err};
 use std::collections::{HashSet, HashMap};
 use std::str::FromStr;
 
@@ -22,7 +22,7 @@ pub fn parse_expression(st : SymbolTable, module_name : Symbol, code : &str) -> 
     return Ok(e);
   }
   let loc = SrcLocation { start: 0, end: code.len(), module };
-  error(loc, "expected a single expression")
+  err(loc, "expected a single expression")
 }
 
 struct ParseConfig<'l> {
@@ -166,7 +166,7 @@ impl <'l> ParseState<'l> {
       else {
         SrcLocation{start: 0, end: 0, module: self.code_module }
       };
-      error(loc, "Expected token. Found nothing.")
+      err(loc, "Expected token. Found nothing.")
     }
   }
 
@@ -205,7 +205,7 @@ impl <'l> ParseState<'l> {
   fn pop_type(&mut self, token_type : TokenType) -> Result<&Token, Error> {
     let t = self.peek()?;
     if t.token_type != token_type {
-      return error(t.loc, format!("Expected token of type '{:?}', found token type '{:?}'", token_type, t.token_type));
+      return err(t.loc, format!("Expected token of type '{:?}', found token type '{:?}'", token_type, t.token_type));
     }
     self.skip();
     Ok(&self.tokens[self.pos-1])
@@ -241,7 +241,7 @@ impl <'l> ParseState<'l> {
   fn expect(&mut self, string : &str) -> Result<(), Error> {
     let t = self.peek()?;
     if !match_symbol(t, string) {
-      return error(t.loc, format!("Expected symbol '{}', found {}", string, t));
+      return err(t.loc, format!("Expected symbol '{}', found {}", string, t));
     }
     self.skip();
     Ok(())
@@ -339,7 +339,7 @@ fn parse_paren_infix(ps : &mut ParseState, left_expr : Expr, first_arg : Option<
   let (operation, start_paren) = match t.string {
     "(" => (Call, "("),
     "[" => (Index, "["),
-    _ => return error(t.loc, "unexpected token"),
+    _ => return err(t.loc, "unexpected token"),
   };
   let end_paren = ps.config.paren_pairs.get(start_paren).unwrap().clone();
   ps.expect(start_paren)?;
@@ -522,7 +522,7 @@ fn parse_literal<T : FromStr>(ps : &mut ParseState) -> Result<T, Error> {
     Ok(v)
   }
   else {
-    error(t.loc, format!("Failed to parse literal from '{}'", s))
+    err(t.loc, format!("Failed to parse literal from '{}'", s))
   }
 }
 
@@ -530,7 +530,7 @@ fn parse_operator(ps : &mut ParseState) -> Result<Expr, Error> {
   let start = ps.peek_marker();
   let t = ps.pop_type(Symbol)?;
   let op = str_to_operator(t.string).ok_or_else(||
-    error_raw(t.loc,
+    error(t.loc,
       format!("Operator '{}' not supported", t.string)))?;
   Ok(ps.literal_expr(Val::Operator(op), start))
 }
@@ -918,7 +918,7 @@ fn parse_top_level(module : Ptr<CodeModule>, tokens : Vec<Token>, st : SymbolTab
   parse_semicolon_expr_list(&mut ps, &mut es)?;
   if ps.has_tokens() {
     let t = ps.peek()?;
-    return error(t.loc, format!("Unexpected token '{}' of type '{:?}'", t.to_string(), t.token_type));
+    return err(t.loc, format!("Unexpected token '{}' of type '{:?}'", t.to_string(), t.token_type));
   }
   return Ok(es);
 }

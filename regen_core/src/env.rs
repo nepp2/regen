@@ -14,7 +14,7 @@ pub struct RegenValue {
 #[derive(Clone)]
 pub struct Environment {
   pub live_exprs : Vec<Expr>,
-  pub cells : HashMap<CellUid, CellValue>,
+  pub cells : HashMap<CellUid, Cell>,
   pub graph : CellGraph,
   pub timers : HashMap<CellUid, TriggerId>,
   pub event_loop : Ptr<EventLoop>,
@@ -96,11 +96,15 @@ use CellUid::*;
 
 #[derive(Clone, Copy)]
 pub struct CellValue {
-  pub full_expr : Expr,
-  pub value_expr : Expr,
+  pub ptr : *mut (),
   pub t : TypeHandle,
-  pub ptr : *const (),
-  pub has_value : bool,
+  pub initialised : bool,
+}
+
+#[derive(Clone, Copy)]
+pub struct Cell {
+  pub value_expr : Expr,
+  pub v : CellValue,
 }
 
 pub fn new_namespace(names : &[Symbol]) -> Namespace {
@@ -129,8 +133,12 @@ pub fn unload_cell(mut env : Env, uid : CellUid) {
   env.graph.unload_cell(uid);
 }
 
-pub fn get_cell_value(env : Env, uid : CellUid) -> Option<CellValue> {
+pub fn get_cell(env : Env, uid : CellUid) -> Option<Cell> {
   env.cells.get(&uid).cloned()
+}
+
+pub fn get_cell_value(env : Env, uid : CellUid) -> Option<CellValue> {
+  env.cells.get(&uid).map(|c| c.v)
 }
 
 pub fn define_global(mut env : Env, s : &str, v : u64, t : TypeHandle) {
@@ -142,19 +150,12 @@ pub fn define_global(mut env : Env, s : &str, v : u64, t : TypeHandle) {
   let layout = std::alloc::Layout::from_size_align(t.size_of as usize, 8).unwrap();
   let ptr = unsafe { std::alloc::alloc(layout) as *mut () };
   let e = env.builtin_dummy_expr;
-  let cv = CellValue { full_expr: e, value_expr: e, t, ptr, has_value: true };
-  env.cells.insert(path, cv);
+  let cv = CellValue{ t, ptr, initialised: true };
+  let c = Cell { value_expr: e, v: cv };
+  env.cells.insert(path, c);
   unsafe {
     *(ptr as *mut u64) = v;
   }
-}
-
-pub fn get_cell_type(e : Env, uid : CellUid) -> Option<TypeHandle> {
-  e.cells.get(&uid).map(|entry| entry.t)
-}
-
-pub fn get_event_loop(e : Env) -> Ptr<EventLoop> {
-  e.event_loop
 }
 
 pub fn new_env(st : SymbolTable) -> Env {

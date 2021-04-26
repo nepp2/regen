@@ -14,6 +14,18 @@ pub struct SrcLocation {
   pub module : Ptr<CodeModule>,
 }
 
+impl <'a> Into<SrcLocation> for &'a Expr {
+  fn into(self) -> SrcLocation {
+    self.loc()
+  }
+}
+
+impl Into<SrcLocation> for Expr {
+  fn into(self) -> SrcLocation {
+    self.loc()
+  }
+}
+
 pub type Expr = Ptr<ExprData>;
 
 pub fn expr(tag : ExprTag, content : ExprContent, loc : SrcLocation) -> Expr {

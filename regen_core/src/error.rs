@@ -1,16 +1,20 @@
 
 use std::fmt;
 
-use crate::{perm_alloc::SlicePtr, parse::SrcLocation};
+use crate::{parse::SrcLocation};
 
 /// Returns an error that isn't wrapped in Result::Err
-pub fn error_raw<L : Into<SrcLocation>, S : Into<ErrorContent>>(loc : L, message : S) -> Error {
+pub fn error<L, S>(loc : L, message : S) -> Error
+  where L : Into<SrcLocation>, S : Into<String>
+{
   Error { message: message.into(), location: loc.into() }
 }
 
 /// Returns an error wrapped in Result::Err
-pub fn error<T, L : Into<SrcLocation>, S : Into<ErrorContent>>(loc : L, message : S) -> Result<T, Error> {
-  Err(Error { message: message.into(), location: loc.into() })
+pub fn err<T, L, S>(loc : L, message : S) -> Result<T, Error>
+  where L : Into<SrcLocation>, S : Into<String>
+{
+  Err(error(loc, message))
 }
 
 impl <'l> Into<SrcLocation> for &'l SrcLocation {
@@ -19,20 +23,8 @@ impl <'l> Into<SrcLocation> for &'l SrcLocation {
   }
 }
 
-impl <S : Into<String>> From<S> for ErrorContent {
-  fn from(s : S) -> ErrorContent {
-    let s : String = s.into();
-    ErrorContent::Message(s)
-  }
-}
-
-pub enum ErrorContent {
-  Message(String),
-  InnerErrors(String, SlicePtr<Error>),
-}
-
 pub struct Error {
-  pub message : ErrorContent,
+  pub message : String,
   pub location : SrcLocation,
 }
 
@@ -57,18 +49,7 @@ impl <'l> fmt::Display for ErrorDisplay<'l> {
     use ansi_term::Colour::RGB;
     let red = RGB(255, 100, 100);
     write!(f, "{}", red.prefix())?;
-    match &self.e.message {
-      ErrorContent::Message(m) => {
-        write!(f, "error: {} ({})", m, self.e.location)?;
-      },
-      ErrorContent::InnerErrors(m, es) => {
-        writeln!(f, "error: {} ({})", m, self.e.location)?;
-        writeln!(f, "  inner errors:")?;
-        for e in es.as_slice() {
-          writeln!(f, "    {}", e.display())?
-        }
-      },
-    }
+    write!(f, "error: {} ({})", self.e.message, self.e.location)?;
     write!(f, "{}", red.suffix())?;
     Ok(())
   }

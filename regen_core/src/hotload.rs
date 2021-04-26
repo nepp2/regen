@@ -1,5 +1,5 @@
 
-use crate::{compile, env::{self, CellUid, CellValue, Env, Namespace, ReactiveObserver, RegenValue}, error::{Error, error, error_raw}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
+use crate::{compile, env::{self, Cell, CellUid, CellValue, Env, Namespace, ReactiveObserver, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
 
 use std::{alloc::{Layout, alloc}, collections::{HashMap, HashSet}};
 
@@ -11,18 +11,18 @@ pub enum CellStatus {
   NewValue, UnchangedValue, Broken, AwaitingInput
 }
 
-pub struct CellResolver<'l> {
-  env : Env,
+pub struct CompileContext<'l> {
+  pub env : Env,
   hs : &'l HotloadState,
 }
 
-impl <'l> CellResolver<'l> {
+impl <'l> CompileContext<'l> {
 
   fn new(
     env : Env,
     hs : &'l HotloadState,
   ) -> Self {
-    CellResolver { env, hs }
+    CompileContext { env, hs }
   }
 
   pub fn cell_status(&self, uid : CellUid) -> CellStatus {
@@ -53,28 +53,6 @@ impl <'l> CellResolver<'l> {
 
   pub fn cell_value(&self, uid : CellUid) -> Option<CellValue> {
     env::get_cell_value(self.env, uid)
-  }
-
-  fn expr_to_uid(&self, mut names : Vec<Symbol>, e : Expr) -> Option<CellUid> {
-    use ExprShape::*;
-    match e.shape() {
-      Sym(name) => {
-        Some(CellUid::def(perm_slice_from_vec(names), name))
-      }
-      List(ExprTag::Namespace, &[name, tail]) => {
-        names.push(name.as_symbol());
-        self.expr_to_uid(names, tail)
-      },
-      _ => {
-        None
-      }
-    }
-  }
-
-  pub fn resolve_name(&self, e : Expr) -> Option<CellUid> {
-    let uid = self.expr_to_uid(vec![], e)?;
-    if self.check_uid(uid) { Some(uid) }
-    else { None }
   }
 }
 
@@ -113,92 +91,84 @@ fn get_dependencies_status(env : Env, hs : &HotloadState, uid : CellUid) -> Cell
   }
 }
 
+/// Returns the evaluated expr value, and the cell's resolved dependencies
+fn load_cell_value(
+  env : Env,
+  hs : &HotloadState,
+  uid : CellUid,
+  value_expr : Expr,
+  reactive_cell : bool,
+) -> Result<(CellValue, HashSet<CellUid>), Error>
+{
+  let (v, deps) = eval_expr(env, hs, value_expr)?;
+  let cv = {
+    if reactive_cell {
+      register_reactive_cell(env, uid, value_expr, v)?
+    }
+    else {
+      CellValue{ t: v.t, ptr: v.ptr, initialised: true }
+    }
+  };
+  Ok((cv, deps))
+}
 
 /// Returns the evaluated expr value, and the cell's resolved dependencies
 fn load_cell(
-  resolver : &CellResolver,
+  mut env : Env,
+  hs : &HotloadState,
   uid : CellUid,
-  full_expr : Expr,
   value_expr : Expr,
   reactive_cell : bool,
-) -> Result<CellStatus, Error>
+) -> CellStatus
 {
-  // TODO: using catch unwind is very ugly. Replace with proper error handling.
-  let mut deps = HashSet::new();
-  let v = eval_expr(resolver, &mut deps, value_expr)?;
-  if reactive_cell {
-    initialise_reactive_cell(resolver.env, uid, full_expr, value_expr, v, deps)
-  }
-  else {
-    initialise_normal_cell(resolver.env, uid, full_expr, value_expr, v, deps);
-    Ok(CellStatus::NewValue)
-  }
-}
+  let r = load_cell_value(env, hs, uid, value_expr, reactive_cell);
+  let status = match r {
+    Ok((v, deps)) => {
+      env.cells.insert(uid, Cell {
+        value_expr,
+        v
+      });
+      env.graph.set_cell_dependencies(uid, deps);
+      if v.initialised { CellStatus::NewValue }
+      else { CellStatus::AwaitingInput }
 
-fn initialise_normal_cell(
-  mut env : Env,
-  uid : CellUid,
-  full_expr : Expr,
-  value_expr : Expr,
-  v : RegenValue,
-  deps : HashSet<CellUid>,
-)
-{
-  let cv = CellValue {
-    full_expr,
-    value_expr,
-    t: v.t,
-    ptr: v.ptr,
-    has_value: true,
+    }
+    Err(e) => {
+      println!("{}", e.display());
+      CellStatus::Broken
+    }
   };
-  env.cells.insert(uid, cv);
-  env.graph.set_cell_dependencies(uid, deps);
+  status
 }
 
-fn initialise_reactive_cell(
+fn register_reactive_cell(
   mut env : Env,
   uid : CellUid,
-  full_expr : Expr,
   value_expr : Expr,
   v : RegenValue,
-  deps : HashSet<CellUid>,
-) -> Result<CellStatus, Error>
+) -> Result<CellValue, Error>
 {
   let constructor = to_reactive_constructor(env, value_expr, v)?;
-  let has_value;
-  let container_val = match constructor.variant {
+  match constructor.variant {
     ConstructorVariant::Timer { millisecond_interval } => {
       let id = event_loop::register_cell_timer(env.event_loop, uid, millisecond_interval);
       let now : i64 = event_loop::current_millisecond(env.event_loop);
       env.timers.insert(uid, id);
-      has_value = false;
-      RegenValue { t: env.c.i64_tag, ptr: alloc_val(now) }
+      let v = CellValue { t: env.c.i64_tag, ptr: alloc_val(now), initialised: false };
+      Ok(v)
     }
     ConstructorVariant::Poll { input, initial_value, poll_function } => {
       let t = constructor.value_type;
-      has_value = initial_value.is_some();
-      let state = RegenValue {
+      let v = CellValue {
         t,
         ptr: alloc_bytes(t.size_of as usize, initial_value),
+        initialised: initial_value.is_some()
       };
       let ob = ReactiveObserver { uid, input: *input, update_handler: poll_function };
       env.graph.reactive_observers.insert(uid, ob);
-      state
+      Ok(v)
     }
-  };
-  let cv = CellValue {
-    full_expr,
-    value_expr,
-    t: container_val.t,
-    ptr: container_val.ptr,
-    has_value,
-  };
-  env.cells.insert(uid, cv);
-  env.graph.set_cell_dependencies(uid, deps);
-  let status = 
-    if has_value { CellStatus::NewValue }
-    else { CellStatus::AwaitingInput };
-  Ok(status)
+  }
 }
 
 fn alloc_val<V>(v : V) -> *mut () {
@@ -235,16 +205,17 @@ fn to_reactive_constructor(env : Env, value_expr : Expr, constructor_val : Regen
     };
     return Ok(c);
   }
-  error(value_expr.loc(), format!("expected reactive constructor, found {}", constructor_val.t))
+  err(value_expr.loc(), format!("expected reactive constructor, found {}", constructor_val.t))
 }
 
 fn eval_expr(
-  resolver : &CellResolver,
-  dependencies : &mut HashSet<CellUid>,
+  env : Env,
+  hs : &HotloadState,
   expr : Expr,
-) -> Result<RegenValue, Error>
+) -> Result<(RegenValue, HashSet<CellUid>), Error>
 {
-  let f = compile::compile_expr_to_function(resolver.env, &resolver, dependencies, expr)?;
+  let ctx = CompileContext::new(env, hs);
+  let (f, dependencies) = compile::compile_expr_to_function(&ctx, expr)?;
   let expr_type = types::type_as_function(&f.t).unwrap().returns;
   // TODO: it's wasteful to allocate for types that are 64bits wide or smaller
   let ptr = {
@@ -254,10 +225,10 @@ fn eval_expr(
   std::panic::catch_unwind(|| {
     interpret::interpret_function(&f, &[], Some(ptr));
   }).map_err(|_|
-    error_raw(SrcLocation::zero(expr.loc().module), "regen eval panic!")
+    error(SrcLocation::zero(expr.loc().module), "regen eval panic!")
   )?;
   let v = RegenValue { t: expr_type, ptr };
-  Ok(v)
+  Ok((v, dependencies))
 }
 
 fn unload_cell(env : Env, uid : CellUid){
@@ -271,15 +242,12 @@ fn get_cell_status(
   value_expr : Expr
 ) -> CellStatus
 {
+  use CellStatus::*;
   // if already defined
   if let Some(cell) = env.cells.get(&uid) {
-    // check if the cell has been flagged for an update
-    if hs.forced_updates.contains(&uid) {
-      CellStatus::NewValue
-    }
     // check if expression has changed
-    else if cell.value_expr != value_expr {
-      CellStatus::NewValue
+    if cell.value_expr != value_expr {
+      NewValue
     }
     // check if dependencies have changed
     else {
@@ -291,9 +259,13 @@ fn get_cell_status(
   }
 }
 
+fn get_cell_mut (env : &mut Env, uid : CellUid) -> &mut Cell {
+  env.cells.get_mut(&uid).unwrap()
+}
+
 fn update_observer(mut env : Env, ob : ReactiveObserver) -> CellStatus {
-  let state_val = env.cells[&ob.uid];
-  let input_val = env.cells[&ob.input];
+  let state_val = env::get_cell_value(env, ob.uid).unwrap();
+  let input_val = env::get_cell_value(env, ob.input).unwrap();
   let returns_bool = {
     let f = unsafe { &*ob.update_handler };
     let return_type = types::type_as_function(&f.t).unwrap().returns;
@@ -306,11 +278,10 @@ fn update_observer(mut env : Env, ob : ReactiveObserver) -> CellStatus {
       &[state_val.ptr as u64, input_val.ptr as u64],
       Some((&mut return_val) as *mut bool as *mut ()));
     if return_val {
-      let state_val = env.cells.get_mut(&ob.uid).unwrap();
-      state_val.has_value = true;
+      get_cell_mut(&mut env, ob.uid).v.initialised = true;
       CellStatus::NewValue
     }
-    else if state_val.has_value {
+    else if state_val.initialised {
       CellStatus::UnchangedValue
     }
     else {
@@ -322,8 +293,7 @@ fn update_observer(mut env : Env, ob : ReactiveObserver) -> CellStatus {
       ob.update_handler,
       &[state_val.ptr as u64, input_val.ptr as u64],
       None);
-      let state_val = env.cells.get_mut(&ob.uid).unwrap();
-      state_val.has_value = true;
+      get_cell_mut(&mut env, ob.uid).v.initialised = true;
     CellStatus::NewValue
   }
 }
@@ -359,7 +329,6 @@ fn hotload_cell(
   mut env : Env,
   hs : &mut HotloadState,
   uid : CellUid,
-  full_expr : Expr,
   value_expr : Expr,
   reactive_cell : bool,
 )
@@ -381,22 +350,13 @@ fn hotload_cell(
   let final_status = match status {
     NewValue => {
       unload_cell(env, uid);
-      let resolver = CellResolver::new(env, hs);
-      let r = load_cell(&resolver, uid, full_expr, value_expr, reactive_cell);
-      match r {
-        Ok(s) => s,
-        Err(e) => {
-          println!("{}", e.display());
-          Broken
-        }
-      }
+      load_cell(env, hs, uid, value_expr, reactive_cell)
     }
     UnchangedValue => {
       // Update exprs so that their text locations are correct
       let cell = env.cells.get_mut(&uid).unwrap();
-      cell.full_expr = full_expr;
       cell.value_expr = value_expr;
-      if cell.has_value { UnchangedValue } else { AwaitingInput }
+      if cell.v.initialised { UnchangedValue } else { AwaitingInput }
     }
     AwaitingInput => {
       AwaitingInput
@@ -474,16 +434,17 @@ fn hotload_embedded(
   hotload_cells(env, hs, namespace, embeds);
   for &e in embeds {
     let uid = CellUid::expr(e);
-    let cell = env::get_cell_value(env, uid).unwrap();
-    if cell.t == env.c.expr_tag {
-      let e = unsafe { *(cell.ptr as *const Expr) };
+    let TODO = (); // handle this better
+    let cv = env::get_cell_value(env, uid).unwrap();
+    if cv.t == env.c.expr_tag {
+      let e = unsafe { *(cv.ptr as *const Expr) };
       let nested = get_nested_cells(e);
       hotload_cells(env, hs, namespace, &nested.defs);
       hotload_cells(env, hs, namespace, &nested.const_exprs);
       hotload_embedded(env, hs, namespace, &nested.embeds);
     }
     else {
-      println!("expected expression of type 'expr', found {}", cell.t);
+      println!("expected expression of type 'expr', found {}", cv.t);
     }
   }
 }
@@ -493,7 +454,6 @@ fn hotload_def(
   hs : &mut HotloadState,
   namespace : Namespace,
   name : Symbol,
-  full_expr : Expr,
   value_expr : Expr,
   reactive_cell : bool,
 )
@@ -506,7 +466,7 @@ fn hotload_def(
   hotload_embedded(env, hs, nested_namespace, &nested.embeds);
   // hotload the def initialiser
   let uid = CellUid::def(namespace, name);
-  hotload_cell(env, hs, uid, full_expr, value_expr, reactive_cell);
+  hotload_cell(env, hs, uid, value_expr, reactive_cell);
   // update observer
   poll_observer_input(env, hs, uid);
 }
@@ -521,10 +481,10 @@ fn hotload_cells(
   for &e in cell_exprs {
     match e.shape() {
       ExprShape::List(ExprTag::Def, &[name, value_expr]) => {
-        hotload_def(env, hs, namespace, name.as_symbol(), e, value_expr, false);
+        hotload_def(env, hs, namespace, name.as_symbol(), value_expr, false);
       }
       ExprShape::List(ExprTag::Reactive, &[name, value_expr]) => {
-        hotload_def(env, hs, namespace, name.as_symbol(), e, value_expr, true);
+        hotload_def(env, hs, namespace, name.as_symbol(), value_expr, true);
       }
       _ => {
         // hotload nested cells
@@ -534,7 +494,7 @@ fn hotload_cells(
         hotload_embedded(env, hs, namespace, &nested.embeds);
         // hotload the const expression initialiser
         let uid = CellUid::expr(e);
-        hotload_cell(env, hs, uid, e, e, false);
+        hotload_cell(env, hs, uid, e, false);
       }
     }
   }
@@ -543,20 +503,18 @@ fn hotload_cells(
 struct HotloadState {
   active_cells : HashSet<CellUid>,
   visited_cells : HashMap<CellUid, CellStatus>,
-  forced_updates : HashSet<CellUid>,
 }
 
-fn hotload_module(env : Env, module_name : Symbol, exprs : &[Expr], forced_updates : HashSet<CellUid>) {
+fn hotload_module(env : Env, module_name : Symbol, exprs : &[Expr], visited_cells : HashMap<CellUid, CellStatus>) {
   let mut active_cells = HashSet::new();
   for (id, v) in &env.cells {
-    if v.full_expr.loc().module.name == module_name {
+    if v.value_expr.loc().module.name == module_name {
       active_cells.insert(*id);
     }
   }
   let mut hs = HotloadState {
     active_cells,
-    visited_cells: HashMap::new(),
-    forced_updates,
+    visited_cells,
   };
 
   // Find new and unchanged cells
@@ -583,7 +541,7 @@ pub fn hotload_live_module(mut env : Env, module_name : &str, code : &str) {
     });
     if let Ok(n) = r { n } else { return }
   };
-  hotload_module(env, module_name, &exprs, HashSet::new());
+  hotload_module(env, module_name, &exprs, HashMap::new());
   env.live_exprs = exprs;
 }
 
@@ -596,22 +554,23 @@ pub fn interpret_module(env : Env, module_name : &str, code : &str) {
     });
     if let Ok(n) = r { n } else { return }
   };
-  hotload_module(env, module_name, &exprs, HashSet::new());
+  hotload_module(env, module_name, &exprs, HashMap::new());
 }
 
 /// Recalculate cell values in response to an updated cell
 fn cell_updated(env : Env, uid : CellUid) {
-  let forced_updates = env.graph.outputs(uid).cloned().unwrap_or(HashSet::new());
-  let module_name = env.cells[&uid].full_expr.loc().module.name;
-  hotload_module(env, module_name, &env.live_exprs, forced_updates);
+  let module_name = env.cells[&uid].value_expr.loc().module.name;
+  let mut visited_cells = HashMap::new();
+  visited_cells.insert(uid, CellStatus::NewValue);
+  hotload_module(env, module_name, &env.live_exprs, visited_cells);
 }
 
 /// Called by the event loop when the value of a reactive cell has changed
 pub fn update_timer_cell(mut env : Env, uid : CellUid, millisecond : i64) {
-  let cv = env.cells.get_mut(&uid).unwrap();
+  let c = get_cell_mut(&mut env, uid);
   unsafe {
-    *(cv.ptr as *mut i64) = millisecond;
+    *(c.v.ptr as *mut i64) = millisecond;
   }
-  cv.has_value = true;
+  c.v.initialised = true;
   cell_updated(env, uid);
 }

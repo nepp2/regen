@@ -1,8 +1,8 @@
 
 /// Compiles core language into bytecode
 
-use crate::{bytecode, env::{CellUid, CellValue, Env}, error::{Error, error, error_raw}, hotload::{CellResolver, CellStatus}, parse, perm_alloc, symbols::{self, SymbolTable}, types};
-use std::collections::HashSet;
+use crate::{bytecode, env::{CellUid, CellValue}, error::{Error, err, error}, hotload::{CompileContext, CellStatus}, parse, perm_alloc, symbols::{self, SymbolTable}, types};
+use std::{collections::HashSet};
 
 use bytecode::{
   SequenceHandle, SequenceInfo, InstrExpr, FunctionBytecode,
@@ -19,13 +19,15 @@ use parse::{Expr, ExprShape, ExprTag, Val};
 
 /// Compile expression to simple no-arg function
 pub fn compile_expr_to_function(
-  env : Env,
-  resolver : &CellResolver,
-  dependencies : &mut HashSet<CellUid>,
+  context : &CompileContext,
   root : Expr
-) -> Result<Function, Error>
+) -> Result<(Function, HashSet<CellUid>), Error>
 {
-  compile_function(Builder::new(resolver, dependencies, &env.c, env.st), root, &[], None)
+  let mut dependencies = HashSet::new();
+  let f = compile_function(
+    Builder::new(context, &mut dependencies, &context.env.c, context.env.st),
+    root, &[], None)?;
+  Ok((f, dependencies))
 }
 
 struct LabelledExpr {
@@ -55,7 +57,7 @@ struct Builder<'l> {
   /// labels indicating the start and end of a labelled block expression
   label_stack : Vec<LabelledExpr>,
 
-  resolver : &'l CellResolver<'l>,
+  context : &'l CompileContext<'l>,
 
   dependencies : &'l mut HashSet<CellUid>,
 
@@ -66,7 +68,7 @@ struct Builder<'l> {
 
 impl <'l> Builder<'l> {
   fn new(
-    resolver : &'l CellResolver<'l>,
+    context : &'l CompileContext<'l>,
     dependencies : &'l mut HashSet<CellUid>,
     c : &'l CoreTypes,
     st : SymbolTable,
@@ -84,7 +86,7 @@ impl <'l> Builder<'l> {
       seq_completion: vec![],
       current_sequence: None,
       label_stack: vec![],
-      resolver,
+      context,
       dependencies,
       c, st,
     }
@@ -224,7 +226,7 @@ fn find_label<'a>(b : &'a mut Builder, label : Expr) -> Result<&'a LabelledExpr,
   let sym = label.as_symbol();
   b.label_stack.iter().rev()
   .find(|l| l.name == sym)
-  .ok_or_else(|| error_raw(label.loc(), format!("label '{}' not found", sym)))
+  .ok_or_else(|| error(label, format!("label '{}' not found", sym)))
 }
 
 fn create_sequence(b : &mut Builder, name : &str) -> SequenceHandle {
@@ -289,7 +291,7 @@ fn function_to_var(b : &mut Builder, f : Function) -> Var {
 }
 
 fn compile_function_def(
-  resolver : &CellResolver,
+  context : &CompileContext,
   dependencies : &mut HashSet<CellUid>,
   c : &CoreTypes,
   st : SymbolTable,
@@ -298,7 +300,7 @@ fn compile_function_def(
   body : Expr,
 ) -> Result<Function, Error>
 {
-  let mut b = Builder::new(resolver, dependencies, c, st);
+  let mut b = Builder::new(context, dependencies, c, st);
   b.bc.args = args.len();
   let mut arg_types = vec![];
   for a in args {
@@ -308,7 +310,7 @@ fn compile_function_def(
       arg_types.push(t);
     }
     else {
-      return error(a.loc(), "expected function argument definition")
+      return err(a, "expected function argument definition")
     }
   }
   let expected_return =
@@ -340,7 +342,7 @@ fn compile_function(
   }
   if let Some(et) = expected_return {
     if et != return_type {
-      return error(body.loc(), format!("expected return type {}, found {}", et, return_type));
+      return err(body, format!("expected return type {}, found {}", et, return_type));
     }
   }
   let t = types::function_type(&arg_types, return_type);
@@ -360,7 +362,7 @@ fn compile_if_else(
   let else_seq = create_sequence(b, "else");
   let exit_seq = create_sequence(b, "exit");
   let cond = compile_expr_to_var(b, cond_expr)?.id;
-  assert_type(cond_expr.loc(), cond.t, b.c.bool_tag)?;
+  assert_type(cond_expr, cond.t, b.c.bool_tag)?;
   b.bc.instrs.push(Instr::CJump{ cond, then_seq, else_seq });
   set_current_sequence(b, then_seq);
   let then_result = compile_expr(b, then_expr)?;
@@ -368,30 +370,30 @@ fn compile_if_else(
     let nv = new_var(b, v.t, true).to_ref();
     result_var = Some(nv);
     let v = v.to_var(b);
-    compile_assignment(b, then_expr.loc(), nv, v)?;
+    compile_assignment(b, then_expr, nv, v)?;
   }
   b.bc.instrs.push(Instr::Jump(exit_seq));
   set_current_sequence(b, else_seq);
   let else_result = compile_expr(b, else_expr)?;
   if let Some(l) = result_var {
     let v = else_result
-      .ok_or_else(|| error_raw(else_expr.loc(), "expected block expression"))?
+      .ok_or_else(|| error(else_expr, "expected block expression"))?
       .to_var(b);
-    compile_assignment(b, else_expr.loc(), l, v)?;
+    compile_assignment(b, else_expr, l, v)?;
   }
   b.bc.instrs.push(Instr::Jump(exit_seq));
   set_current_sequence(b, exit_seq);
   Ok(result_var)
 }
 
-fn compile_assignment(b : &mut Builder, loc : SrcLocation, dest : Ref, value : Var)
+fn compile_assignment<L : Into<SrcLocation>>(b : &mut Builder, loc : L, dest : Ref, value : Var)
   -> Result<(), Error>
 {
   if dest.t.size_of != value.t.size_of {
-    return error(loc, "types don't match");
+    return err(loc, "types don't match");
   }
   if !dest.mutable {
-    return error(loc, "can't assign to this value");
+    return err(loc, "can't assign to this value");
   }
   let pointer = dest.get_address(b).id;
   b.bc.instrs.push(Instr::Store {
@@ -416,7 +418,7 @@ fn compile_expr_to_ref(b : &mut Builder, e : Expr) -> Result<Ref, Error> {
     Ok(r)
   }
   else {
-    error(e.loc(), "expected value, found none")
+    err(e, "expected value, found none")
   }
 }
 
@@ -425,24 +427,25 @@ fn compile_expr_to_var(b : &mut Builder, e : Expr) -> Result<Var, Error> {
   Ok(r.to_var(b))
 }
 
-fn assert_type(loc : SrcLocation, t : TypeHandle, expected : TypeHandle)
+fn assert_type<L : Into<SrcLocation>>(loc : L, t : TypeHandle, expected : TypeHandle)
   -> Result<(), Error>
 {
   if t != expected {
-    return error(loc, format!("expected {}, found {}", expected, t));
+    return err(loc.into(), format!("expected {}, found {}", expected, t));
   }
   Ok(())
 }
 
-fn compile_cast(b : &mut Builder, loc : SrcLocation, v : Var, t : TypeHandle)
+fn compile_cast<L>(b : &mut Builder, loc : L, v : Var, t : TypeHandle)
   -> Result<Var, Error>
+    where L : Into<SrcLocation>
 {
   fn ptr_or_prim(t : TypeHandle) -> bool {
     t.kind == Kind::Pointer || t.kind == Kind::Primitive
   }
   if t.size_of != v.t.size_of {
     if !(ptr_or_prim(t) && ptr_or_prim(v.t)) {
-      return error(loc, format!("cannot cast from {} to {}", v.t, t));
+      return err(loc, format!("cannot cast from {} to {}", v.t, t));
     }
   }
   Ok(push_expr(b, InstrExpr::Cast(v.id), t))
@@ -465,7 +468,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
     List(Break, &[]) => {
       let break_to =
         b.label_stack.last()
-        .ok_or_else(|| error_raw(e.loc(), "can't break in this scope"))?
+        .ok_or_else(|| error(e, "can't break in this scope"))?
         .exit_seq;
       b.bc.instrs.push(Instr::Jump(break_to));
     }
@@ -478,7 +481,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
     List(Repeat, &[]) => {
       let loop_back_to =
         b.label_stack.last()
-        .ok_or_else(|| error_raw(e.loc(), "can't repeat in this scope"))?
+        .ok_or_else(|| error(e, "can't repeat in this scope"))?
         .entry_seq;
       b.bc.instrs.push(Instr::Jump(loop_back_to));
     }
@@ -491,7 +494,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
     Literal(Val::Bool(v)) => {
       let lit_expr = InstrExpr::LiteralI64(if v { 1 } else { 0 });
       let v = push_expr(b, lit_expr, b.c.u64_tag);
-      return Ok(Some(compile_cast(b, e.loc(), v, b.c.bool_tag)?.to_ref()));
+      return Ok(Some(compile_cast(b, e, v, b.c.bool_tag)?.to_ref()));
     }
     // local reference
     Sym(sym) => {
@@ -543,7 +546,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
       for e in &elements[1..] {
         let v = compile_expr_to_var(b, *e)?;
         if v.t != element_type {
-          return error(e.loc(),
+          return err(e,
             format!("expected element of type {} and found type {}",
               element_type, v.t));
         }
@@ -558,10 +561,10 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
       let r = compile_expr_to_ref(b, array)?;
       let info =
         types::type_as_array(&r.t)
-        .ok_or_else(|| error_raw(array.loc(), "expected array"))?;
+        .ok_or_else(|| error(array, "expected array"))?;
       let array_ptr = r.get_address(b);
       let element_ptr_type = types::pointer_type(info.inner);
-      let ptr = compile_cast(b, array.loc(), array_ptr, element_ptr_type)?;
+      let ptr = compile_cast(b, array, array_ptr, element_ptr_type)?;
       let len = compile_array_len(b, array)?;
       let e = InstrExpr::Init(perm_slice(&[ptr.id, len.id]));
       let t = types::slice_type(&b.c, b.st, info.inner);
@@ -578,11 +581,11 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
         info
       }
       else {
-        return error(array.loc(), "expected array");
+        return err(array, "expected array");
       };
       let array_ptr = v.get_address(b);
       let element_ptr_type = types::pointer_type(info.inner);
-      let ptr = compile_cast(b, array.loc(), array_ptr, element_ptr_type)?;
+      let ptr = compile_cast(b, array, array_ptr, element_ptr_type)?;
       let offset = compile_expr_to_var(b, index)?.id;
       let e = InstrExpr::PtrOffset { ptr: ptr.id, offset };
       let ptr = push_expr(b, e, ptr.t);
@@ -610,10 +613,10 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
         i
       }
       else {
-        return error(e.loc(), format!("expected struct, found {}", t));
+        return err(e, format!("expected struct, found {}", t));
       };
       if field_vals.len() != info.field_types.len() {
-        return error(e.loc(),
+        return err(e,
           format!("expected {} fields, found {}",
             info.field_types.len(), field_vals.len()));
       }
@@ -621,7 +624,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
       for (i, f) in field_vals.iter().enumerate() {
         let v = compile_expr_to_var(b, *f)?;
         if info.field_types[i] != v.t  {
-          return error(f.loc(),
+          return err(f,
             format!("expected arg of type {}, found type {}",
               info.field_types[i], v.t));
         }
@@ -637,14 +640,14 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
       let info =
         types::type_as_struct(&struct_ref.t)
         .ok_or_else(||
-          error_raw(e.loc(), format!("expected struct, found {}", struct_ref.t))
+          error(e, format!("expected struct, found {}", struct_ref.t))
         )?;
       let i = {
         let sym = field_name.as_symbol();
         info.field_names.as_slice().iter()
           .position(|n| *n == sym)
           .ok_or_else(||
-            error_raw(field_name.loc(), format!("no such field '{}'", sym))
+            error(field_name, format!("no such field '{}'", sym))
           )? as u64
       };
       let field_type = info.field_types[i as usize];
@@ -659,7 +662,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
         else { Some(ret) }
       };
       let f = compile_function_def(
-        b.resolver,
+        b.context,
         b.dependencies,
         &b.c, b.st,
         args.children(),
@@ -672,7 +675,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
     List(Set, &[dest_expr, value_expr]) => {
       let dest = compile_expr_to_ref(b, dest_expr)?;
       let value = compile_expr_to_var(b, value_expr)?;
-      compile_assignment(b, value_expr.loc(), dest, value)?;
+      compile_assignment(b, value_expr, dest, value)?;
     }
     // let
     List(Let, &[var_name, value_expr]) => {
@@ -682,14 +685,14 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
       // evaluate the expression
       let value = compile_expr_to_var(b, value_expr)?;
       let local_var = new_local_variable(b, name, value.t);
-      compile_assignment(b, value_expr.loc(), local_var.to_ref(), value)?;
+      compile_assignment(b, value_expr, local_var.to_ref(), value)?;
     }
     // if then
     List(IfElse, &[cond, then_expr]) => {
       let then_seq = create_sequence(b, "then");
       let exit_seq = create_sequence(b, "exit");
       let cond_var = compile_expr_to_var(b, cond)?.id;
-      assert_type(cond.loc(), cond_var.t, b.c.bool_tag)?;
+      assert_type(cond, cond_var.t, b.c.bool_tag)?;
       b.bc.instrs.push(Instr::CJump{ cond: cond_var, then_seq, else_seq: exit_seq });
       set_current_sequence(b, then_seq);
       compile_expr(b, then_expr)?;
@@ -743,7 +746,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
     List(Embed, &[e]) => {
       let cev = const_expr_value(b, e)?;
       if cev.t != b.c.expr_tag {
-        return error(e.loc(), format!("expected expression of type 'expr', found {}", cev.t));
+        return err(e, format!("expected expression of type 'expr', found {}", cev.t));
       }
       let expr_value = unsafe { *(cev.ptr as *const Expr) };
       return compile_expr(b, expr_value);
@@ -768,16 +771,14 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
     List(Cast, &[value, to_type]) => {
       let t = const_expr_to_type(b, to_type)?;
       let v = compile_expr_to_var(b, value)?;
-      return Ok(Some(compile_cast(b, e.loc(), v, t)?.to_ref()));
+      return Ok(Some(compile_cast(b, e, v, t)?.to_ref()));
     }
     // observe
     List(Observe, &[e]) => {
-      let uid = {
-        if let Some(uid) = b.resolver.resolve_name(e) { uid }
-        else { 
-          return error(e.loc(), format!("def {} not found", e));
-        }
-      };
+      let uid = expr_to_uid(e)?;      
+      if !b.context.check_uid(uid) {
+        return err(e, format!("def {} not found", uid));
+      }
       let cell = get_cell_value(b, e, uid)?;
       let signal_type = types::poly_type(b.c.signal_tag, cell.t);
       let uid_ptr = Ptr::to_ptr(perm(uid)) as *const ();
@@ -817,12 +818,31 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
       return Ok(Some(compile_expr_value(b, e.deep_clone()).to_ref()));
     }
     _ => {
-      return error(e.loc(),
+      return err(e,
         format!("encountered invalid expression '{}'",
           e.loc().src_snippet()));
     }
   }
   Ok(None)
+}
+
+fn expr_to_uid(e : Expr) -> Result<CellUid, Error> {
+  fn inner(mut names : Vec<Symbol>, e : Expr) -> Option<CellUid> {
+    use ExprShape::*;
+    match e.shape() {
+      Sym(name) => {
+        Some(CellUid::def(perm_slice_from_vec(names), name))
+      }
+      List(ExprTag::Namespace, &[name, tail]) => {
+        names.push(name.as_symbol());
+        inner(names, tail)
+      },
+      _ => {
+        None
+      }
+    }
+  }
+  inner(vec![], e).ok_or_else(|| error(e, "malformed uid"))
 }
 
 fn compile_type_literal(b : &mut Builder, t : TypeHandle) -> Var {
@@ -831,12 +851,10 @@ fn compile_type_literal(b : &mut Builder, t : TypeHandle) -> Var {
 }
 
 fn compile_def_reference(b : &mut Builder, e : Expr) -> Result<Ref, Error> {
-  let uid = {
-    if let Some(uid) = b.resolver.resolve_name(e) { uid }
-    else {
-      return error(e.loc(), format!("def {} not found", e));
-    }
-  };
+  let uid = expr_to_uid(e)?;      
+  if !b.context.check_uid(uid) {
+    return err(e, format!("def {} not found", uid));
+  }
   b.dependencies.insert(uid);
   let cell = get_cell_value(b, e, uid)?;
   let e = InstrExpr::StaticValue(cell.t, cell.ptr);
@@ -849,7 +867,7 @@ fn compile_array_len(b : &mut Builder, array : Expr) -> Result<Var, Error> {
   let r = compile_expr_to_ref(b, array)?;
   let info =
     types::type_as_array(&r.t)
-    .ok_or_else(|| error_raw(array.loc(), "expected array"))?;
+    .ok_or_else(|| error(array, "expected array"))?;
   let e = InstrExpr::LiteralI64(info.length as i64);
   Ok(push_expr(b, e, b.c.i64_tag))
 }
@@ -858,22 +876,19 @@ fn strip_const_wrapper(e : Expr) -> Result<Expr, Error> {
   if let ExprShape::List(ExprTag::ConstExpr, &[ce]) = e.shape() {
     return Ok(ce);
   }
-  return error(e.loc(), format!("expected const expression, found '{}'", e));
+  return err(e, format!("expected const expression, found '{}'", e));
 }
 
 fn const_expr_value(b : &mut Builder, e : Expr) -> Result<CellValue, Error> {
   let uid = CellUid::expr(e);
-  if !b.resolver.check_uid(uid) {
-    return error(e.loc(), format!("dependency {} not found", uid));
+  if !b.context.check_uid(uid) {
+    return err(e, format!("dependency {} not found", uid));
   }
-  if b.resolver.cell_status(uid) == CellStatus::Broken {
-    return error(e.loc(), format!("dependency {} is broken", uid));
+  if b.context.cell_status(uid) == CellStatus::Broken {
+    return err(e, format!("dependency {} is broken", uid));
   }
   b.dependencies.insert(uid);
   let cell = get_cell_value(b, e, uid)?;
-  if cell.value_expr != e {
-    return error(e.loc(), format!("const expressions '{}' and '{}' do not match", cell.value_expr, e));
-  }
   return Ok(cell);
 }
 
@@ -881,7 +896,7 @@ fn const_expr_to_type(b: &mut Builder, e : Expr) -> Result<TypeHandle, Error> {
   let e = strip_const_wrapper(e)?;
   let cev = const_expr_value(b, e)?;
   if cev.t != b.c.type_tag {
-    return error(e.loc(),
+    return err(e,
       format!("expected expression of type 'type', found {}", cev.t));
   }
   Ok(unsafe { *(cev.ptr as *const TypeHandle) })
@@ -900,11 +915,11 @@ fn compile_function_call(
     i
   }
   else {
-    return error(function_val.loc(),
+    return err(function_val,
       format!("expected function, found {}", f.t));
   };
   if args.len() != info.args.len() {
-    return error(e.loc(),
+    return err(e,
       format!("expected {} args, found {}",
         info.args.len(), args.len()));
   }
@@ -914,12 +929,12 @@ fn compile_function_call(
     let arg_type = arg_values[i].t;
     let expected_type = info.args[i];
     if expected_type != arg_type  {
-      return error(arg.loc(),
+      return err(arg,
         format!("expected arg of type {}, found type {}",
           expected_type, arg_type));
     }
     if info.c_function && arg_type.size_of > 8 {
-      return error(arg.loc(),
+      return err(arg,
         format!("types passed to a C function must be 64 bits wide or less; found type {} of width {}",
           arg_type, arg_type.size_of));
     }
@@ -951,36 +966,36 @@ fn compile_container(
   // Check types
   let fun =
     types::type_as_function(&function.t)
-    .ok_or_else(|| error_raw(function_expr.loc(), "invalid function type"))?;
+    .ok_or_else(|| error(function_expr, "invalid function type"))?;
   let state_type =
     types::deref_pointer_type(fun.args[0])
-    .ok_or_else(|| error_raw(function_expr.loc(), "invalid function type"))?;
+    .ok_or_else(|| error(function_expr, "invalid function type"))?;
   let input_type =
     types::deref_pointer_type(fun.args[1])
-    .ok_or_else(|| error_raw(function_expr.loc(), "invalid function type"))?;
+    .ok_or_else(|| error(function_expr, "invalid function type"))?;
   let signal_param =
     types::type_as_poly(&signal.t)
-    .ok_or_else(|| error_raw(signal_expr.loc(), "invalid signal type"))?
+    .ok_or_else(|| error(signal_expr, "invalid signal type"))?
     .param;
   if state_type != value.t {
-    return error(e.loc(),
+    return err(e,
       format!("conflicting container state types {} and {}",
       state_type, value.t));
   }
   if signal_param != input_type {
-    return error(e.loc(),
+    return err(e,
       format!("conflicting container input types {} and {}",
       signal_param, input_type));
   }
   // Cast args
   let void_ptr_tag = types::pointer_type(b.c.void_tag);
-  let signal_arg = compile_cast(b, signal_expr.loc(), signal, b.c.signal_tag)?;
+  let signal_arg = compile_cast(b, signal_expr, signal, b.c.signal_tag)?;
   let type_arg = compile_type_literal(b, value.t);
   let value_arg = {
     let v = value.to_ref().get_address(b);
-    compile_cast(b, value_expr.loc(), v, void_ptr_tag)?
+    compile_cast(b, value_expr, v, void_ptr_tag)?
   };
-  let function_arg = compile_cast(b, function_expr.loc(), function, void_ptr_tag)?;
+  let function_arg = compile_cast(b, function_expr, function, void_ptr_tag)?;
   compile_function_call(
     b, e,
     container_function,
@@ -1003,27 +1018,27 @@ fn compile_stream(
   // Check types
   let fun =
     types::type_as_function(&function.t)
-    .ok_or_else(|| error_raw(function_expr.loc(), "invalid function type"))?;
+    .ok_or_else(|| error(function_expr, "invalid function type"))?;
   let state_type =
     types::deref_pointer_type(fun.args[0])
-    .ok_or_else(|| error_raw(function_expr.loc(), "invalid function type"))?;
+    .ok_or_else(|| error(function_expr, "invalid function type"))?;
   let input_type =
     types::deref_pointer_type(fun.args[1])
-    .ok_or_else(|| error_raw(function_expr.loc(), "invalid function type"))?;
+    .ok_or_else(|| error(function_expr, "invalid function type"))?;
   let signal_param =
     types::type_as_poly(&signal.t)
-    .ok_or_else(|| error_raw(signal_expr.loc(), "invalid signal type"))?
+    .ok_or_else(|| error(signal_expr, "invalid signal type"))?
     .param;
   if signal_param != input_type {
-    return error(e.loc(),
+    return err(e,
       format!("conflicting container input types {} and {}",
         signal_param, input_type));
   }
   // Cast args
   let void_ptr_tag = types::pointer_type(b.c.void_tag);
-  let signal_arg = compile_cast(b, signal_expr.loc(), signal, b.c.signal_tag)?;
+  let signal_arg = compile_cast(b, signal_expr, signal, b.c.signal_tag)?;
   let type_arg = compile_type_literal(b, state_type);
-  let function_arg = compile_cast(b, function_expr.loc(), function, void_ptr_tag)?;
+  let function_arg = compile_cast(b, function_expr, function, void_ptr_tag)?;
   compile_function_call(
     b, e,
     stream_function,
@@ -1080,7 +1095,7 @@ fn compile_intrinic_op(b : &mut Builder, e : Expr, op : Operator, args : &[Expr]
       let e = InstrExpr::BinaryOp(op, v1.id, v2.id);
       return Ok(push_expr(b, e, t));
     }
-    return error(e.loc(),
+    return err(e,
       format!("no binary op {} for types {} and {} at",
         op, v1.t, v2.t));
   }
@@ -1090,10 +1105,10 @@ fn compile_intrinic_op(b : &mut Builder, e : Expr, op : Operator, args : &[Expr]
       let e = InstrExpr::UnaryOp(op, v1.id);
       return Ok(push_expr(b, e, t));
     }
-    return error(e.loc(),
+    return err(e,
       format!("no unary op {} for type {}", op, v1.t));
   }
-  return error(e.loc(),
+  return err(e,
     format!("incorrect number of args to operator {}", op));
 }
 
@@ -1104,10 +1119,10 @@ fn compile_expr_value(b : &mut Builder, expr : Expr) -> Var {
 }
 
 fn get_cell_value(b : &mut Builder, e : Expr, uid : CellUid) -> Result<CellValue, Error> {
-  if let Some(v) = b.resolver.cell_value(uid) {
-    if v.has_value {
+  if let Some(v) = b.context.cell_value(uid) {
+    if v.initialised {
       return Ok(v);
     }
   }
-  error(e.loc(), format!("no value found for cell {}", uid))
+  err(e, format!("no value found for cell {}", uid))
 }

@@ -1,7 +1,7 @@
 
 use std::{fmt};
 
-use crate::{error::{Error, error_raw}, perm_alloc::Ptr};
+use crate::{error::{Error, error}, perm_alloc::Ptr};
 use super::expr::{CodeModule, SrcLocation};
 
 const SYNTAX : &'static [&'static str] =
@@ -130,7 +130,7 @@ impl <'l> TokenIterator<'l> {
   fn raise_error(&mut self, message : String) -> Error {
     let location = self.get_src_location();
     self.start_pos = self.pos;
-    error_raw(location, message)
+    error(location, message)
   }
 
   fn lex_newline(&mut self) -> Option<Token<'l>> {
