@@ -100,7 +100,8 @@ fn update_cell(
       dep_values.insert(dep_uid, v);
     }
     else {
-      println!("dependency {} not found at ({})", dep_uid, value_expr.loc());
+      let e = error(value_expr, format!("dependency {} not found", dep_uid));
+      println!("{}", e.display());
       return false;
     }
   }
