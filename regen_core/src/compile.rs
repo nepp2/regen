@@ -1,8 +1,7 @@
 
 /// Compiles core language into bytecode
 
-use crate::{bytecode, env::{CellUid, CellValue}, error::{Error, err, error}, hotload::{CompileContext, CellStatus}, parse, perm_alloc, symbols::{self, SymbolTable}, types};
-use std::{collections::HashSet};
+use crate::{bytecode, dependencies, env::{CellUid, CellValue}, error::{Error, err, error}, hotload::CompileContext, parse, perm_alloc, symbols::{self, SymbolTable}, types};
 
 use bytecode::{
   SequenceHandle, SequenceInfo, InstrExpr, FunctionBytecode,
@@ -20,14 +19,13 @@ use parse::{Expr, ExprShape, ExprTag, Val};
 /// Compile expression to simple no-arg function
 pub fn compile_expr_to_function(
   context : &CompileContext,
-  root : Expr
-) -> Result<(Function, HashSet<CellUid>), Error>
+  root : Expr,
+) -> Result<Function, Error>
 {
-  let mut dependencies = HashSet::new();
   let f = compile_function(
-    Builder::new(context, &mut dependencies, &context.env.c, context.env.st),
+    Builder::new(context, &context.env.c, context.env.st),
     root, &[], None)?;
-  Ok((f, dependencies))
+  Ok(f)
 }
 
 struct LabelledExpr {
@@ -36,6 +34,7 @@ struct LabelledExpr {
   exit_seq: SequenceHandle,
 }
 
+#[derive(Clone)]
 pub struct Function {
   pub bc : FunctionBytecode,
   pub t : TypeHandle,
@@ -59,8 +58,6 @@ struct Builder<'l> {
 
   context : &'l CompileContext<'l>,
 
-  dependencies : &'l mut HashSet<CellUid>,
-
   c : &'l CoreTypes,
 
   st : SymbolTable,
@@ -69,7 +66,6 @@ struct Builder<'l> {
 impl <'l> Builder<'l> {
   fn new(
     context : &'l CompileContext<'l>,
-    dependencies : &'l mut HashSet<CellUid>,
     c : &'l CoreTypes,
     st : SymbolTable,
   ) -> Self
@@ -87,7 +83,6 @@ impl <'l> Builder<'l> {
       current_sequence: None,
       label_stack: vec![],
       context,
-      dependencies,
       c, st,
     }
   }
@@ -292,7 +287,6 @@ fn function_to_var(b : &mut Builder, f : Function) -> Var {
 
 fn compile_function_def(
   context : &CompileContext,
-  dependencies : &mut HashSet<CellUid>,
   c : &CoreTypes,
   st : SymbolTable,
   args : &[Expr],
@@ -300,7 +294,7 @@ fn compile_function_def(
   body : Expr,
 ) -> Result<Function, Error>
 {
-  let mut b = Builder::new(context, dependencies, c, st);
+  let mut b = Builder::new(context, c, st);
   b.bc.args = args.len();
   let mut arg_types = vec![];
   for a in args {
@@ -496,7 +490,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
       let v = push_expr(b, lit_expr, b.c.u64_tag);
       return Ok(Some(compile_cast(b, e, v, b.c.bool_tag)?.to_ref()));
     }
-    // local reference
+    // local or global reference
     Sym(sym) => {
       // Look for variable in local scope
       if let Some(v) = find_var_in_scope(b, sym) {
@@ -663,7 +657,6 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
       };
       let f = compile_function_def(
         b.context,
-        b.dependencies,
         &b.c, b.st,
         args.children(),
         return_tag,
@@ -776,9 +769,6 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
     // observe
     List(Observe, &[e]) => {
       let uid = expr_to_uid(e)?;      
-      if !b.context.check_uid(uid) {
-        return err(e, format!("def {} not found", uid));
-      }
       let cell = get_cell_value(b, e, uid)?;
       let signal_type = types::poly_type(b.c.signal_tag, cell.t);
       let uid_ptr = Ptr::to_ptr(perm(uid)) as *const ();
@@ -827,22 +817,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
 }
 
 fn expr_to_uid(e : Expr) -> Result<CellUid, Error> {
-  fn inner(mut names : Vec<Symbol>, e : Expr) -> Option<CellUid> {
-    use ExprShape::*;
-    match e.shape() {
-      Sym(name) => {
-        Some(CellUid::def(perm_slice_from_vec(names), name))
-      }
-      List(ExprTag::Namespace, &[name, tail]) => {
-        names.push(name.as_symbol());
-        inner(names, tail)
-      },
-      _ => {
-        None
-      }
-    }
-  }
-  inner(vec![], e).ok_or_else(|| error(e, "malformed uid"))
+  dependencies::expr_to_uid(e).ok_or_else(|| error(e, "malformed uid"))
 }
 
 fn compile_type_literal(b : &mut Builder, t : TypeHandle) -> Var {
@@ -851,11 +826,7 @@ fn compile_type_literal(b : &mut Builder, t : TypeHandle) -> Var {
 }
 
 fn compile_def_reference(b : &mut Builder, e : Expr) -> Result<Ref, Error> {
-  let uid = expr_to_uid(e)?;      
-  if !b.context.check_uid(uid) {
-    return err(e, format!("def {} not found", uid));
-  }
-  b.dependencies.insert(uid);
+  let uid = expr_to_uid(e)?;
   let cell = get_cell_value(b, e, uid)?;
   let e = InstrExpr::StaticValue(cell.t, cell.ptr);
   let pointer_type = types::pointer_type(cell.t);
@@ -881,13 +852,6 @@ fn strip_const_wrapper(e : Expr) -> Result<Expr, Error> {
 
 fn const_expr_value(b : &mut Builder, e : Expr) -> Result<CellValue, Error> {
   let uid = CellUid::expr(e);
-  if !b.context.check_uid(uid) {
-    return err(e, format!("dependency {} not found", uid));
-  }
-  if b.context.cell_status(uid) == CellStatus::Broken {
-    return err(e, format!("dependency {} is broken", uid));
-  }
-  b.dependencies.insert(uid);
   let cell = get_cell_value(b, e, uid)?;
   return Ok(cell);
 }
@@ -1121,7 +1085,7 @@ fn compile_expr_value(b : &mut Builder, expr : Expr) -> Var {
 fn get_cell_value(b : &mut Builder, e : Expr, uid : CellUid) -> Result<CellValue, Error> {
   if let Some(v) = b.context.cell_value(uid) {
     if v.initialised {
-      return Ok(v);
+      return Ok(*v);
     }
   }
   err(e, format!("no value found for cell {}", uid))

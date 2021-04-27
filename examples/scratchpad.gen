@@ -28,4 +28,8 @@ print evens;
 
 print seconds + evens;
 
+def bleb = 5;
+
 def blub = bleb;
+
+print blub;

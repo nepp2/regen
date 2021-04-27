@@ -14,8 +14,13 @@ pub struct RegenValue {
 #[derive(Clone)]
 pub struct Environment {
   pub live_exprs : Vec<Expr>,
-  pub cells : HashMap<CellUid, Cell>,
+
+  pub cell_exprs : HashMap<CellUid, Expr>,
+  pub cell_values : HashMap<CellUid, CellValue>,
+  pub reactive_outputs : HashMap<CellUid, HashSet<CellUid>>,
+  pub reactive_cells : HashMap<CellUid, ReactiveCell>,
   pub graph : CellGraph,
+
   pub timers : HashMap<CellUid, TriggerId>,
   pub event_loop : Ptr<EventLoop>,
   pub st : SymbolTable,
@@ -24,8 +29,7 @@ pub struct Environment {
 }
 
 #[derive(Copy, Clone)]
-pub struct ReactiveObserver {
-  pub uid : CellUid,
+pub struct ReactiveCell {
   pub input : CellUid,
   pub update_handler : *const Function,
 }
@@ -40,9 +44,6 @@ pub struct CellGraph {
 
   /// The output graph is just the dependency graph inverted
   output_graph : HashMap<CellUid, HashSet<CellUid>>,
-
-  /// Maps from reactive cells to the cells they observe
-  pub reactive_observers : HashMap<CellUid, ReactiveObserver>,
 }
 
 impl CellGraph {
@@ -66,7 +67,6 @@ impl CellGraph {
 
   pub fn unload_cell(&mut self, uid : CellUid) {
     self.clear_dependencies(uid);
-    self.reactive_observers.remove(&uid);
   }
 
   pub fn set_cell_dependencies(&mut self, uid : CellUid, deps : HashSet<CellUid>) {
@@ -121,6 +121,10 @@ impl CellUid {
   }
 }
 
+pub fn get_cell_value(env : Env, uid : CellUid) -> Option<CellValue> {
+  env.cell_values.get(&uid).cloned()
+}
+
 pub fn unload_cell(mut env : Env, uid : CellUid) {
   if let DefCell(_, _) = uid {
     let el = env.event_loop;
@@ -129,30 +133,25 @@ pub fn unload_cell(mut env : Env, uid : CellUid) {
     }
     env.timers.remove(&uid);
   }
-  env.cells.remove(&uid);
+  env.cell_exprs.remove(&uid);
+  env.cell_values.remove(&uid);
+  env.reactive_outputs.remove(&uid);
+  env.reactive_cells.remove(&uid);
   env.graph.unload_cell(uid);
-}
-
-pub fn get_cell(env : Env, uid : CellUid) -> Option<Cell> {
-  env.cells.get(&uid).cloned()
-}
-
-pub fn get_cell_value(env : Env, uid : CellUid) -> Option<CellValue> {
-  env.cells.get(&uid).map(|c| c.v)
 }
 
 pub fn define_global(mut env : Env, s : &str, v : u64, t : TypeHandle) {
   let name = to_symbol(env.st, s);
   let path = CellUid::def(new_namespace(&[]), name);
-  if env.cells.contains_key(&path) {
+  if env.cell_exprs.contains_key(&path) {
     panic!("def {} already defined", name);
   }
   let layout = std::alloc::Layout::from_size_align(t.size_of as usize, 8).unwrap();
   let ptr = unsafe { std::alloc::alloc(layout) as *mut () };
   let e = env.builtin_dummy_expr;
   let cv = CellValue{ t, ptr, initialised: true };
-  let c = Cell { value_expr: e, v: cv };
-  env.cells.insert(path, c);
+  env.cell_exprs.insert(path, e);
+  env.cell_values.insert(path, cv);
   unsafe {
     *(ptr as *mut u64) = v;
   }
@@ -173,7 +172,10 @@ pub fn new_env(st : SymbolTable) -> Env {
 
   let env = perm(Environment {
     live_exprs: vec![],
-    cells: HashMap::new(),
+    cell_exprs: HashMap::new(),
+    cell_values: HashMap::new(),
+    reactive_outputs: HashMap::new(),
+    reactive_cells: HashMap::new(),
     graph: Default::default(),
     timers: HashMap::new(),
     event_loop: event_loop::create_event_loop(),

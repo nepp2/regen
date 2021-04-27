@@ -72,6 +72,7 @@ pub struct SequenceInfo {
   pub num_instructions : usize,
 }
 
+#[derive(Clone)]
 pub struct FunctionBytecode {
   pub sequence_info : Vec<SequenceHandle>,
   pub instrs : Vec<Instr>,

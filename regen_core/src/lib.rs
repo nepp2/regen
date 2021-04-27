@@ -3,6 +3,7 @@ pub mod symbols;
 mod parse;
 pub mod env;
 mod bytecode;
+mod dependencies;
 mod compile;
 pub mod interpret;
 mod ffi_ccall;

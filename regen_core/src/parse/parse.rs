@@ -1,8 +1,8 @@
 
-use crate::{bytecode::Operator, error::{error}, ffi_libs, perm_alloc::{Ptr, perm, perm_slice, perm_slice_from_vec}, symbols::{Symbol, SymbolTable, to_symbol}};
+use crate::{bytecode::Operator, ffi_libs, perm_alloc::{Ptr, perm, perm_slice, perm_slice_from_vec}, symbols::{Symbol, SymbolTable, to_symbol}};
 use super::{expr::*, lexer::{Token, TokenType, lex}, templates};
 use templates::{ExprBuilder, template_macro};
-use crate::error::{Error, err};
+use crate::error::{Error, err, error};
 use std::collections::{HashSet, HashMap};
 use std::str::FromStr;
 
@@ -217,7 +217,7 @@ impl <'l> ParseState<'l> {
       Ok(t)
     }
     else {
-      // return error(t.loc,
+      // return err(t.loc,
       //   format!("Expected syntax '{}', found '{}'", str, t.string));
       panic!("Expected syntax '{}', found '{}'", str, t.string)
     }
