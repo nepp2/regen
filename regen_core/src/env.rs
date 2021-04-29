@@ -1,6 +1,6 @@
 use crate::{compile::Function, event_loop::{self, EventLoop, TriggerId}, ffi_libs::*, parse::{self, CodeModule, Expr, ExprContent, ExprTag, SrcLocation, Val}, perm_alloc::{Ptr, SlicePtr, perm, perm_slice}, symbols::{Symbol, SymbolTable, to_symbol}, types::{TypeHandle, CoreTypes, core_types }};
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 
 /// A heap allocated Regen value
@@ -16,6 +16,7 @@ pub struct Environment {
   pub live_exprs : Vec<Expr>,
 
   pub cell_exprs : HashMap<CellUid, Expr>,
+  pub cell_compiles : HashMap<CellUid, CellCompile>,
   pub cell_values : HashMap<CellUid, CellValue>,
   pub reactive_cells : HashMap<CellUid, ReactiveCell>,
   pub graph : CellGraph,
@@ -25,6 +26,12 @@ pub struct Environment {
   pub st : SymbolTable,
   pub c : CoreTypes,
   builtin_dummy_expr : Expr,
+}
+
+#[derive(Clone)]
+pub struct CellCompile {
+  pub allocation : RegenValue,
+  pub function : Function,
 }
 
 #[derive(Copy, Clone)]
@@ -108,12 +115,6 @@ pub struct CellValue {
   pub initialised : bool,
 }
 
-#[derive(Clone, Copy)]
-pub struct Cell {
-  pub value_expr : Expr,
-  pub v : CellValue,
-}
-
 pub fn new_namespace(names : &[Symbol]) -> Namespace {
   perm_slice(names)
 }
@@ -133,6 +134,19 @@ pub fn get_cell_value(env : Env, uid : CellUid) -> Option<CellValue> {
 }
 
 pub fn unload_cell(mut env : Env, uid : CellUid) {
+  env.cell_exprs.remove(&uid);
+  env.cell_compiles.remove(&uid);
+  env.graph.unload_cell(uid);
+  unload_cell_compile(env, uid);
+}
+
+pub fn unload_cell_compile(mut env : Env, uid : CellUid) {
+  env.cell_compiles.remove(&uid);
+  unload_cell_value(env, uid);
+  
+}
+
+pub fn unload_cell_value(mut env : Env, uid : CellUid) {
   if let DefCell(_, _) = uid {
     let el = env.event_loop;
     if let Some(&id) = env.timers.get(&uid) {
@@ -140,10 +154,8 @@ pub fn unload_cell(mut env : Env, uid : CellUid) {
     }
     env.timers.remove(&uid);
   }
-  env.cell_exprs.remove(&uid);
   env.cell_values.remove(&uid);
   env.reactive_cells.remove(&uid);
-  env.graph.unload_cell(uid);
 }
 
 pub fn define_global(mut env : Env, s : &str, v : u64, t : TypeHandle) {
@@ -179,6 +191,7 @@ pub fn new_env(st : SymbolTable) -> Env {
   let env = perm(Environment {
     live_exprs: vec![],
     cell_exprs: HashMap::new(),
+    cell_compiles: HashMap::new(),
     cell_values: HashMap::new(),
     reactive_cells: HashMap::new(),
     graph: Default::default(),

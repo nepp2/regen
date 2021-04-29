@@ -41,30 +41,30 @@ def tick_to_game_event = fun(output : ptr game_event, tick : ptr i64) {
 
 def window = create_game_window("SDL Test", 800, 600);
 
-reactive input_tick = create_timer(10);
+// reactive input_tick = create_timer(10);
 
-reactive sdl_input = stream(observe input_tick, poll_sdl_input);
+// reactive sdl_input = stream(observe input_tick, poll_sdl_input);
 
-reactive frame_tick = create_timer(1000/30);
+// reactive frame_tick = create_timer(1000/30);
 
-def frame_event = init game_event(tick_event_tag, zero_init sdl_event, frame_tick);
+// def frame_event = init game_event(tick_event_tag, zero_init sdl_event, frame_tick);
 
-def event = {
-  if sdl_input.tick > frame_event.tick {
-    sdl_input
-  }
-  else {
-    frame_event
-  }
-}
+// def event = {
+//   if sdl_input.tick > frame_event.tick {
+//     sdl_input
+//   }
+//   else {
+//     frame_event
+//   }
+// }
 
-reactive sample_timer = create_timer(1000);
+// reactive sample_timer = create_timer(1000);
 
-reactive sample = stream(observe sample_timer, fun(e : ptr game_event, tick : ptr i64) {
-  *e = event;
-});
+// reactive sample = stream(observe sample_timer, fun(e : ptr game_event, tick : ptr i64) {
+//   *e = event;
+// });
 
-print sample;
+// print sample;
 
 
 // def game_input_signal = fun(input_signal : signal, tick_signal : tick_event_signal) {

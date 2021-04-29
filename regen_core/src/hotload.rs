@@ -1,5 +1,5 @@
 
-use crate::{compile, dependencies::{self, CellDependencies}, env::{self, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
+use crate::{compile, dependencies::{self, CellDependencies}, env::{self, CellCompile, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
 
 use std::{alloc::{Layout, alloc}, collections::{HashMap, HashSet}};
 
@@ -26,7 +26,7 @@ impl <'l> CompileContext<'l> {
   }
 }
 
-fn get_dependency_value(
+fn get_cell_value(
   env : Env,
   hs : &HotloadState,
   uid : CellUid,
@@ -34,13 +34,8 @@ fn get_dependency_value(
 ) -> Option<CellValue>
 {
   if let Some(&cv) = env.cell_values.get(&uid) {
-    if require_initialised && cv.initialised {
-      // Accept defs that appear before this one in the current pass
-      if hs.visited_cells.contains(&uid) {
-        return Some(cv);
-      }
-      // Accept defs that aren't part of the active module
-      if env.cell_exprs[&uid].loc().module.name != hs.active_module {
+    if !require_initialised || cv.initialised {
+      if is_cell_visible(env, hs, uid) {
         return Some(cv);
       }
     }
@@ -48,16 +43,38 @@ fn get_dependency_value(
   None
 }
 
-/// Returns the evaluated expr value, and the cell's resolved dependencies
-fn load_cell_value(
+fn is_cell_visible(
+  env : Env,
+  hs : &HotloadState,
+  uid : CellUid,
+) -> bool
+{
+  // Accept defs that appear before this one in the current pass
+  if hs.visited_cells.contains(&uid) {
+    return true;
+  }
+  // Accept defs that aren't part of the active module
+  if env.cell_exprs[&uid].loc().module.name != hs.active_module {
+    return true;
+  }
+  false
+}
+
+/// Returns the evaluated expr value
+fn calculate_cell_value(
   env : Env,
   uid : CellUid,
   value_expr : Expr,
-  deps : &DependencyValues,
   reactive_cell : bool,
 ) -> Result<CellValue, Error>
 {
-  let v = eval_expr(env, value_expr, deps)?;
+  let cc = env.cell_compiles.get(&uid).unwrap();
+  std::panic::catch_unwind(|| {
+    interpret::interpret_function(&cc.function, &[], Some(cc.allocation.ptr));
+  }).map_err(|_| {
+    error(value_expr, "regen eval panic!")
+  })?;
+  let v = cc.allocation;
   let cv = {
     if reactive_cell {
       register_reactive_cell(env, uid, value_expr, v)?
@@ -70,43 +87,25 @@ fn load_cell_value(
 }
 
 /// Returns the evaluated expr value, and the cell's resolved dependencies
-fn update_cell(
+fn compile_cell(
   mut env : Env,
   hs : &HotloadState,
   uid : CellUid,
   value_expr : Expr,
   deps : &CellDependencies,
-  reactive_cell : bool,
 ) -> bool
 {
-  env::unload_cell(env, uid);
-  // update expr
-  env.cell_exprs.insert(uid, value_expr);
-  // update dependencies
-  let mut graph_deps = HashMap::new();
-  for &dep_uid in &deps.observer_refs {
-    graph_deps.insert(dep_uid, DependencyType::Reactive);
+  // don't bother compiling if the reactive input hasn't changed
+  if let Some(observe_uid) = deps.observe_ref {
+    if !hs.change_flags.contains_key(&observe_uid) {
+      return false;
+    }
   }
-  for &dep_uid in &deps.def_refs {
-    graph_deps.insert(dep_uid, DependencyType::Value);
-  }
-  for &e in &deps.const_exprs {
-    let dep_uid = CellUid::ExprCell(e);
-    graph_deps.insert(dep_uid, DependencyType::Code);
-  }
-  env.graph.set_cell_dependencies(uid, graph_deps.clone());
-  // get dependency values
+  // get/check dependency values
   let mut dep_values = HashMap::new();
-  for &dep_uid in graph_deps.keys() {
-    let v = get_dependency_value(env, hs, dep_uid, true);
+  for &dep_uid in env.graph.dependencies(uid).unwrap().keys() {
+    let v = get_cell_value(env, hs, dep_uid, true);
     if let Some(v) = v {
-      if let CellUid::ExprCell(_) = dep_uid {
-        if !v.initialised {
-          let e = error(value_expr, format!("dependency {} not initialised", dep_uid));
-          println!("{}", e.display());
-          return false;
-        }
-      }
       dep_values.insert(dep_uid, v);
     }
     else {
@@ -115,8 +114,29 @@ fn update_cell(
       return false;
     }
   }
+  let r = compile_expr(env, value_expr, &dep_values);
+  match r {
+    Ok(cc) => {
+      env.cell_compiles.insert(uid, cc);
+      true
+    }
+    Err(e) => {
+      println!("{}", e.display());
+      false
+    }
+  }
+}
+
+/// Returns the evaluated expr value, and the cell's resolved dependencies
+fn evaluate_cell(
+  mut env : Env,
+  uid : CellUid,
+  value_expr : Expr,
+  reactive_cell : bool,
+) -> bool
+{
   // load cell value
-  let r = load_cell_value(env, uid, value_expr, &dep_values, reactive_cell);
+  let r = calculate_cell_value(env, uid, value_expr, reactive_cell);
   match r {
     Ok(v) => {
       env.cell_values.insert(uid, v);
@@ -142,7 +162,11 @@ fn register_reactive_cell(
       let id = event_loop::register_cell_timer(env.event_loop, uid, millisecond_interval);
       let now : i64 = event_loop::current_millisecond(env.event_loop);
       env.timers.insert(uid, id);
-      let v = CellValue { t: env.c.i64_tag, ptr: alloc_val(now), initialised: false };
+      let v = CellValue {
+        t: env.c.i64_tag,
+        ptr: alloc_val(now),
+        initialised: false,
+      };
       Ok(v)
     }
     ConstructorVariant::Poll { input, initial_value, poll_function } => {
@@ -150,7 +174,7 @@ fn register_reactive_cell(
       let v = CellValue {
         t,
         ptr: alloc_bytes(t.size_of as usize, initial_value),
-        initialised: initial_value.is_some()
+        initialised: initial_value.is_some(),
       };
       let ob = ReactiveCell { input: *input, update_handler: poll_function };
       env.reactive_cells.insert(uid, ob);
@@ -196,53 +220,54 @@ fn to_reactive_constructor(env : Env, value_expr : Expr, constructor_val : Regen
   err(value_expr.loc(), format!("expected reactive constructor, found {}", constructor_val.t))
 }
 
-fn eval_expr(
+fn compile_expr(
   env : Env,
   expr : Expr,
   deps : &DependencyValues,
-) -> Result<RegenValue, Error>
+) -> Result<CellCompile, Error>
 {
   let ctx = CompileContext::new(env, deps);
-  let f = compile::compile_expr_to_function(&ctx, expr)?;
-  let expr_type = types::type_as_function(&f.t).unwrap().returns;
+  let function = compile::compile_expr_to_function(&ctx, expr)?;
+  let expr_type = types::type_as_function(&function.t).unwrap().returns;
   // TODO: it's wasteful to allocate for types that are 64bits wide or smaller
   let ptr = {
     let layout = std::alloc::Layout::from_size_align(expr_type.size_of as usize, 8).unwrap();
     unsafe { std::alloc::alloc(layout) as *mut () }
   };
-  std::panic::catch_unwind(|| {
-    interpret::interpret_function(&f, &[], Some(ptr));
-  }).map_err(|_|
-    error(SrcLocation::zero(expr.loc().module), "regen eval panic!")
-  )?;
-  let v = RegenValue { t: expr_type, ptr };
-  Ok(v)
+  let allocation = RegenValue { t: expr_type, ptr };
+  Ok(CellCompile { allocation, function })
 }
 
-fn does_cell_require_update(
-  env : Env,
-  hs : &HotloadState,
+/// returns true if expression changed
+fn update_value_expression(
+  mut env : Env,
   uid : CellUid,
-  value_expr : Expr
+  value_expr : Expr,
+  deps : &CellDependencies,
 ) -> bool
 {
   if let Some(&prev_expr) = env.cell_exprs.get(&uid) {
-    if prev_expr != value_expr {
-      return true;
+    if prev_expr == value_expr {
+      // Always update the value expr, to keep valid source locations
+      env.cell_exprs.insert(uid, value_expr);
+      return false;
     }
   }
-  else {
-    return true;
+  env.cell_exprs.insert(uid, value_expr);
+  // update dependencies
+  let mut graph_deps = HashMap::new();
+  if let Some(observe_uid) = deps.observe_ref {
+    graph_deps.insert(observe_uid, DependencyType::Reactive);
   }
-  if let Some(dt) = hs.stale_cells.get(&uid) {
-    if let DependencyType::Code | DependencyType::Value = dt {
-      return true;
-    }
-    if get_dependency_value(env, hs, uid, true).is_none() {
-      return true;
-    }
+  for &dep_uid in &deps.def_refs {
+    graph_deps.insert(dep_uid, DependencyType::Value);
   }
-  false
+  for &e in &deps.const_exprs {
+    let dep_uid = CellUid::ExprCell(e);
+    graph_deps.insert(dep_uid, DependencyType::Code);
+  }
+  env.graph.set_cell_dependencies(uid, graph_deps);
+  true
 }
 
 fn get_cell_value_mut (env : &mut Env, uid : CellUid) -> &mut CellValue {
@@ -250,15 +275,15 @@ fn get_cell_value_mut (env : &mut Env, uid : CellUid) -> &mut CellValue {
 }
 
 fn update_observer(mut env : Env, hs : &mut HotloadState, uid : CellUid, rc : ReactiveCell) -> bool {
-  let state_val = env.cell_values.get(&uid).unwrap();
-  let input_val = {
-    if let Some(v) = get_dependency_value(env, hs, rc.input, true) {
-      v
-    }
-    else {
-      return false;
-    }
-  };
+  if hs.change_flags.get(&rc.input).is_none() {
+    return false;
+  }
+  let state_val =
+    if let Some(v) = get_cell_value(env, hs, uid, false) { v }
+    else { return false; };
+  let input_val =
+    if let Some(v) = get_cell_value(env, hs, rc.input, true) { v }
+    else { return false; };
   let returns_bool = {
     let f = unsafe { &*rc.update_handler };
     let return_type = types::type_as_function(&f.t).unwrap().returns;
@@ -288,23 +313,6 @@ fn update_observer(mut env : Env, hs : &mut HotloadState, uid : CellUid, rc : Re
   }
 }
 
-fn poll_observer_input(
-  env : Env,
-  hs : &mut HotloadState,
-  uid : CellUid
-)
-{
-  if let Some(rc) = env.reactive_cells.get(&uid) {
-    if let Some(cv) = env.cell_values.get(&uid) {
-      if hs.stale_cells.contains_key(&uid) || !cv.initialised {
-        if update_observer(env, hs, uid, *rc) {
-          mark_outputs(env, hs, uid);
-        }
-      }
-    }
-  }
-}
-
 fn hotload_cell(
   mut env : Env,
   hs : &mut HotloadState,
@@ -314,6 +322,7 @@ fn hotload_cell(
   reactive_cell : bool,
 )
 {
+  // Check if this cell has already been visited
   if hs.visited_cells.contains(&uid) {
     match uid {
       DefCell(_, _) => {
@@ -325,15 +334,38 @@ fn hotload_cell(
       }
     }
   }
-  // check whether the def needs to be loaded/reloaded
-  let requires_update = does_cell_require_update(env, hs, uid, value_expr);
-  if requires_update {
-    update_cell(env, hs, uid, value_expr, deps, reactive_cell);
-    mark_outputs(env, hs, uid);
+  let mut requires_recompile = false;
+  // Update the value expression
+  if update_value_expression(env, uid, value_expr, deps) {
+    requires_recompile = true;
   }
-  else {
-    // Update exprs so that their text locations are correct
-    env.cell_exprs.insert(uid, value_expr);
+  // Always update the expr, to keep valid source locations
+  env.cell_exprs.insert(uid, value_expr);
+  // Check if this cell has been flagged for change
+  if !requires_recompile {
+    if let Some(dt) = hs.change_flags.get(&uid) {
+      match dt {
+        DependencyType::Code | DependencyType::Value => {
+          requires_recompile = true;
+        }
+        DependencyType::Reactive => {
+          // reactive changes only trigger cell value
+          // updates when the cell hasn't been evaluated yet
+          if get_cell_value(env, hs, uid, false).is_none() {
+            requires_recompile = true;
+          }        
+        }
+      }
+    }
+  }
+  // update the cell
+  if requires_recompile {
+    env::unload_cell_compile(env, uid);
+    if compile_cell(env, hs, uid, value_expr, deps) {
+      if evaluate_cell(env, uid, value_expr, reactive_cell) {
+        mark_outputs(env, hs, uid);
+      }
+    }
   }
   hs.visited_cells.insert(uid);
 }
@@ -403,7 +435,11 @@ fn hotload_def(
   let uid = CellUid::def(namespace, name);
   hotload_cell(env, hs, uid, value_expr, &deps, reactive_cell);
   // update observer
-  poll_observer_input(env, hs, uid);
+  if let Some(rc) = env.reactive_cells.get(&uid) {
+    if update_observer(env, hs, uid, *rc) {
+      mark_outputs(env, hs, uid);
+    }
+  }
 }
 
 fn hotload_cells(
@@ -435,7 +471,7 @@ fn hotload_cells(
 
 struct HotloadState {
   active_module : Symbol,
-  stale_cells : HashMap<CellUid, DependencyType>,
+  change_flags : HashMap<CellUid, DependencyType>,
   visited_cells : HashSet<CellUid>,
 }
 
@@ -451,11 +487,11 @@ fn dependency_precedence(a : DependencyType, b : DependencyType) -> DependencyTy
 fn mark_outputs(env : Env, hs : &mut HotloadState, uid : CellUid) {
   if let Some(outputs) = env.graph.outputs(uid) {
     for (&output_uid, &dt) in outputs {
-      let new_dt = if let Some(&prev_dt) = hs.stale_cells.get(&output_uid) {
+      let new_dt = if let Some(&prev_dt) = hs.change_flags.get(&output_uid) {
         dependency_precedence(dt, prev_dt)
       }
       else { dt };
-      hs.stale_cells.insert(output_uid, new_dt);
+      hs.change_flags.insert(output_uid, new_dt);
     }
   }
 }
@@ -485,7 +521,7 @@ pub fn hotload_live_module(mut env : Env, module_name : &str, code : &str) {
   };
   let mut hs = HotloadState {
     active_module: module_name,
-    stale_cells: HashMap::new(),
+    change_flags: HashMap::new(),
     visited_cells: HashSet::new(),
   };
   hotload_module(env, &mut hs, &exprs);
@@ -503,7 +539,7 @@ pub fn interpret_module(env : Env, module_name : &str, code : &str) {
   };
   let mut hs = HotloadState {
     active_module: module_name,
-    stale_cells: HashMap::new(),
+    change_flags: HashMap::new(),
     visited_cells: HashSet::new(),
   };
   hotload_module(env, &mut hs, &exprs);
@@ -514,9 +550,10 @@ fn cell_updated(env : Env, uid : CellUid) {
   let module_name = env.cell_exprs[&uid].loc().module.name;
   let mut hs = HotloadState {
     active_module: module_name,
-    stale_cells: HashMap::new(),
+    change_flags: HashMap::new(),
     visited_cells: HashSet::new(),
   };
+  hs.change_flags.insert(uid, DependencyType::Value);
   mark_outputs(env, &mut hs, uid);
   hotload_module(env, &mut hs, &env.live_exprs);
 }

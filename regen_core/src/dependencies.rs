@@ -4,7 +4,7 @@ pub struct CellDependencies {
   pub defs : Vec<Expr>,
   pub const_exprs : Vec<Expr>,
   pub def_refs : Vec<CellUid>,
-  pub observer_refs : Vec<CellUid>,
+  pub observe_ref : Option<CellUid>,
   pub embeds : Vec<Expr>,
 }
 
@@ -29,7 +29,10 @@ pub fn get_cell_dependencies(st : SymbolTable, expr : Expr) -> CellDependencies 
       }
       List(ExprTag::Observe, &[e]) => {
         if let Some(uid) = expr_to_uid(e) {
-          deps.observer_refs.push(uid);
+          if deps.observe_ref.is_some() {
+            panic!("only permit one observe per definition")
+          }
+          deps.observe_ref = Some(uid);
         }
       }
       List(ExprTag::Namespace, _) => {
@@ -101,7 +104,7 @@ pub fn get_cell_dependencies(st : SymbolTable, expr : Expr) -> CellDependencies 
     defs: vec![],
     const_exprs: vec![],
     def_refs: vec![],
-    observer_refs: vec![],
+    observe_ref: None,
     embeds: vec![]
   };
   let mut locals = vec![];

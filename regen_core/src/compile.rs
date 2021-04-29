@@ -1087,6 +1087,9 @@ fn get_cell_value(b : &mut Builder, e : Expr, uid : CellUid) -> Result<CellValue
     if v.initialised {
       return Ok(*v);
     }
+    else {
+      return err(e, format!("cell {} not yet initialised", uid));
+    }
   }
   err(e, format!("no value found for cell {}", uid))
 }
