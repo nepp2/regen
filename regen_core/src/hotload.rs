@@ -1,5 +1,5 @@
 
-use crate::{compile, dependencies::{self, CellDependencies}, env::{self, CellUid, CellValue, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
+use crate::{compile, dependencies::{self, CellDependencies}, env::{self, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
 
 use std::{alloc::{Layout, alloc}, collections::{HashMap, HashSet}};
 
@@ -26,9 +26,15 @@ impl <'l> CompileContext<'l> {
   }
 }
 
-fn get_dependency_value(env : Env, hs : &HotloadState, uid : CellUid) -> Option<CellValue> {
+fn get_dependency_value(
+  env : Env,
+  hs : &HotloadState,
+  uid : CellUid,
+  require_initialised : bool,
+) -> Option<CellValue>
+{
   if let Some(&cv) = env.cell_values.get(&uid) {
-    if cv.initialised {
+    if require_initialised && cv.initialised {
       // Accept defs that appear before this one in the current pass
       if hs.visited_cells.contains(&uid) {
         return Some(cv);
@@ -77,26 +83,30 @@ fn update_cell(
   // update expr
   env.cell_exprs.insert(uid, value_expr);
   // update dependencies
-  let mut graph_deps = HashSet::new();
-  let mut all_deps = vec![];
-  for &e in &deps.const_exprs {
-    let dep_uid = CellUid::ExprCell(e);
-    graph_deps.insert(dep_uid);
-    all_deps.push(dep_uid);
+  let mut graph_deps = HashMap::new();
+  for &dep_uid in &deps.observer_refs {
+    graph_deps.insert(dep_uid, DependencyType::Reactive);
   }
   for &dep_uid in &deps.def_refs {
-    graph_deps.insert(dep_uid);
-    all_deps.push(dep_uid);
+    graph_deps.insert(dep_uid, DependencyType::Value);
   }
-  for &dep_uid in &deps.observer_refs {
-    all_deps.push(dep_uid);
+  for &e in &deps.const_exprs {
+    let dep_uid = CellUid::ExprCell(e);
+    graph_deps.insert(dep_uid, DependencyType::Code);
   }
-  env.graph.set_cell_dependencies(uid, graph_deps);
+  env.graph.set_cell_dependencies(uid, graph_deps.clone());
   // get dependency values
   let mut dep_values = HashMap::new();
-  for dep_uid in all_deps {
-    let v = get_dependency_value(env, hs, dep_uid);
+  for &dep_uid in graph_deps.keys() {
+    let v = get_dependency_value(env, hs, dep_uid, true);
     if let Some(v) = v {
+      if let CellUid::ExprCell(_) = dep_uid {
+        if !v.initialised {
+          let e = error(value_expr, format!("dependency {} not initialised", dep_uid));
+          println!("{}", e.display());
+          return false;
+        }
+      }
       dep_values.insert(dep_uid, v);
     }
     else {
@@ -224,8 +234,13 @@ fn does_cell_require_update(
   else {
     return true;
   }
-  if hs.stale_cells.get(&uid) == Some(&StaleMarker::Value) {
-    return true;
+  if let Some(dt) = hs.stale_cells.get(&uid) {
+    if let DependencyType::Code | DependencyType::Value = dt {
+      return true;
+    }
+    if get_dependency_value(env, hs, uid, true).is_none() {
+      return true;
+    }
   }
   false
 }
@@ -237,7 +252,7 @@ fn get_cell_value_mut (env : &mut Env, uid : CellUid) -> &mut CellValue {
 fn update_observer(mut env : Env, hs : &mut HotloadState, uid : CellUid, rc : ReactiveCell) -> bool {
   let state_val = env.cell_values.get(&uid).unwrap();
   let input_val = {
-    if let Some(v) = get_dependency_value(env, hs, rc.input) {
+    if let Some(v) = get_dependency_value(env, hs, rc.input, true) {
       v
     }
     else {
@@ -418,29 +433,29 @@ fn hotload_cells(
   }
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum StaleMarker {
-  Reactive,
-  Value,
-}
-
 struct HotloadState {
   active_module : Symbol,
-  stale_cells : HashMap<CellUid, StaleMarker>,
+  stale_cells : HashMap<CellUid, DependencyType>,
   visited_cells : HashSet<CellUid>,
+}
+
+fn dependency_precedence(a : DependencyType, b : DependencyType) -> DependencyType {
+  use DependencyType::*;
+  match (a, b) {
+    (Code, _) | (_, Code) => Code,
+    (Value, _) | (_, Value) => Value,
+    (Reactive, Reactive) => Reactive,
+  }
 }
 
 fn mark_outputs(env : Env, hs : &mut HotloadState, uid : CellUid) {
   if let Some(outputs) = env.graph.outputs(uid) {
-    for &output_uid in outputs {
-      hs.stale_cells.insert(output_uid, StaleMarker::Value);
-    }
-  }
-  if let Some(outputs) = env.reactive_outputs.get(&uid) {
-    for &output_uid in outputs {
-      if hs.stale_cells.get(&output_uid) != Some(&StaleMarker::Value) {
-        hs.stale_cells.insert(output_uid, StaleMarker::Reactive);
+    for (&output_uid, &dt) in outputs {
+      let new_dt = if let Some(&prev_dt) = hs.stale_cells.get(&output_uid) {
+        dependency_precedence(dt, prev_dt)
       }
+      else { dt };
+      hs.stale_cells.insert(output_uid, new_dt);
     }
   }
 }

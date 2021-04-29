@@ -654,6 +654,11 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       let quoted = pratt_parse(ps, kp)?;
       ps.list_expr(Quote, vec![quoted], start)
     }
+    "zero_init" => {
+      ps.pop_type(TokenType::Symbol)?;
+      let type_name = parse_const_expr(ps, kp)?;
+      ps.list_expr(ZeroInit, vec![type_name], start)
+    }
     "init" => {
       ps.pop_type(TokenType::Symbol)?;
       let paren_precedence = infix_precedence(ps, "(");

@@ -1,22 +1,25 @@
 # TODO
 
+* [ ] fix observer triggers
+  * trigger when the reactive dependency changes
+  * mark as not initialised if a value/code dependency changes?
+  * compiles on-demand
+  * what if value references another def that has been deallocated?
+    * require user copying?
+* [ ] optimise compilation
+  * only recompile if a code dependency changed
+  * otherwise just re-execute previous function
+* [ ] optimise reactive events
+  * if there are no embeds, record the update sequence
 * [ ] make compiler fail gracefully
   * [ ] fail silently when a dependency is found, but is not ready for use
-  * [ ] leave a marker for cells whose values couldn't be calculated
-  * [ ] just log the expression and the missing dependency
+  * [ ] only display an error once until something changes (what?)
 
-`observe uid` is maybe a bug? it creates a runtime value that can be stored (for example, in a reactive container). it's probably fine as long as the runtime checks that the uid is valid whenever it binds it to an observer.
+# Issues
 
-avoiding repetitive errors is hard. the problem is that if something fails to compile, i have to re-execute it _every time_ any event is triggered, because i don't know what it depends on. this is very unfortunate. it could be solved by only allowing each cell to display one error between successful compiles, but there will still be repetitive compile attempts happening behind the scenes.
+### `observe` keyword
 
-alternatively, i could store the dependencies of an expression before compiling it. i'm not sure why i stopped doing this. some problem with embed?
+Keeping a uid reference as a value can lead to problems.
 
-then there's four cell states:
-
-* expr located
-  * only update if expr changed
-* dependencies extracted
-  * only update if a dependency changed
-* function compiled
-* value calculated
+Short-term solution: the `observe` keyword can only be used as the first argument of a `stream` or `container` call
 

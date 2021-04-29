@@ -17,7 +17,6 @@ pub struct Environment {
 
   pub cell_exprs : HashMap<CellUid, Expr>,
   pub cell_values : HashMap<CellUid, CellValue>,
-  pub reactive_outputs : HashMap<CellUid, HashSet<CellUid>>,
   pub reactive_cells : HashMap<CellUid, ReactiveCell>,
   pub graph : CellGraph,
 
@@ -34,30 +33,37 @@ pub struct ReactiveCell {
   pub update_handler : *const Function,
 }
 
+#[derive(Copy, Clone, PartialEq)]
+pub enum DependencyType {
+  Code,
+  Value,
+  Reactive,
+}
+
 #[derive(Clone, Default)]
 pub struct CellGraph {
   /// The Uids of symbol dependencies are stored alongside the expression
   /// the Uid was calculated from, because these expressions are sensitive
   /// to namespacing. When the code changes they have to be re-checked in
   /// case they resolve to a different Uid.
-  dependency_graph : HashMap<CellUid, HashSet<CellUid>>,
+  dependency_graph : HashMap<CellUid, HashMap<CellUid, DependencyType>>,
 
   /// The output graph is just the dependency graph inverted
-  output_graph : HashMap<CellUid, HashSet<CellUid>>,
+  output_graph : HashMap<CellUid, HashMap<CellUid, DependencyType>>,
 }
 
 impl CellGraph {
-  pub fn dependencies(&self, uid : CellUid) -> Option<&HashSet<CellUid>> {
+  pub fn dependencies(&self, uid : CellUid) -> Option<&HashMap<CellUid, DependencyType>> {
     self.dependency_graph.get(&uid)
   }
 
-  pub fn outputs(&self, uid : CellUid) -> Option<&HashSet<CellUid>> {
+  pub fn outputs(&self, uid : CellUid) -> Option<&HashMap<CellUid, DependencyType>> {
     self.output_graph.get(&uid)
   }
 
   fn clear_dependencies(&mut self, uid : CellUid) {
     if let Some(deps) = self.dependency_graph.remove(&uid) {
-      for dep_uid in &deps {
+      for dep_uid in deps.keys() {
         if let Some(outputs) = self.output_graph.get_mut(dep_uid) {
           outputs.remove(&uid);
         }
@@ -69,13 +75,14 @@ impl CellGraph {
     self.clear_dependencies(uid);
   }
 
-  pub fn set_cell_dependencies(&mut self, uid : CellUid, deps : HashSet<CellUid>) {
+  pub fn set_cell_dependencies(&mut self, uid : CellUid, deps : HashMap<CellUid, DependencyType>) {
     // make sure any old data is removed
     self.clear_dependencies(uid);
     // add the outputs
-    for &dep_uid in &deps {
-      let outputs = self.output_graph.entry(dep_uid).or_insert_with(|| HashSet::new());
-      outputs.insert(uid);
+    for (&dep_uid, &dep_type) in &deps {
+      let outputs =
+        self.output_graph.entry(dep_uid).or_insert_with(|| HashMap::new());
+      outputs.insert(uid, dep_type);
     }
     self.dependency_graph.insert(uid, deps);
   }
@@ -135,7 +142,6 @@ pub fn unload_cell(mut env : Env, uid : CellUid) {
   }
   env.cell_exprs.remove(&uid);
   env.cell_values.remove(&uid);
-  env.reactive_outputs.remove(&uid);
   env.reactive_cells.remove(&uid);
   env.graph.unload_cell(uid);
 }
@@ -174,7 +180,6 @@ pub fn new_env(st : SymbolTable) -> Env {
     live_exprs: vec![],
     cell_exprs: HashMap::new(),
     cell_values: HashMap::new(),
-    reactive_outputs: HashMap::new(),
     reactive_cells: HashMap::new(),
     graph: Default::default(),
     timers: HashMap::new(),

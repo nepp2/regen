@@ -13,20 +13,9 @@ def create_renderer = fun(window : sdl_window_handle) {
   sdl_create_renderer(window, -1 as i32, SDL_RENDERER_ACCELERATED)
 }
 
-def poll_input = fun(source : ptr void, e : ptr sdl_event, tick : ptr void) {
+def poll_input = fun(e : ptr sdl_event, tick : ptr i64) {
   // TODO: polling the SDL input does not use a window reference, but it should!
   sdl_poll_event(e) == (1 as i32)
-};
-
-def sdl_input_signal = fun() {
-  // the `poll_signal` function defines a new event source
-  poll_signal(
-    tick_signal(1) as signal,          // the sample rate
-    i64,                               // event source type
-    (ref 0) as (ptr void),             // event source
-    sdl_event,                         // event type
-    poll_input as poll_fn_type,        // the polling function
-  )
 };
 
 // one of these pointers will be null
