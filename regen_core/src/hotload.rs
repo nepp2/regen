@@ -1,9 +1,9 @@
 
-use crate::{compile, dependencies::{self, CellDependencies}, env::{self, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
+use crate::{compile, dependencies::{self, CellDependencies}, env::{self, CellIdentifier, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
 
 use std::{alloc::{Layout, alloc}, collections::{HashMap, HashSet}};
 
-use CellUid::*;
+use CellIdentifier::*;
 use event_loop::ReactiveConstructor;
 
 pub type DependencyValues = HashMap<CellUid, CellValue>;
@@ -21,8 +21,8 @@ impl <'l> CompileContext<'l> {
     CompileContext { env, deps }
   }
 
-  pub fn cell_value(&self, uid : CellUid) -> Option<&CellValue> {
-    self.deps.get(&uid)
+  pub fn cell_value(&self, id : CellIdentifier) -> Option<&CellValue> {
+    self.deps.get(&id.uid(self.env))
   }
 }
 
@@ -105,7 +105,8 @@ fn evaluate_cell(
 ) -> bool
 {
   // don't bother compiling if the reactive input hasn't changed
-  if let Some(observe_uid) = deps.observe_ref {
+  if let Some(observe_id) = deps.observe_ref {
+    let observe_uid = observe_id.uid(env);
     if !hs.change_flags.contains_key(&observe_uid) {
       return false;
     }
@@ -118,7 +119,10 @@ fn evaluate_cell(
       dep_values.insert(dep_uid, v);
     }
     else {
-      let e = error(value_expr, format!("dependency {} not found", dep_uid));
+      let e =
+        error(value_expr,
+          format!("{} has dependency {}, but it was not found",
+            uid.id(env), dep_uid.id(env)));
       println!("{}", e.display());
       return false;
     }
@@ -163,7 +167,8 @@ fn register_reactive_cell(
         ptr: alloc_bytes(t.size_of as usize, initial_value),
         initialised: initial_value.is_some(),
       };
-      let ob = ReactiveCell { input: *input, update_handler: poll_function };
+      let input = input.uid(env);
+      let ob = ReactiveCell { input, update_handler: poll_function };
       env.reactive_cells.insert(uid, ob);
       Ok(v)
     }
@@ -225,14 +230,14 @@ fn update_value_expression(
   env.cell_exprs.insert(uid, value_expr);
   // update dependencies
   let mut graph_deps = HashMap::new();
-  if let Some(observe_uid) = deps.observe_ref {
-    graph_deps.insert(observe_uid, DependencyType::Reactive);
+  if let Some(observe_id) = deps.observe_ref {
+    graph_deps.insert(observe_id.uid(env), DependencyType::Reactive);
   }
-  for &dep_uid in &deps.def_refs {
-    graph_deps.insert(dep_uid, DependencyType::Value);
+  for &dep_id in &deps.def_refs {
+    graph_deps.insert(dep_id.uid(env), DependencyType::Value);
   }
   for &e in &deps.const_exprs {
-    let dep_uid = CellUid::ExprCell(e);
+    let dep_uid = CellIdentifier::expr(e).uid(env);
     graph_deps.insert(dep_uid, DependencyType::Code);
   }
   env.graph.set_cell_dependencies(uid, graph_deps);
@@ -297,9 +302,10 @@ fn hotload_cell(
   }
   // Check if this cell has already been visited
   if hs.visited_cells.contains(&uid) {
-    match uid {
+    let id = uid.id(env);
+    match id {
       DefCell(_, _) => {
-        let e = error(value_expr, format!("def {} defined twice!", uid));
+        let e = error(value_expr, format!("def {} defined twice!", id));
         println!("{}", e.display());
         return;
       }
@@ -363,9 +369,9 @@ fn hotload_embedded(
 {
   hotload_cells(env, hs, namespace, embeds);
   for &e in embeds {
-    let uid = CellUid::expr(e);
+    let uid = CellIdentifier::expr(e).uid(env);
     let TODO = (); // handle this better
-    let cv = env.cell_values.get(&uid).unwrap();
+    let cv = get_cell_value(env, hs, uid, true).unwrap();
     if cv.t == env.c.expr_tag {
       let e = unsafe { *(cv.ptr as *const Expr) };
       let deps = dependencies::get_cell_dependencies(env.st, e);
@@ -402,7 +408,7 @@ fn hotload_def(
   let nested_namespace = create_nested_namespace(namespace, name);
   hotload_nested_cells(env, hs, nested_namespace, &deps);
   // hotload the def initialiser
-  let uid = CellUid::def(namespace, name);
+  let uid = CellIdentifier::def(namespace, name).uid(env);
   hotload_cell(env, hs, uid, value_expr, &deps, reactive_cell);
   // update observer
   if let Some(rc) = env.reactive_cells.get(&uid) {
@@ -432,7 +438,7 @@ fn hotload_cells(
         let deps = dependencies::get_cell_dependencies(env.st, e);
         hotload_nested_cells(env, hs, namespace, &deps);
         // hotload the const expression initialiser
-        let uid = CellUid::expr(e);
+        let uid = CellIdentifier::expr(e).uid(env);
         hotload_cell(env, hs, uid, e, &deps, false);
       }
     }

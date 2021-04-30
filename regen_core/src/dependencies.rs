@@ -1,10 +1,10 @@
-use crate::{env::CellUid, parse::{self, Expr, ExprTag, ExprShape}, symbols::{to_symbol, Symbol, SymbolTable}, perm_alloc::{perm_slice_from_vec, perm_slice}};
+use crate::{env::{CellIdentifier}, parse::{self, Expr, ExprTag, ExprShape}, perm_alloc::{perm_slice_from_vec, perm_slice}, symbols::{to_symbol, Symbol, SymbolTable}};
 
 pub struct CellDependencies {
   pub defs : Vec<Expr>,
   pub const_exprs : Vec<Expr>,
-  pub def_refs : Vec<CellUid>,
-  pub observe_ref : Option<CellUid>,
+  pub def_refs : Vec<CellIdentifier>,
+  pub observe_ref : Option<CellIdentifier>,
   pub embeds : Vec<Expr>,
 }
 
@@ -23,12 +23,12 @@ pub fn get_cell_dependencies(st : SymbolTable, expr : Expr) -> CellDependencies 
           return;
         }
         if locals.iter().find(|&l| *l == name).is_none() {
-          let uid = expr_to_uid(expr).unwrap();
+          let uid = expr_to_id(expr).unwrap();
           deps.def_refs.push(uid);
         }
       }
       List(ExprTag::Observe, &[e]) => {
-        if let Some(uid) = expr_to_uid(e) {
+        if let Some(uid) = expr_to_id(e) {
           if deps.observe_ref.is_some() {
             panic!("only permit one observe per definition")
           }
@@ -36,7 +36,7 @@ pub fn get_cell_dependencies(st : SymbolTable, expr : Expr) -> CellDependencies 
         }
       }
       List(ExprTag::Namespace, _) => {
-        if let Some(uid) = expr_to_uid(expr) {
+        if let Some(uid) = expr_to_id(expr) {
           deps.def_refs.push(uid);
         }
       }
@@ -77,7 +77,7 @@ pub fn get_cell_dependencies(st : SymbolTable, expr : Expr) -> CellDependencies 
       List(ExprTag::Container, exprs) => {
         let TODO = (); // temporary hack to get around compiler macro issue
         let sym = to_symbol(st, "create_container");
-        let uid = CellUid::DefCell(perm_slice(&[]), sym);
+        let uid = CellIdentifier::DefCell(perm_slice(&[]), sym);
         deps.def_refs.push(uid);
         for &c in exprs {
           find_nested_cells(st, locals, deps, c);
@@ -86,7 +86,7 @@ pub fn get_cell_dependencies(st : SymbolTable, expr : Expr) -> CellDependencies 
       List(ExprTag::Stream, exprs) => {
         let TODO = (); // temporary hack to get around compiler macro issue
         let sym = to_symbol(st, "create_stream");
-        let uid = CellUid::DefCell(perm_slice(&[]), sym);
+        let uid = CellIdentifier::DefCell(perm_slice(&[]), sym);
         deps.def_refs.push(uid);
         for &c in exprs {
           find_nested_cells(st, locals, deps, c);
@@ -112,12 +112,12 @@ pub fn get_cell_dependencies(st : SymbolTable, expr : Expr) -> CellDependencies 
   deps
 }
 
-pub fn expr_to_uid(e : Expr) -> Option<CellUid> {
-  fn inner(mut names : Vec<Symbol>, e : Expr) -> Option<CellUid> {
+pub fn expr_to_id(e : Expr) -> Option<CellIdentifier> {
+  fn inner(mut names : Vec<Symbol>, e : Expr) -> Option<CellIdentifier> {
     use ExprShape::*;
     match e.shape() {
       Sym(name) => {
-        Some(CellUid::def(perm_slice_from_vec(names), name))
+        Some(CellIdentifier::def(perm_slice_from_vec(names), name))
       }
       List(ExprTag::Namespace, &[name, tail]) => {
         names.push(name.as_symbol());

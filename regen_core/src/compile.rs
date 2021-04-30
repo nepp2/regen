@@ -1,7 +1,7 @@
 
 /// Compiles core language into bytecode
 
-use crate::{bytecode, dependencies, env::{CellUid, CellValue}, error::{Error, err, error}, hotload::CompileContext, parse, perm_alloc, symbols::{self, SymbolTable}, types};
+use crate::{bytecode, dependencies, env::{CellIdentifier, CellValue}, error::{Error, err, error}, hotload::CompileContext, parse, perm_alloc, symbols::{self, SymbolTable}, types};
 
 use bytecode::{
   SequenceHandle, SequenceInfo, InstrExpr, FunctionBytecode,
@@ -768,10 +768,10 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
     }
     // observe
     List(Observe, &[e]) => {
-      let uid = expr_to_uid(e)?;      
-      let cell = get_cell_value(b, e, uid)?;
+      let id = expr_to_id(e)?;      
+      let cell = get_cell_value(b, e, id)?;
       let signal_type = types::poly_type(b.c.signal_tag, cell.t);
-      let uid_ptr = Ptr::to_ptr(perm(uid)) as *const ();
+      let uid_ptr = Ptr::to_ptr(perm(id)) as *const ();
       let ie = InstrExpr::StaticValue(signal_type, uid_ptr);
       let v = push_expr(b, ie, signal_type);
       return Ok(Some(v.to_ref()));
@@ -816,8 +816,8 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
   Ok(None)
 }
 
-fn expr_to_uid(e : Expr) -> Result<CellUid, Error> {
-  dependencies::expr_to_uid(e).ok_or_else(|| error(e, "malformed uid"))
+fn expr_to_id(e : Expr) -> Result<CellIdentifier, Error> {
+  dependencies::expr_to_id(e).ok_or_else(|| error(e, "malformed identifier"))
 }
 
 fn compile_type_literal(b : &mut Builder, t : TypeHandle) -> Var {
@@ -826,7 +826,7 @@ fn compile_type_literal(b : &mut Builder, t : TypeHandle) -> Var {
 }
 
 fn compile_def_reference(b : &mut Builder, e : Expr) -> Result<Ref, Error> {
-  let uid = expr_to_uid(e)?;
+  let uid = expr_to_id(e)?;
   let cell = get_cell_value(b, e, uid)?;
   let e = InstrExpr::StaticValue(cell.t, cell.ptr);
   let pointer_type = types::pointer_type(cell.t);
@@ -851,7 +851,7 @@ fn strip_const_wrapper(e : Expr) -> Result<Expr, Error> {
 }
 
 fn const_expr_value(b : &mut Builder, e : Expr) -> Result<CellValue, Error> {
-  let uid = CellUid::expr(e);
+  let uid = CellIdentifier::expr(e);
   let cell = get_cell_value(b, e, uid)?;
   return Ok(cell);
 }
@@ -1082,14 +1082,14 @@ fn compile_expr_value(b : &mut Builder, expr : Expr) -> Var {
   push_expr(b, e, expr_tag)
 }
 
-fn get_cell_value(b : &mut Builder, e : Expr, uid : CellUid) -> Result<CellValue, Error> {
-  if let Some(v) = b.context.cell_value(uid) {
+fn get_cell_value(b : &mut Builder, e : Expr, id : CellIdentifier) -> Result<CellValue, Error> {
+  if let Some(v) = b.context.cell_value(id) {
     if v.initialised {
       return Ok(*v);
     }
     else {
-      return err(e, format!("cell {} not yet initialised", uid));
+      return err(e, format!("cell {} not yet initialised", id));
     }
   }
-  err(e, format!("no value found for cell {}", uid))
+  err(e, format!("no value found for cell {}", id))
 }

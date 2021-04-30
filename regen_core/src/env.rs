@@ -15,6 +15,13 @@ pub struct RegenValue {
 pub struct Environment {
   pub live_exprs : Vec<Expr>,
 
+  uid_counter : u64,
+
+  /// TODO: these ids are not cleared, so they
+  /// will leak memory over long editing sessions
+  cell_uids : HashMap<CellIdentifier, CellUid>,
+  cell_ids : HashMap<CellUid, CellIdentifier>,
+
   pub cell_exprs : HashMap<CellUid, Expr>,
   // TODO: pub cell_compiles : HashMap<CellUid, CellCompile>,
   pub cell_values : HashMap<CellUid, CellValue>,
@@ -101,13 +108,21 @@ pub type Env = Ptr<Environment>;
 pub type Namespace = SlicePtr<Symbol>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CellUid { 
+pub enum CellIdentifier {
   DefCell(Namespace, Symbol),
   ExprCell(Expr),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct CellUid(u64);
 
-use CellUid::*;
+impl CellUid {
+  pub fn id(self, env : Env) -> CellIdentifier {
+    env.cell_ids[&self]
+  }
+}
+
+use CellIdentifier::*;
 
 #[derive(Clone, Copy)]
 pub struct CellValue {
@@ -120,13 +135,26 @@ pub fn new_namespace(names : &[Symbol]) -> Namespace {
   perm_slice(names)
 }
 
-impl CellUid {
-  pub fn def(namespace : Namespace, name : Symbol) -> CellUid {
-    CellUid::DefCell(namespace, name)
+impl CellIdentifier {
+  pub fn def(namespace : Namespace, name : Symbol) -> CellIdentifier {
+    DefCell(namespace, name)
   }
 
-  pub fn expr(e : Expr) -> CellUid {
-    CellUid::ExprCell(e)
+  pub fn expr(e : Expr) -> CellIdentifier {
+    ExprCell(e)
+  }
+
+  pub fn uid(self, mut env : Env) -> CellUid {
+    if let Some(&uid) = env.cell_uids.get(&self) {
+      uid
+    }
+    else {
+      env.uid_counter += 1;
+      let uid = CellUid(env.uid_counter);
+      env.cell_uids.insert(self, uid);
+      env.cell_ids.insert(uid, self);
+      uid
+    }
   }
 }
 
@@ -136,7 +164,6 @@ pub fn get_cell_value(env : Env, uid : CellUid) -> Option<CellValue> {
 
 pub fn unload_cell(mut env : Env, uid : CellUid) {
   env.cell_exprs.remove(&uid);
-  // TODO: env.cell_compiles.remove(&uid);
   env.graph.unload_cell(uid);
   unload_cell_compile(env, uid);
 }
@@ -148,11 +175,8 @@ pub fn unload_cell_compile(env : Env, uid : CellUid) {
 }
 
 pub fn unload_cell_value(mut env : Env, uid : CellUid) {
-  if let DefCell(_, _) = uid {
-    let el = env.event_loop;
-    if let Some(&id) = env.timers.get(&uid) {
-      event_loop::remove_trigger(el, id);
-    }
+  if let Some(&id) = env.timers.get(&uid) {
+    event_loop::remove_trigger(env.event_loop, id);
     env.timers.remove(&uid);
   }
   env.cell_values.remove(&uid);
@@ -161,16 +185,16 @@ pub fn unload_cell_value(mut env : Env, uid : CellUid) {
 
 pub fn define_global(mut env : Env, s : &str, v : u64, t : TypeHandle) {
   let name = to_symbol(env.st, s);
-  let path = CellUid::def(new_namespace(&[]), name);
-  if env.cell_exprs.contains_key(&path) {
+  let uid = CellIdentifier::def(new_namespace(&[]), name).uid(env);
+  if env.cell_exprs.contains_key(&uid) {
     panic!("def {} already defined", name);
   }
   let layout = std::alloc::Layout::from_size_align(t.size_of as usize, 8).unwrap();
   let ptr = unsafe { std::alloc::alloc(layout) as *mut () };
   let e = env.builtin_dummy_expr;
   let cv = CellValue{ t, ptr, initialised: true };
-  env.cell_exprs.insert(path, e);
-  env.cell_values.insert(path, cv);
+  env.cell_exprs.insert(uid, e);
+  env.cell_values.insert(uid, cv);
   unsafe {
     *(ptr as *mut u64) = v;
   }
@@ -190,7 +214,10 @@ pub fn new_env(st : SymbolTable) -> Env {
   };
 
   let env = perm(Environment {
+    uid_counter: 0,
     live_exprs: vec![],
+    cell_uids:  HashMap::new(),
+    cell_ids:  HashMap::new(),
     cell_exprs: HashMap::new(),
     // TODO: cell_compiles: HashMap::new(),
     cell_values: HashMap::new(),
@@ -206,7 +233,7 @@ pub fn new_env(st : SymbolTable) -> Env {
   env
 }
 
-impl fmt::Display for CellUid {
+impl fmt::Display for CellIdentifier {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
       DefCell(namespace, name) => {

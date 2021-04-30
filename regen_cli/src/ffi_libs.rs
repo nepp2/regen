@@ -1,5 +1,5 @@
 
-use regen_core::{env, env::{CellUid, Env, define_global}, ffi_libs::RegenString, hotload, symbols::{Symbol, to_symbol}, types, types::c_function_type};
+use regen_core::{env, env::{CellIdentifier, Env, define_global}, ffi_libs::RegenString, hotload, symbols::{Symbol, to_symbol}, types, types::c_function_type};
 use std::fs;
 use std::path::Path;
 use std::ffi::CString;
@@ -14,7 +14,8 @@ pub extern "C" fn include(env : Env, file_name : &RegenString) {
   let file_name = file_name.as_str();
   let module_namespace = to_symbol(env.st, "__module");
   let path_symbol = to_symbol(env.st, file_name);
-  let uid = CellUid::def(env::new_namespace(&[module_namespace]), path_symbol);
+  let id = CellIdentifier::def(env::new_namespace(&[module_namespace]), path_symbol);
+  let uid = id.uid(env);
   if env::get_cell_value(env, uid).is_none() {
     let path = format!("{}/{}", LIB_PATH, file_name);
     let code =

@@ -1,12 +1,8 @@
 # TODO
 
 * [x] fix observer triggers
-* [ ] make simple drawing demo work again
-* [ ] optimise CellUid
-  * introduce CellIdentifier
-  * turn them into CellUids (simple numbers)
-  * destroy old CellUids when `unload_cell` is called
-  * is this safe?
+* [x] make simple drawing demo work again
+* [x] optimise CellUid
 * [ ] optimise compilation
   * [ ] divide compilation and evaluation into two passes
   * only recompile if a code dependency changed

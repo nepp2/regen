@@ -3,7 +3,7 @@ use std::{hash::Hash};
 use std::time::{Duration, Instant};
 use std::collections::HashMap;
 
-use crate::{compile::Function, env::{CellUid, Env}, hotload, perm_alloc::{Ptr, perm}, types::TypeHandle};
+use crate::{compile::Function, env::{CellIdentifier, CellUid, Env}, hotload, perm_alloc::{Ptr, perm}, types::TypeHandle};
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct TriggerId(pub u64);
@@ -30,7 +30,7 @@ pub enum UpdateVariant {
   Container,
 }
 
-pub type SignalInput = Ptr<CellUid>;
+pub type SignalInput = Ptr<CellIdentifier>;
 
 #[derive(Copy, Clone)]
 pub struct NativeHook {
