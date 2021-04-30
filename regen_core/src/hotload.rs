@@ -54,8 +54,10 @@ fn is_cell_visible(
     return true;
   }
   // Accept defs that aren't part of the active module
-  if env.cell_exprs[&uid].loc().module.name != hs.active_module {
-    return true;
+  if let Some(e) = env.cell_exprs.get(&uid) {
+    if e.loc().module.name != hs.active_module {
+      return true;
+    }
   }
   false
 }
@@ -119,11 +121,13 @@ fn evaluate_cell(
       dep_values.insert(dep_uid, v);
     }
     else {
-      let e =
-        error(value_expr,
-          format!("{} has dependency {}, but it was not found",
-            uid.id(env), dep_uid.id(env)));
-      println!("{}", e.display());
+      if !is_cell_visible(env, hs, dep_uid) {
+        let e =
+          error(value_expr,
+            format!("{} has dependency {}, but it was not found",
+              uid.id(env), dep_uid.id(env)));
+        println!("{}", e.display());
+      }
       return false;
     }
   }
