@@ -16,7 +16,7 @@ pub struct Environment {
   pub live_exprs : Vec<Expr>,
 
   pub cell_exprs : HashMap<CellUid, Expr>,
-  pub cell_compiles : HashMap<CellUid, CellCompile>,
+  // TODO: pub cell_compiles : HashMap<CellUid, CellCompile>,
   pub cell_values : HashMap<CellUid, CellValue>,
   pub reactive_cells : HashMap<CellUid, ReactiveCell>,
   pub graph : CellGraph,
@@ -28,11 +28,12 @@ pub struct Environment {
   builtin_dummy_expr : Expr,
 }
 
-#[derive(Clone)]
-pub struct CellCompile {
-  pub allocation : RegenValue,
-  pub function : Function,
-}
+// TODO: 
+// #[derive(Clone)]
+// pub struct CellCompile {
+//   pub allocation : RegenValue,
+//   pub function : Function,
+// }
 
 #[derive(Copy, Clone)]
 pub struct ReactiveCell {
@@ -135,13 +136,13 @@ pub fn get_cell_value(env : Env, uid : CellUid) -> Option<CellValue> {
 
 pub fn unload_cell(mut env : Env, uid : CellUid) {
   env.cell_exprs.remove(&uid);
-  env.cell_compiles.remove(&uid);
+  // TODO: env.cell_compiles.remove(&uid);
   env.graph.unload_cell(uid);
   unload_cell_compile(env, uid);
 }
 
-pub fn unload_cell_compile(mut env : Env, uid : CellUid) {
-  env.cell_compiles.remove(&uid);
+pub fn unload_cell_compile(env : Env, uid : CellUid) {
+  // TODO: env.cell_compiles.remove(&uid);
   unload_cell_value(env, uid);
   
 }
@@ -191,7 +192,7 @@ pub fn new_env(st : SymbolTable) -> Env {
   let env = perm(Environment {
     live_exprs: vec![],
     cell_exprs: HashMap::new(),
-    cell_compiles: HashMap::new(),
+    // TODO: cell_compiles: HashMap::new(),
     cell_values: HashMap::new(),
     reactive_cells: HashMap::new(),
     graph: Default::default(),

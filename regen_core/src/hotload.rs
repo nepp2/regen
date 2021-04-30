@@ -1,5 +1,5 @@
 
-use crate::{compile, dependencies::{self, CellDependencies}, env::{self, CellCompile, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
+use crate::{compile, dependencies::{self, CellDependencies}, env::{self, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
 
 use std::{alloc::{Layout, alloc}, collections::{HashMap, HashSet}};
 
@@ -65,16 +65,24 @@ fn calculate_cell_value(
   env : Env,
   uid : CellUid,
   value_expr : Expr,
+  deps : &DependencyValues,
   reactive_cell : bool,
 ) -> Result<CellValue, Error>
 {
-  let cc = env.cell_compiles.get(&uid).unwrap();
+  let ctx = CompileContext::new(env, deps);
+  let function = compile::compile_expr_to_function(&ctx, value_expr)?;
+  let expr_type = types::type_as_function(&function.t).unwrap().returns;
+  // TODO: it's wasteful to allocate for types that are 64bits wide or smaller
+  let ptr = {
+    let layout = std::alloc::Layout::from_size_align(expr_type.size_of as usize, 8).unwrap();
+    unsafe { std::alloc::alloc(layout) as *mut () }
+  };
   std::panic::catch_unwind(|| {
-    interpret::interpret_function(&cc.function, &[], Some(cc.allocation.ptr));
+    interpret::interpret_function(&function, &[], Some(ptr));
   }).map_err(|_| {
     error(value_expr, "regen eval panic!")
   })?;
-  let v = cc.allocation;
+  let v = RegenValue { t: expr_type, ptr };
   let cv = {
     if reactive_cell {
       register_reactive_cell(env, uid, value_expr, v)?
@@ -87,12 +95,13 @@ fn calculate_cell_value(
 }
 
 /// Returns the evaluated expr value, and the cell's resolved dependencies
-fn compile_cell(
+fn evaluate_cell(
   mut env : Env,
   hs : &HotloadState,
   uid : CellUid,
   value_expr : Expr,
   deps : &CellDependencies,
+  reactive_cell : bool,
 ) -> bool
 {
   // don't bother compiling if the reactive input hasn't changed
@@ -114,33 +123,11 @@ fn compile_cell(
       return false;
     }
   }
-  let r = compile_expr(env, value_expr, &dep_values);
+  let r = calculate_cell_value(env, uid, value_expr, &dep_values, reactive_cell);
   match r {
     Ok(cc) => {
-      env.cell_compiles.insert(uid, cc);
+      env.cell_values.insert(uid, cc);
       true
-    }
-    Err(e) => {
-      println!("{}", e.display());
-      false
-    }
-  }
-}
-
-/// Returns the evaluated expr value, and the cell's resolved dependencies
-fn evaluate_cell(
-  mut env : Env,
-  uid : CellUid,
-  value_expr : Expr,
-  reactive_cell : bool,
-) -> bool
-{
-  // load cell value
-  let r = calculate_cell_value(env, uid, value_expr, reactive_cell);
-  match r {
-    Ok(v) => {
-      env.cell_values.insert(uid, v);
-      v.initialised
     }
     Err(e) => {
       println!("{}", e.display());
@@ -220,24 +207,6 @@ fn to_reactive_constructor(env : Env, value_expr : Expr, constructor_val : Regen
   err(value_expr.loc(), format!("expected reactive constructor, found {}", constructor_val.t))
 }
 
-fn compile_expr(
-  env : Env,
-  expr : Expr,
-  deps : &DependencyValues,
-) -> Result<CellCompile, Error>
-{
-  let ctx = CompileContext::new(env, deps);
-  let function = compile::compile_expr_to_function(&ctx, expr)?;
-  let expr_type = types::type_as_function(&function.t).unwrap().returns;
-  // TODO: it's wasteful to allocate for types that are 64bits wide or smaller
-  let ptr = {
-    let layout = std::alloc::Layout::from_size_align(expr_type.size_of as usize, 8).unwrap();
-    unsafe { std::alloc::alloc(layout) as *mut () }
-  };
-  let allocation = RegenValue { t: expr_type, ptr };
-  Ok(CellCompile { allocation, function })
-}
-
 /// returns true if expression changed
 fn update_value_expression(
   mut env : Env,
@@ -314,7 +283,7 @@ fn update_observer(mut env : Env, hs : &mut HotloadState, uid : CellUid, rc : Re
 }
 
 fn hotload_cell(
-  mut env : Env,
+  env : Env,
   hs : &mut HotloadState,
   uid : CellUid,
   value_expr : Expr,
@@ -322,11 +291,16 @@ fn hotload_cell(
   reactive_cell : bool,
 )
 {
+  if hs.root_cell == Some(uid) {
+    // This cell has already been updated
+    return;
+  }
   // Check if this cell has already been visited
   if hs.visited_cells.contains(&uid) {
     match uid {
       DefCell(_, _) => {
-        println!("def {} defined twice!", uid);
+        let e = error(value_expr, format!("def {} defined twice!", uid));
+        println!("{}", e.display());
         return;
       }
       ExprCell(_) => {
@@ -339,8 +313,6 @@ fn hotload_cell(
   if update_value_expression(env, uid, value_expr, deps) {
     requires_recompile = true;
   }
-  // Always update the expr, to keep valid source locations
-  env.cell_exprs.insert(uid, value_expr);
   // Check if this cell has been flagged for change
   if !requires_recompile {
     if let Some(dt) = hs.change_flags.get(&uid) {
@@ -361,10 +333,8 @@ fn hotload_cell(
   // update the cell
   if requires_recompile {
     env::unload_cell_compile(env, uid);
-    if compile_cell(env, hs, uid, value_expr, deps) {
-      if evaluate_cell(env, uid, value_expr, reactive_cell) {
-        mark_outputs(env, hs, uid);
-      }
+    if evaluate_cell(env, hs, uid, value_expr, deps, reactive_cell) {
+      mark_outputs(env, hs, uid);
     }
   }
   hs.visited_cells.insert(uid);
@@ -473,6 +443,7 @@ struct HotloadState {
   active_module : Symbol,
   change_flags : HashMap<CellUid, DependencyType>,
   visited_cells : HashSet<CellUid>,
+  root_cell : Option<CellUid>,
 }
 
 fn dependency_precedence(a : DependencyType, b : DependencyType) -> DependencyType {
@@ -523,6 +494,7 @@ pub fn hotload_live_module(mut env : Env, module_name : &str, code : &str) {
     active_module: module_name,
     change_flags: HashMap::new(),
     visited_cells: HashSet::new(),
+    root_cell: None,
   };
   hotload_module(env, &mut hs, &exprs);
   env.live_exprs = exprs;
@@ -541,6 +513,7 @@ pub fn interpret_module(env : Env, module_name : &str, code : &str) {
     active_module: module_name,
     change_flags: HashMap::new(),
     visited_cells: HashSet::new(),
+    root_cell: None,
   };
   hotload_module(env, &mut hs, &exprs);
 }
@@ -552,8 +525,10 @@ fn cell_updated(env : Env, uid : CellUid) {
     active_module: module_name,
     change_flags: HashMap::new(),
     visited_cells: HashSet::new(),
+    root_cell: Some(uid),
   };
   hs.change_flags.insert(uid, DependencyType::Value);
+  hs.visited_cells.insert(uid);
   mark_outputs(env, &mut hs, uid);
   hotload_module(env, &mut hs, &env.live_exprs);
 }
