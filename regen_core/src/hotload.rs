@@ -308,8 +308,9 @@ fn hotload_cell(
       }
     }
   }
-  let mut requires_recompile = false;
+  hs.visited_cells.insert(uid);
   // Update the value expression
+  let mut requires_recompile = false;
   if update_value_expression(env, uid, value_expr, deps) {
     requires_recompile = true;
   }
@@ -337,7 +338,6 @@ fn hotload_cell(
       mark_outputs(env, hs, uid);
     }
   }
-  hs.visited_cells.insert(uid);
 }
 
 pub fn create_nested_namespace(n : Namespace, name : Symbol) -> Namespace {
