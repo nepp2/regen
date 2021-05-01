@@ -1,5 +1,5 @@
 
-use crate::{compile, dependencies::{self, CellDependencies}, env::{self, CellCompile, CellIdentifier, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
+use crate::{compile, dependencies::{self, CellDependencies}, env::{self, CellCompile, CellIdentifier, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types::{self, TypeHandle}};
 
 use std::{alloc::{Layout, alloc}, collections::{HashMap, HashSet}};
 
@@ -62,13 +62,31 @@ fn is_cell_visible(
   false
 }
 
+enum LinkingStatus {
+  ReuseAllocation,
+  NewAllocation,
+}
+
+fn allocate_cell(env : Env, uid : CellUid, t : TypeHandle)
+  -> (*mut (), LinkingStatus)
+{
+  if let Some(cc) = env.cell_compiles.get(&uid) {
+    if cc.allocation.t.size_of == t.size_of {
+      return (cc.allocation.ptr, LinkingStatus::ReuseAllocation);
+    }
+  }
+  let layout = std::alloc::Layout::from_size_align(t.size_of as usize, 8).unwrap();
+  let ptr = unsafe { std::alloc::alloc(layout) as *mut () };
+  (ptr, LinkingStatus::NewAllocation)
+}
+
 /// Returns the evaluated expr value, and the cell's resolved dependencies
 fn compile_cell(
   mut env : Env,
   hs : &HotloadState,
   uid : CellUid,
   value_expr : Expr,
-) -> bool
+) -> Result<LinkingStatus, Option<Error>>
 {
   // get/check dependency values
   let mut dep_values = HashMap::new();
@@ -83,33 +101,24 @@ fn compile_cell(
           error(value_expr,
             format!("{} has dependency {}, but it was not found",
               uid.id(env), dep_uid.id(env)));
-        println!("{}", e.display());
+        return Err(Some(e));
       }
-      return false;
+      return Err(None);
     }
   }
   // compile the expression
   let ctx = CompileContext::new(env, &dep_values);
   let function = {
-    let r = compile::compile_expr_to_function(&ctx, value_expr);
-    if let Ok(f) = r {
-      perm(f)
-    }
-    else {
-      return false;
-    }
+    let f = compile::compile_expr_to_function(&ctx, value_expr)?;
+    perm(f)
   };
   let expr_type = types::type_as_function(&function.t).unwrap().returns;
-  // TODO: it's wasteful to allocate for types that are 64bits wide or smaller
-  let ptr = {
-    let layout = std::alloc::Layout::from_size_align(expr_type.size_of as usize, 8).unwrap();
-    unsafe { std::alloc::alloc(layout) as *mut () }
-  };
+  let (ptr, link_status) = allocate_cell(env, uid, expr_type);
   env.cell_compiles.insert(uid, CellCompile {
     allocation: RegenValue { t: expr_type, ptr },
     function,
   });
-  true
+  return Ok(link_status)
 }
 
 fn evaluate_cell(
@@ -117,46 +126,30 @@ fn evaluate_cell(
   uid : CellUid,
   value_expr : Expr,
   reactive_cell : bool,
-) -> bool
+) -> Result<(), Option<Error>>
 {
-  fn eval(
-    env : Env,
-    uid : CellUid,
-    value_expr : Expr,
-    reactive_cell : bool,
-  ) -> Result<CellValue, Error> {
-    let cc = env.cell_compiles.get(&uid).unwrap();
-    std::panic::catch_unwind(|| {
-      interpret::interpret_function(
-        Ptr::to_ptr(cc.function),
-        &[],
-        Some(cc.allocation.ptr)
-      );
-    }).map_err(|_| {
-      error(value_expr, "regen eval panic!")
-    })?;
-    let v = cc.allocation;
-    let cv = {
-      if reactive_cell {
-        register_reactive_cell(env, uid, value_expr, v)?
-      }
-      else {
-        CellValue{ t: v.t, ptr: v.ptr, initialised: true }
-      }
-    };
-    Ok(cv)
-  }
-  let r = eval(env, uid, value_expr, reactive_cell);
-  match r {
-    Ok(cc) => {
-      env.cell_values.insert(uid, cc);
-      true
+  env::unload_cell_value(env, uid);
+  let cc = env.cell_compiles.get(&uid).unwrap();
+  std::panic::catch_unwind(|| {
+    interpret::interpret_function(
+      Ptr::to_ptr(cc.function),
+      &[],
+      Some(cc.allocation.ptr)
+    );
+  }).map_err(|_| {
+    error(value_expr, "regen eval panic!")
+  })?;
+  let v = cc.allocation;
+  let cv = {
+    if reactive_cell {
+      register_reactive_cell(env, uid, value_expr, v)?
     }
-    Err(e) => {
-      println!("{}", e.display());
-      false
+    else {
+      CellValue{ t: v.t, ptr: v.ptr, initialised: true }
     }
-  }
+  };
+  env.cell_values.insert(uid, cv);
+  Ok(())
 }
 
 fn register_reactive_cell(
@@ -315,9 +308,24 @@ fn hotload_cell(
   reactive_cell : bool,
 )
 {
+  let r = try_hotload_cell(env, hs, uid, value_expr, deps, reactive_cell);
+  if let Err(Some(e)) = r {
+    println!("{}", e.display());
+  }
+}
+
+fn try_hotload_cell(
+  env : Env,
+  hs : &mut HotloadState,
+  uid : CellUid,
+  value_expr : Expr,
+  deps : &CellDependencies,
+  reactive_cell : bool,
+) -> Result<(), Option<Error>>
+{
   if hs.root_cell == Some(uid) {
     // This cell has already been updated
-    return;
+    return Ok(());
   }
   // Check if this cell has already been visited
   if hs.visited_cells.contains(&uid) {
@@ -325,11 +333,10 @@ fn hotload_cell(
     match id {
       DefCell(_, _) => {
         let e = error(value_expr, format!("def {} defined twice!", id));
-        println!("{}", e.display());
-        return;
+        return Err(Some(e));
       }
       ExprCell(_) => {
-        return;
+        return Ok(());
       }
     }
   }
@@ -368,27 +375,26 @@ fn hotload_cell(
     // don't bother compiling if the reactive input hasn't changed
     let observe_uid = observe_id.uid(env);
     if !hs.change_flags.contains_key(&observe_uid) {
-      return;
+      return Ok(());
     }
   }
   // update the cell
   if update_compile {
-    env::unload_cell_compile(env, uid);
+    let link_status = compile_cell(env, hs, uid, value_expr)?;
+    evaluate_cell(env, uid, value_expr, reactive_cell)?;
+    mark_outputs(env, hs, uid, link_status);
   }
   else if update_value {
-    env::unload_cell_value(env, uid);
-  }
-  if update_compile || update_value {
-    if !env.cell_compiles.contains_key(&uid) {
-      let r = compile_cell(env, hs, uid, value_expr);
-      if !r {
-        return;
-      }
+    let link_status = if !env.cell_compiles.contains_key(&uid) {
+      compile_cell(env, hs, uid, value_expr)?
     }
-    if evaluate_cell(env, uid, value_expr, reactive_cell) {
-      mark_outputs(env, hs, uid);
-    }
+    else {
+      LinkingStatus::ReuseAllocation
+    };
+    evaluate_cell(env, uid, value_expr, reactive_cell)?;
+    mark_outputs(env, hs, uid, link_status);
   }
+  Ok(())
 }
 
 pub fn create_nested_namespace(n : Namespace, name : Symbol) -> Namespace {
@@ -458,7 +464,7 @@ fn hotload_def(
   // update observer
   if let Some(rc) = env.reactive_cells.get(&uid) {
     if update_observer(env, hs, uid, *rc) {
-      mark_outputs(env, hs, uid);
+      mark_outputs(env, hs, uid, LinkingStatus::ReuseAllocation);
     }
   }
 }
@@ -506,17 +512,23 @@ fn dependency_precedence(a : DependencyType, b : DependencyType) -> DependencyTy
   }
 }
 
-fn mark_outputs(env : Env, hs : &mut HotloadState, uid : CellUid) {
-  // this should behave differently if the cell was recompiled
-  // e.g. value & reactive dependencies also need to be recompiled,
-  // because they are linked to an out-of-date pointer
-  let TODO = ();
+fn mark_outputs(
+  env : Env,
+  hs : &mut HotloadState,
+  uid : CellUid,
+  link_status : LinkingStatus,
+) {
   if let Some(outputs) = env.graph.outputs(uid) {
     for (&output_uid, &dt) in outputs {
-      let new_dt = if let Some(&prev_dt) = hs.change_flags.get(&output_uid) {
-        dependency_precedence(dt, prev_dt)
-      }
-      else { dt };
+      let new_dt = match link_status {
+        LinkingStatus::NewAllocation => DependencyType::Code,
+        LinkingStatus::ReuseAllocation => {
+          if let Some(&prev_dt) = hs.change_flags.get(&output_uid) {
+            dependency_precedence(dt, prev_dt)
+          }
+          else { dt }
+        }
+      };
       hs.change_flags.insert(output_uid, new_dt);
     }
   }
@@ -584,7 +596,7 @@ fn cell_updated(env : Env, uid : CellUid) {
   };
   hs.change_flags.insert(uid, DependencyType::Value);
   hs.visited_cells.insert(uid);
-  mark_outputs(env, &mut hs, uid);
+  mark_outputs(env, &mut hs, uid, LinkingStatus::ReuseAllocation);
   hotload_module(env, &mut hs, &env.live_exprs);
 }
 

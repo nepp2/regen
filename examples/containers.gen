@@ -2,36 +2,41 @@
 include(env, ref "examples/lib/prelude.gen");
 include(env, ref "examples/lib/game.gen");
 
-def width = 800;
-def height = 600;
-
-def window = create_game_window("SDL Example", width, height);
-
-def poll_event = fun(tick : ptr tick_event, output_event : ptr sdl_event) {
-  sdl_poll_event(output_event) == (1 as i32)
-};
-
 def game = struct {
   ticker : i64,
 }
 
-def game_update = fun(state : ptr game, e : ptr sdl_event) {
+def width = 800;
+def height = 600;
+
+def window = create_game_window("SDL Test", width, height);
+
+reactive input_tick = create_timer(10);
+
+reactive sdl_input = stream(observe input_tick, poll_sdl_input);
+
+def game_update = fun(state : ptr game, e : ptr game_event) {
   // handle input events
-  if e.event_type == SDL_QUIT {
-    sdl_destroy_window(window);
+  if e.tag == sdl_event_tag {
+    if e.input.event_type == SDL_QUIT {
+      sdl_destroy_window(window);
+    }
   }
-  state.ticker = state.ticker + 4;
-  if state.ticker > 200 {
-    state.ticker = 0;
-  } 
-};
+  // handle time events
+  if e.tag == tick_event_tag {
+    state.ticker = state.ticker + 4;
+    if state.ticker > 400 {
+      state.ticker = 0;
+    } 
+  }
+}
 
 def initial_game_state = init game(0);
 
 def renderer =
   sdl_create_renderer(window, -1 as i32, SDL_RENDERER_ACCELERATED);
 
-def render_game = fun (r : sdl_renderer_handle, event : ptr tick_event) {
+def render_game = fun (r : sdl_renderer_handle, game_state : ptr game) {
   // render
   sdl_set_draw_color(r, 0 as u8, 0 as u8, 0 as u8, 0 as u8);
   sdl_clear(r);
@@ -46,19 +51,26 @@ def render_game = fun (r : sdl_renderer_handle, event : ptr tick_event) {
   sdl_present(r);
 };
 
-reactive tick = create_timer(1);
+reactive frame_tick = create_timer(1000/30);
 
-reactive event = stream(observe tick, poll_event);
+def frame_event = init game_event(tick_event_tag, zero_init sdl_event, frame_tick);
+
+def event = {
+  if sdl_input.tick > frame_event.tick {
+    sdl_input
+  }
+  else {
+    frame_event
+  }
+}
 
 reactive game_state = container(observe event, init game(0), game_update);
 
-reactive render_sample = sampler(
-  tick_signal(1000 / 60),
-  fun(tick : ptr tick_event, output : ptr game) {
-    *output = game_state;
-    true
+reactive render_tick = create_timer(1000 / 60);
+
+reactive render_stream = stream(
+  observe render_tick,
+  fun(v : ptr void, tick : ptr i64) {
+    render_game(renderer, ref game_state);
   }
 );
-
-render_game(renderer, render_sample);
-

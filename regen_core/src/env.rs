@@ -164,13 +164,8 @@ pub fn get_cell_value(env : Env, uid : CellUid) -> Option<CellValue> {
 pub fn unload_cell(mut env : Env, uid : CellUid) {
   env.cell_exprs.remove(&uid);
   env.graph.unload_cell(uid);
-  unload_cell_compile(env, uid);
-}
-
-pub fn unload_cell_compile(mut env : Env, uid : CellUid) {
   env.cell_compiles.remove(&uid);
   unload_cell_value(env, uid);
-  
 }
 
 pub fn unload_cell_value(mut env : Env, uid : CellUid) {

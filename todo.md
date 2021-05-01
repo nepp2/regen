@@ -3,14 +3,11 @@
 * [ ] **solve issue with sample cells**
   * value changes shouldn't trigger stream cells
   * what about container cells?
+  * do I need sample cells, as a concept?
 * [x] fix observer triggers
 * [x] make simple drawing demo work again
 * [x] optimise CellUid
-* [ ] optimise compilation
-  * [x] divide compilation and evaluation into two passes
-  * [ ] **make sure symbols are always re-linked when necessary!**
-  * only recompile if a code dependency changed
-  * otherwise just re-execute previous function
+* [x] optimise compilation
 * [ ] optimise reactive events
 
   * if there are no embeds, record the update sequence

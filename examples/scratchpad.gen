@@ -1,79 +1,8 @@
 
-include(env, ref "examples/lib/prelude.gen");
-include(env, ref "examples/lib/game.gen");
+// test linking thing
 
-def game = struct {
-  ticker : i64,
-}
+def a = 60;
 
-def width = 800;
-def height = 600;
+def b = a + a;
 
-def window = create_game_window("SDL Test", width, height);
-
-reactive input_tick = create_timer(10);
-
-reactive sdl_input = stream(observe input_tick, poll_sdl_input);
-
-def game_update = fun(state : ptr game, e : ptr game_event) {
-  // handle input events
-  if e.tag == sdl_event_tag {
-    if e.input.event_type == SDL_QUIT {
-      sdl_destroy_window(window);
-    }
-  }
-  // handle time events
-  if e.tag == tick_event_tag {
-    state.ticker = state.ticker + 4;
-    if state.ticker > 400 {
-      state.ticker = 0;
-    } 
-  }
-}
-
-def initial_game_state = init game(0);
-
-def renderer =
-  sdl_create_renderer(window, -1 as i32, SDL_RENDERER_ACCELERATED);
-
-def render_game = fun (r : sdl_renderer_handle, game_state : ptr game) {
-  // render
-  sdl_set_draw_color(r, 0 as u8, 0 as u8, 0 as u8, 0 as u8);
-  sdl_clear(r);
-
-  sdl_set_draw_color(r, 255 as u8, 0 as u8, 0 as u8, 255 as u8);
-
-  let x = 50 + game_state.ticker;
-
-  let rect = init sdl_rect(x as i32, 50 as i32, 300 as i32, 200 as i32);
-
-  sdl_fill_rect(r, ref rect);
-  sdl_present(r);
-};
-
-reactive frame_tick = create_timer(1000/30);
-
-def frame_event = init game_event(tick_event_tag, zero_init sdl_event, frame_tick);
-
-def event = {
-  if sdl_input.tick > frame_event.tick {
-    sdl_input
-  }
-  else {
-    frame_event
-  }
-}
-
-reactive game_state = container(observe event, init game(0), game_update);
-
-reactive render_tick = create_timer(1000 / 60);
-
-reactive render_sample = stream(
-  observe render_tick,
-  fun(sample : ptr game, tick : ptr i64) {
-    *sample = game_state;
-    true
-  }
-);
-
-render_game(renderer, ref render_sample);
+print b;
