@@ -68,16 +68,8 @@ fn compile_cell(
   hs : &HotloadState,
   uid : CellUid,
   value_expr : Expr,
-  deps : &CellDependencies,
 ) -> bool
 {
-  // don't bother compiling if the reactive input hasn't changed
-  if let Some(observe_id) = deps.observe_ref {
-    let observe_uid = observe_id.uid(env);
-    if !hs.change_flags.contains_key(&observe_uid) {
-      return false;
-    }
-  }
   // get/check dependency values
   let mut dep_values = HashMap::new();
   for &dep_uid in env.graph.dependencies(uid).unwrap().keys() {
@@ -343,34 +335,58 @@ fn hotload_cell(
   }
   hs.visited_cells.insert(uid);
   // Update the value expression
-  let mut requires_recompile = false;
+  use DependencyType::*;
+  let mut update_compile = false;
+  let mut update_value = false;
   if update_value_expression(env, uid, value_expr, deps) {
-    requires_recompile = true;
+    update_compile = true;
   }
   // Check if this cell has been flagged for change
-  if !requires_recompile {
+  if !update_compile {
     if let Some(dt) = hs.change_flags.get(&uid) {
       match dt {
-        DependencyType::Code | DependencyType::Value => {
-          requires_recompile = true;
+        Code => {
+          update_compile = true;
         }
-        DependencyType::Reactive => {
+        Value => {
+          update_value = true;
+        }
+        Reactive => {
           // reactive changes only trigger cell value
           // updates when the cell hasn't been evaluated yet
           if get_cell_value(env, hs, uid, false).is_none() {
-            requires_recompile = true;
-          }        
+            update_value = true;
+          }
         }
       }
     }
   }
+  if let Some(observe_id) = deps.observe_ref {
+    // value changes shouldn't affect stream cells
+    // what about container cells??
+    let TODO = ();
+    // don't bother compiling if the reactive input hasn't changed
+    let observe_uid = observe_id.uid(env);
+    if !hs.change_flags.contains_key(&observe_uid) {
+      return;
+    }
+  }
   // update the cell
-  if requires_recompile {
+  if update_compile {
     env::unload_cell_compile(env, uid);
-    if compile_cell(env, hs, uid, value_expr, deps) {
-      if evaluate_cell(env, uid, value_expr, reactive_cell) {
-        mark_outputs(env, hs, uid);
+  }
+  else if update_value {
+    env::unload_cell_value(env, uid);
+  }
+  if update_compile || update_value {
+    if !env.cell_compiles.contains_key(&uid) {
+      let r = compile_cell(env, hs, uid, value_expr);
+      if !r {
+        return;
       }
+    }
+    if evaluate_cell(env, uid, value_expr, reactive_cell) {
+      mark_outputs(env, hs, uid);
     }
   }
 }
@@ -491,6 +507,10 @@ fn dependency_precedence(a : DependencyType, b : DependencyType) -> DependencyTy
 }
 
 fn mark_outputs(env : Env, hs : &mut HotloadState, uid : CellUid) {
+  // this should behave differently if the cell was recompiled
+  // e.g. value & reactive dependencies also need to be recompiled,
+  // because they are linked to an out-of-date pointer
+  let TODO = ();
   if let Some(outputs) = env.graph.outputs(uid) {
     for (&output_uid, &dt) in outputs {
       let new_dt = if let Some(&prev_dt) = hs.change_flags.get(&output_uid) {

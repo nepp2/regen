@@ -104,9 +104,12 @@ reactive render_sample = stream(
   observe render_tick,
   fun(sample : ptr game, tick : ptr i64) {
     *sample = game_state;
+    print sample.ticker;
     true
   }
 );
+
+print render_sample.ticker;
 
 render_game(renderer, ref render_sample);
 

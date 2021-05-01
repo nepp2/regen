@@ -1,10 +1,14 @@
 # TODO
 
+* [ ] **solve issue with sample cells**
+  * value changes shouldn't trigger stream cells
+  * what about container cells?
 * [x] fix observer triggers
 * [x] make simple drawing demo work again
 * [x] optimise CellUid
 * [ ] optimise compilation
-  * [ ] divide compilation and evaluation into two passes
+  * [x] divide compilation and evaluation into two passes
+  * [ ] **make sure symbols are always re-linked when necessary!**
   * only recompile if a code dependency changed
   * otherwise just re-execute previous function
 * [ ] optimise reactive events
