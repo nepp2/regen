@@ -1,38 +1,6 @@
 
 include(env, ref "examples/lib/prelude.gen");
-include(env, ref "examples/lib/sdl2.gen");
-
-def create_game_window = fun(title : string, width : i64, height : i64) {
-  sdl_init(SDL_INIT_VIDEO);
-  sdl_create_window(
-    title.data, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-    width as i32, height as i32, SDL_WINDOW_SHOWN)
-};
-
-def create_renderer = fun(window : sdl_window_handle) {
-  sdl_create_renderer(window, -1 as i32, SDL_RENDERER_ACCELERATED)
-}
-
-def tick_event_tag = 1;
-def sdl_event_tag = 2;
-
-// one of these pointers will be null
-def game_event = struct {
-  tag : i64,
-  input : sdl_event,
-  tick : i64,
-};
-
-def poll_sdl_input = fun(ge : ptr game_event, tick : ptr i64) {
-  let e = zero_init sdl_event;
-  if sdl_poll_event(ref e) == (1 as i32) {
-    *ge = init game_event(sdl_event_tag, e, *tick);
-    true
-  }
-  else {
-    false
-  }
-};
+include(env, ref "examples/lib/game.gen");
 
 def game = struct {
   ticker : i64,
@@ -104,14 +72,8 @@ reactive render_sample = stream(
   observe render_tick,
   fun(sample : ptr game, tick : ptr i64) {
     *sample = game_state;
-    print sample.ticker;
     true
   }
 );
 
-print render_sample.ticker;
-
 render_game(renderer, ref render_sample);
-
-
-

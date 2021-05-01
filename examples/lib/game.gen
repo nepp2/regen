@@ -8,36 +8,27 @@ def create_game_window = fun(title : string, width : i64, height : i64) {
     width as i32, height as i32, SDL_WINDOW_SHOWN)
 };
 
-
 def create_renderer = fun(window : sdl_window_handle) {
   sdl_create_renderer(window, -1 as i32, SDL_RENDERER_ACCELERATED)
 }
 
-def poll_input = fun(e : ptr sdl_event, tick : ptr i64) {
-  // TODO: polling the SDL input does not use a window reference, but it should!
-  sdl_poll_event(e) == (1 as i32)
-};
+def tick_event_tag = 1;
+def sdl_event_tag = 2;
 
 // one of these pointers will be null
 def game_event = struct {
-  input : ptr sdl_event,
-  tick : ptr tick_event,
+  tag : i64,
+  input : sdl_event,
+  tick : i64,
 };
 
-def input_to_game_event = fun(output : ptr game_event, input_event : ptr sdl_event) {
-  let e =
-    init game_event(input_event, 0 as ptr tick_event);
-  *output = e;
-};
-
-def tick_to_game_event = fun(output : ptr game_event, tick : ptr tick_event) {
-  let e  =
-    init game_event(0 as ptr sdl_event, tick);
-  *output = e;
-};
-
-def game_input_signal = fun(input_signal : signal, tick_signal : tick_event_signal) {
-  let input = map_signal(input_signal, game_event, input_to_game_event as map_fn_type);
-  let ticks = map_signal(tick_signal as signal, game_event, tick_to_game_event as map_fn_type);
-  merge_signal(input, ticks, game_event)
+def poll_sdl_input = fun(ge : ptr game_event, tick : ptr i64) {
+  let e = zero_init sdl_event;
+  if sdl_poll_event(ref e) == (1 as i32) {
+    *ge = init game_event(sdl_event_tag, e, *tick);
+    true
+  }
+  else {
+    false
+  }
 };
