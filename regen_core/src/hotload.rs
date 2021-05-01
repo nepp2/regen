@@ -1,5 +1,5 @@
 
-use crate::{compile, dependencies::{self, CellDependencies}, env::{self, CellIdentifier, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
+use crate::{compile, dependencies::{self, CellDependencies}, env::{self, CellCompile, CellIdentifier, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types};
 
 use std::{alloc::{Layout, alloc}, collections::{HashMap, HashSet}};
 
@@ -62,48 +62,13 @@ fn is_cell_visible(
   false
 }
 
-/// Returns the evaluated expr value
-fn calculate_cell_value(
-  env : Env,
-  uid : CellUid,
-  value_expr : Expr,
-  deps : &DependencyValues,
-  reactive_cell : bool,
-) -> Result<CellValue, Error>
-{
-  let ctx = CompileContext::new(env, deps);
-  let function = compile::compile_expr_to_function(&ctx, value_expr)?;
-  let expr_type = types::type_as_function(&function.t).unwrap().returns;
-  // TODO: it's wasteful to allocate for types that are 64bits wide or smaller
-  let ptr = {
-    let layout = std::alloc::Layout::from_size_align(expr_type.size_of as usize, 8).unwrap();
-    unsafe { std::alloc::alloc(layout) as *mut () }
-  };
-  std::panic::catch_unwind(|| {
-    interpret::interpret_function(&function, &[], Some(ptr));
-  }).map_err(|_| {
-    error(value_expr, "regen eval panic!")
-  })?;
-  let v = RegenValue { t: expr_type, ptr };
-  let cv = {
-    if reactive_cell {
-      register_reactive_cell(env, uid, value_expr, v)?
-    }
-    else {
-      CellValue{ t: v.t, ptr: v.ptr, initialised: true }
-    }
-  };
-  Ok(cv)
-}
-
 /// Returns the evaluated expr value, and the cell's resolved dependencies
-fn evaluate_cell(
+fn compile_cell(
   mut env : Env,
   hs : &HotloadState,
   uid : CellUid,
   value_expr : Expr,
   deps : &CellDependencies,
-  reactive_cell : bool,
 ) -> bool
 {
   // don't bother compiling if the reactive input hasn't changed
@@ -131,7 +96,65 @@ fn evaluate_cell(
       return false;
     }
   }
-  let r = calculate_cell_value(env, uid, value_expr, &dep_values, reactive_cell);
+  // compile the expression
+  let ctx = CompileContext::new(env, &dep_values);
+  let function = {
+    let r = compile::compile_expr_to_function(&ctx, value_expr);
+    if let Ok(f) = r {
+      perm(f)
+    }
+    else {
+      return false;
+    }
+  };
+  let expr_type = types::type_as_function(&function.t).unwrap().returns;
+  // TODO: it's wasteful to allocate for types that are 64bits wide or smaller
+  let ptr = {
+    let layout = std::alloc::Layout::from_size_align(expr_type.size_of as usize, 8).unwrap();
+    unsafe { std::alloc::alloc(layout) as *mut () }
+  };
+  env.cell_compiles.insert(uid, CellCompile {
+    allocation: RegenValue { t: expr_type, ptr },
+    function,
+  });
+  true
+}
+
+fn evaluate_cell(
+  mut env : Env,
+  uid : CellUid,
+  value_expr : Expr,
+  reactive_cell : bool,
+) -> bool
+{
+  fn eval(
+    env : Env,
+    uid : CellUid,
+    value_expr : Expr,
+    reactive_cell : bool,
+  ) -> Result<CellValue, Error> {
+    let cc = env.cell_compiles.get(&uid).unwrap();
+    std::panic::catch_unwind(|| {
+      interpret::interpret_function(
+        Ptr::to_ptr(cc.function),
+        &[],
+        Some(cc.allocation.ptr)
+      );
+    }).map_err(|_| {
+      error(value_expr, "regen eval panic!")
+    })?;
+    let v = cc.allocation;
+    let cv = {
+      if reactive_cell {
+        register_reactive_cell(env, uid, value_expr, v)?
+      }
+      else {
+        CellValue{ t: v.t, ptr: v.ptr, initialised: true }
+      }
+    };
+    Ok(cv)
+  }
+  let r = eval(env, uid, value_expr, reactive_cell);
   match r {
     Ok(cc) => {
       env.cell_values.insert(uid, cc);
@@ -344,8 +367,10 @@ fn hotload_cell(
   // update the cell
   if requires_recompile {
     env::unload_cell_compile(env, uid);
-    if evaluate_cell(env, hs, uid, value_expr, deps, reactive_cell) {
-      mark_outputs(env, hs, uid);
+    if compile_cell(env, hs, uid, value_expr, deps) {
+      if evaluate_cell(env, uid, value_expr, reactive_cell) {
+        mark_outputs(env, hs, uid);
+      }
     }
   }
 }
