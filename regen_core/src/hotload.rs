@@ -248,6 +248,10 @@ fn update_value_expression(
   for &dep_id in &deps.def_refs {
     graph_deps.insert(dep_id.uid(env), DependencyType::Value);
   }
+  for &e in &deps.embeds {
+    let dep_uid = CellIdentifier::expr(e).uid(env);
+    graph_deps.insert(dep_uid, DependencyType::Code);
+  }
   for &e in &deps.const_exprs {
     let dep_uid = CellIdentifier::expr(e).uid(env);
     graph_deps.insert(dep_uid, DependencyType::Code);
@@ -421,15 +425,16 @@ fn hotload_embedded(
   hotload_cells(env, hs, namespace, embeds);
   for &e in embeds {
     let uid = CellIdentifier::expr(e).uid(env);
-    let TODO = (); // handle this better
-    let cv = get_cell_value(env, hs, uid, true).unwrap();
-    if cv.t == env.c.expr_tag {
-      let e = unsafe { *(cv.ptr as *const Expr) };
-      let deps = dependencies::get_cell_dependencies(env.st, e);
-      hotload_nested_cells(env, hs, namespace, &deps);
-    }
-    else {
-      println!("expected expression of type 'expr', found {}", cv.t);
+    if let Some(cv) = get_cell_value(env, hs, uid, true) {
+      if cv.t == env.c.expr_tag {
+        let e = unsafe { *(cv.ptr as *const Expr) };
+        let deps = dependencies::get_cell_dependencies(env.st, e);
+        hotload_nested_cells(env, hs, namespace, &deps);
+      }
+      else {
+        let e = error(e, format!("expected expression of type 'expr', found {}", cv.t));
+        println!("{}", e.display());
+      }
     }
   }
 }

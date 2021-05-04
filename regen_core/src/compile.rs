@@ -1091,5 +1091,5 @@ fn get_cell_value(b : &mut Builder, e : Expr, id : CellIdentifier) -> Result<Cel
       return err(e, format!("cell {} not yet initialised", id));
     }
   }
-  err(e, format!("no value found for cell {}", id))
+  err(e, format!("no value found for cell"))
 }
