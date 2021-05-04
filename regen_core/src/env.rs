@@ -1,6 +1,6 @@
 use crate::{compile::Function, event_loop::{self, EventLoop, TriggerId}, ffi_libs::*, parse::{self, CodeModule, Expr, ExprContent, ExprTag, SrcLocation, Val}, perm_alloc::{Ptr, SlicePtr, perm, perm_slice}, symbols::{Symbol, SymbolTable, to_symbol}, types::{TypeHandle, CoreTypes, core_types }};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 /// A heap allocated Regen value
@@ -25,6 +25,7 @@ pub struct Environment {
   pub cell_exprs : HashMap<CellUid, Expr>,
   pub cell_compiles : HashMap<CellUid, CellCompile>,
   pub cell_values : HashMap<CellUid, CellValue>,
+  pub broken_cells : HashSet<CellUid>,
   pub reactive_cells : HashMap<CellUid, ReactiveCell>,
   pub graph : CellGraph,
 
@@ -35,7 +36,7 @@ pub struct Environment {
   builtin_dummy_expr : Expr,
 }
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub struct CellCompile {
   pub allocation : RegenValue,
   pub function : Ptr<Function>,
@@ -47,7 +48,7 @@ pub struct ReactiveCell {
   pub update_handler : *const Function,
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum DependencyType {
   Code,
   Value,
@@ -165,6 +166,7 @@ pub fn unload_cell(mut env : Env, uid : CellUid) {
   env.cell_exprs.remove(&uid);
   env.graph.unload_cell(uid);
   env.cell_compiles.remove(&uid);
+  env.broken_cells.remove(&uid);
   unload_cell_value(env, uid);
 }
 
@@ -215,6 +217,7 @@ pub fn new_env(st : SymbolTable) -> Env {
     cell_exprs: HashMap::new(),
     cell_compiles: HashMap::new(),
     cell_values: HashMap::new(),
+    broken_cells : HashSet::new(),
     reactive_cells: HashMap::new(),
     graph: Default::default(),
     timers: HashMap::new(),

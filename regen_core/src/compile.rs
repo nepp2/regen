@@ -107,6 +107,7 @@ pub struct Ref {
   ref_type : RefType,
   t : TypeHandle,
   mutable : bool,
+  loc : SrcLocation,
 }
 
 type ExprResult = Option<Ref>;
@@ -114,7 +115,12 @@ type ExprResult = Option<Ref>;
 impl Ref {
 
   fn from_var(local : Var) -> Self {
-    Ref{ ref_type: RefType::Value(local.id), t: local.t, mutable: local.mutable }
+    Ref{
+      ref_type: RefType::Value(local.id),
+      t: local.t,
+      mutable: local.mutable,
+      loc: local.loc,
+    }
   }
 
   fn get_address(&self, b : &mut Builder) -> Var {
@@ -122,25 +128,31 @@ impl Ref {
     let id = match self.ref_type {
       RefType::Locator(id) => id,
       RefType::Value(id) => {
-        let e = InstrExpr::LocalAddr(id);
+        let ie = InstrExpr::LocalAddr(id);
         let addr_id = new_local(b, None, t, self.mutable);
-        b.bc.instrs.push(Instr::Expr(addr_id, e));
+        b.bc.instrs.push(Instr::Expr(addr_id, ie));
         addr_id
       }
     };
-    Var { id, t: t, mutable: self.mutable }
+    Var {
+      id,
+      t: t,
+      mutable: self.mutable,
+      loc: self.loc,
+    }
   }
   
   fn to_var(&self, b : &mut Builder) -> Var {
     match self.ref_type {
       RefType::Locator(r) => {
-        let e = InstrExpr::Load(r);
-        push_expr(b, e, self.t)
+        let ie = InstrExpr::Load(r);
+        push_expr(b, self.loc, ie, self.t)
       }
       RefType::Value(r) => Var {
         id: r,
         t: self.t,
         mutable: self.mutable,
+        loc: self.loc,
       },
     }
   }
@@ -151,6 +163,7 @@ struct Var {
   id : LocalHandle,
   t : TypeHandle,
   mutable : bool,
+  loc : SrcLocation,
 }
 
 impl Var {
@@ -177,9 +190,11 @@ fn find_var_in_scope(b : &mut Builder, name : Symbol)
   None
 }
 
-fn new_local_variable(b : &mut Builder, name : Symbol, t : TypeHandle) -> Var {
+fn new_local_variable<L>(b : &mut Builder, name : Symbol, t : TypeHandle, loc : L) -> Var
+  where L : Into<SrcLocation>
+{
   let id = new_local(b, Some(name), t, true);
-  let v = Var { id, t: t, mutable: true };
+  let v = Var { id, t: t, mutable: true, loc: loc.into() };
   b.scoped_vars.push(NamedVar{ name, v });
   v
 }
@@ -197,24 +212,31 @@ fn new_local(b : &mut Builder, name : Option<Symbol>, t : TypeHandle, mutable : 
   lh
 }
 
-fn new_var(b : &mut Builder, t : TypeHandle, mutable : bool) -> Var {
+fn new_var<L>(b : &mut Builder, t : TypeHandle, mutable : bool, loc : L) -> Var
+  where L : Into<SrcLocation>
+{
   let id = new_local(b, None, t, mutable);
-  Var { id, t: t, mutable }
+  Var { id, t: t, mutable, loc: loc.into() }
 }
 
-fn push_expr(b : &mut Builder, e : InstrExpr, t : TypeHandle) -> Var {
-  let v = new_var(b, t, false);
-  b.bc.instrs.push(Instr::Expr(v.id, e));
+fn push_expr<L>(b : &mut Builder, loc : L, ie : InstrExpr, t : TypeHandle) -> Var
+  where L : Into<SrcLocation>
+{
+  let v = new_var(b, t, false, loc.into());
+  b.bc.instrs.push(Instr::Expr(v.id, ie));
   return v;
 }
 
-fn pointer_to_locator(v : Var, mutable : bool) -> Ref {
-  let inner = types::deref_pointer_type(v.t).expect("expected pointer type");
-  Ref {
+fn pointer_to_locator(v : Var, mutable : bool) -> Result<Ref, Error> {
+  let inner = types::deref_pointer_type(v.t)
+    .ok_or_else(|| error(v.loc, "expected pointer type"))?;
+  let r = Ref {
     ref_type: RefType::Locator(v.id),
     t: inner,
     mutable,
-  }
+    loc: v.loc,
+  };
+  Ok(r)
 }
 
 fn find_label<'a>(b : &'a mut Builder, label : Expr) -> Result<&'a LabelledExpr, Error> {
@@ -278,13 +300,6 @@ fn complete_function(mut b : Builder) -> FunctionBytecode {
   b.bc
 }
 
-fn function_to_var(b : &mut Builder, f : Function) -> Var {
-  let function_var = new_var(b, f.t, false);
-  let f_addr = Box::into_raw(Box::new(f)) as i64;
-  b.bc.instrs.push(Instr::Expr(function_var.id, InstrExpr::LiteralI64(f_addr)));
-  function_var
-}
-
 fn compile_function_def(
   context : &CompileContext,
   c : &CoreTypes,
@@ -297,10 +312,10 @@ fn compile_function_def(
   let mut b = Builder::new(context, c, st);
   b.bc.args = args.len();
   let mut arg_types = vec![];
-  for a in args {
+  for &a in args {
     if let Some(&[name, tag]) = a.as_syntax() {
       let t = const_expr_to_type(&mut b, tag)?;
-      new_local_variable(&mut b, name.as_symbol(), t);
+      new_local_variable(&mut b, name.as_symbol(), t, a);
       arg_types.push(t);
     }
     else {
@@ -361,7 +376,7 @@ fn compile_if_else(
   set_current_sequence(b, then_seq);
   let then_result = compile_expr(b, then_expr)?;
   if let Some(v) = then_result {
-    let nv = new_var(b, v.t, true).to_ref();
+    let nv = new_var(b, v.t, true, then_expr).to_ref();
     result_var = Some(nv);
     let v = v.to_var(b);
     compile_assignment(b, then_expr, nv, v)?;
@@ -402,7 +417,7 @@ fn compile_and_fully_deref(b : &mut Builder, e : Expr) -> Result<Ref, Error> {
   let mut r = compile_expr_to_ref(b, e)?;
   while r.t.kind == Kind::Pointer {
     let v = r.to_var(b);
-    r = pointer_to_locator(v, r.mutable);
+    r = pointer_to_locator(v, r.mutable)?;
   }
   Ok(r)
 }
@@ -430,19 +445,18 @@ fn assert_type<L : Into<SrcLocation>>(loc : L, t : TypeHandle, expected : TypeHa
   Ok(())
 }
 
-fn compile_cast<L>(b : &mut Builder, loc : L, v : Var, t : TypeHandle)
+fn compile_cast(b : &mut Builder, v : Var, t : TypeHandle)
   -> Result<Var, Error>
-    where L : Into<SrcLocation>
 {
   fn ptr_or_prim(t : TypeHandle) -> bool {
     t.kind == Kind::Pointer || t.kind == Kind::Primitive
   }
   if t.size_of != v.t.size_of {
     if !(ptr_or_prim(t) && ptr_or_prim(v.t)) {
-      return err(loc, format!("cannot cast from {} to {}", v.t, t));
+      return err(v.loc, format!("cannot cast from {} to {}", v.t, t));
     }
   }
-  Ok(push_expr(b, InstrExpr::Cast(v.id), t))
+  Ok(push_expr(b, v.loc, InstrExpr::Cast(v.id), t))
 }
 
 fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
@@ -487,8 +501,8 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
     // boolean
     Literal(Val::Bool(v)) => {
       let lit_expr = InstrExpr::LiteralI64(if v { 1 } else { 0 });
-      let v = push_expr(b, lit_expr, b.c.u64_tag);
-      return Ok(Some(compile_cast(b, e, v, b.c.bool_tag)?.to_ref()));
+      let v = push_expr(b, e, lit_expr, b.c.u64_tag);
+      return Ok(Some(compile_cast(b, v, b.c.bool_tag)?.to_ref()));
     }
     // local or global reference
     Sym(sym) => {
@@ -507,26 +521,26 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
       let e = strip_const_wrapper(e)?;
       let cev = const_expr_value(b, e)?;
       let ie = InstrExpr::StaticValue(cev.t, cev.ptr);
-      let v = push_expr(b, ie, types::pointer_type(cev.t));
-      return Ok(Some(pointer_to_locator(v, false)));
+      let v = push_expr(b, e, ie, types::pointer_type(cev.t));
+      return Ok(Some(pointer_to_locator(v, false)?));
     }
     // literal i64
     Literal(Val::I64(v)) => {
-      let e = InstrExpr::LiteralI64(v);
-      return Ok(Some(push_expr(b, e, b.c.i64_tag).to_ref()));
+      let ie = InstrExpr::LiteralI64(v);
+      return Ok(Some(push_expr(b, e, ie, b.c.i64_tag).to_ref()));
     }
     // literal string
     Literal(Val::String(s)) => {
       let t = types::pointer_type(b.c.string_tag);
-      let e = InstrExpr::StaticValue(t, Ptr::to_ptr(s) as *const ());
-      let v = push_expr(b, e, t);
-      return Ok(Some(pointer_to_locator(v, false)));
+      let ie = InstrExpr::StaticValue(t, Ptr::to_ptr(s) as *const ());
+      let v = push_expr(b, e, ie, t);
+      return Ok(Some(pointer_to_locator(v, false)?));
     }
     // literal symbol
     List(LiteralSymbol, &[sym]) => {
       let s = sym.as_symbol();
-      let e = InstrExpr::LiteralI64(s.as_i64());
-      return Ok(Some(push_expr(b, e, b.c.symbol_tag).to_ref()));
+      let ie = InstrExpr::LiteralI64(s.as_i64());
+      return Ok(Some(push_expr(b, e, ie, b.c.symbol_tag).to_ref()));
     }
     // literal void
     Literal(Val::Void) => {
@@ -534,21 +548,21 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
     }
     // array
     List(ArrayInit, elements) => {
-      let e = compile_expr_to_var(b, elements[0])?;
-      let element_type = e.t;
-      let mut element_values = vec![e.id];
-      for e in &elements[1..] {
-        let v = compile_expr_to_var(b, *e)?;
+      let first_el = compile_expr_to_var(b, elements[0])?;
+      let element_type = first_el.t;
+      let mut element_values = vec![first_el.id];
+      for &el in &elements[1..] {
+        let v = compile_expr_to_var(b, el)?;
         if v.t != element_type {
-          return err(e,
+          return err(el,
             format!("expected element of type {} and found type {}",
               element_type, v.t));
         }
         element_values.push(v.id);
       }
       let t = types::array_type(element_type, elements.len() as i64);
-      let e = InstrExpr::Array(perm_slice_from_vec(element_values));
-      return Ok(Some(push_expr(b, e, t).to_ref()))
+      let ie = InstrExpr::Array(perm_slice_from_vec(element_values));
+      return Ok(Some(push_expr(b, e, ie, t).to_ref()))
     }
     // array length
     List(ArrayAsSlice, &[array]) => {
@@ -558,11 +572,11 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
         .ok_or_else(|| error(array, "expected array"))?;
       let array_ptr = r.get_address(b);
       let element_ptr_type = types::pointer_type(info.inner);
-      let ptr = compile_cast(b, array, array_ptr, element_ptr_type)?;
+      let ptr = compile_cast(b, array_ptr, element_ptr_type)?;
       let len = compile_array_len(b, array)?;
-      let e = InstrExpr::Init(perm_slice(&[ptr.id, len.id]));
+      let ie = InstrExpr::Init(perm_slice(&[ptr.id, len.id]));
       let t = types::slice_type(&b.c, b.st, info.inner);
-      return Ok(Some(push_expr(b, e, t).to_ref()))
+      return Ok(Some(push_expr(b, e, ie, t).to_ref()))
     }
     // array length
     List(ArrayLen, &[array]) => {
@@ -579,24 +593,24 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
       };
       let array_ptr = v.get_address(b);
       let element_ptr_type = types::pointer_type(info.inner);
-      let ptr = compile_cast(b, array, array_ptr, element_ptr_type)?;
+      let ptr = compile_cast(b, array_ptr, element_ptr_type)?;
       let offset = compile_expr_to_var(b, index)?.id;
-      let e = InstrExpr::PtrOffset { ptr: ptr.id, offset };
-      let ptr = push_expr(b, e, ptr.t);
-      return Ok(Some(pointer_to_locator(ptr, true)));
+      let ie = InstrExpr::PtrOffset { ptr: ptr.id, offset };
+      let ptr = push_expr(b, e, ie, ptr.t);
+      return Ok(Some(pointer_to_locator(ptr, true)?));
     }
     // ptr index
     List(PtrIndex, &[ptr, index]) => {
       let ptr = compile_expr_to_var(b, ptr)?;
       let offset = compile_expr_to_var(b, index)?.id;
-      let e = InstrExpr::PtrOffset { ptr: ptr.id, offset };
-      let ptr = push_expr(b, e, ptr.t);
-      return Ok(Some(pointer_to_locator(ptr, true)));
+      let ie = InstrExpr::PtrOffset { ptr: ptr.id, offset };
+      let ptr = push_expr(b, e, ie, ptr.t);
+      return Ok(Some(pointer_to_locator(ptr, true)?));
     }
     // zero init
     List(ZeroInit, &[t]) => {
       let t = const_expr_to_type(b, t)?;
-      return Ok(Some(push_expr(b, InstrExpr::ZeroInit, t).to_ref()));
+      return Ok(Some(push_expr(b, e, InstrExpr::ZeroInit, t).to_ref()));
     }
     // init
     List(StructInit, es) => {
@@ -624,8 +638,8 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
         }
         field_values.push(v.id);
       }
-      let e = InstrExpr::Init(perm_slice_from_vec(field_values));
-      return Ok(Some(push_expr(b, e, t).to_ref()));
+      let ie = InstrExpr::Init(perm_slice_from_vec(field_values));
+      return Ok(Some(push_expr(b, e, ie, t).to_ref()));
     }
     // field deref
     List(FieldIndex, &[structure, field_name]) => {
@@ -645,9 +659,9 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
           )? as u64
       };
       let field_type = info.field_types[i as usize];
-      let e = InstrExpr::FieldIndex{ struct_addr, index: i };
-      let v = push_expr(b, e, types::pointer_type(field_type));
-      return Ok(Some(pointer_to_locator(v, struct_ref.mutable)));
+      let ie = InstrExpr::FieldIndex{ struct_addr, index: i };
+      let v = push_expr(b, e, ie, types::pointer_type(field_type));
+      return Ok(Some(pointer_to_locator(v, struct_ref.mutable)?));
     }
     // fun
     List(Fun, &[args, ret, body]) => {
@@ -661,7 +675,12 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
         args.children(),
         return_tag,
         body)?;
-      let v = function_to_var(b, f);
+      let v = {
+        let function_var = new_var(b, f.t, false, e.loc());
+        let f_addr = Box::into_raw(Box::new(f)) as i64;
+        b.bc.instrs.push(Instr::Expr(function_var.id, InstrExpr::LiteralI64(f_addr)));
+        function_var
+      };
       return Ok(Some(v.to_ref()));
     }
     // set var
@@ -677,7 +696,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
       let name = var_name.as_symbol();
       // evaluate the expression
       let value = compile_expr_to_var(b, value_expr)?;
-      let local_var = new_local_variable(b, name, value.t);
+      let local_var = new_local_variable(b, name, value.t, value_expr);
       compile_assignment(b, value_expr, local_var.to_ref(), value)?;
     }
     // if then
@@ -748,12 +767,12 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
     List(TypeOf, &[v]) => {
       // TODO: it's weird to codegen the expression when we only need its type
       let var = compile_expr_to_var(b, v)?;
-      return Ok(Some(compile_type_literal(b, var.t).to_ref()));
+      return Ok(Some(compile_type_literal(b, var.t, v).to_ref()));
     }
     // deref
     List(Deref, &[pointer]) => {
       let ptr = compile_expr_to_var(b, pointer)?;
-      return Ok(Some(pointer_to_locator(ptr, true)));
+      return Ok(Some(pointer_to_locator(ptr, true)?));
     }
     // ref
     List(GetAddress, &[locator]) => {
@@ -764,7 +783,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
     List(Cast, &[value, to_type]) => {
       let t = const_expr_to_type(b, to_type)?;
       let v = compile_expr_to_var(b, value)?;
-      return Ok(Some(compile_cast(b, e, v, t)?.to_ref()));
+      return Ok(Some(compile_cast(b, v, t)?.to_ref()));
     }
     // observe
     List(Observe, &[e]) => {
@@ -773,7 +792,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
       let signal_type = types::poly_type(b.c.signal_tag, cell.t);
       let uid_ptr = Ptr::to_ptr(perm(id)) as *const ();
       let ie = InstrExpr::StaticValue(signal_type, uid_ptr);
-      let v = push_expr(b, ie, signal_type);
+      let v = push_expr(b, e, ie, signal_type);
       return Ok(Some(v.to_ref()));
     }
     // container
@@ -820,18 +839,20 @@ fn expr_to_id(e : Expr) -> Result<CellIdentifier, Error> {
   dependencies::expr_to_id(e).ok_or_else(|| error(e, "malformed identifier"))
 }
 
-fn compile_type_literal(b : &mut Builder, t : TypeHandle) -> Var {
-  let e = InstrExpr::LiteralI64(Ptr::to_i64(t));
-  return push_expr(b, e, b.c.type_tag);
+fn compile_type_literal<L>(b : &mut Builder, t : TypeHandle, loc : L) -> Var
+  where L : Into<SrcLocation>
+{
+  let ie = InstrExpr::LiteralI64(Ptr::to_i64(t));
+  return push_expr(b, loc, ie, b.c.type_tag);
 }
 
 fn compile_def_reference(b : &mut Builder, e : Expr) -> Result<Ref, Error> {
   let uid = expr_to_id(e)?;
   let cell = get_cell_value(b, e, uid)?;
-  let e = InstrExpr::StaticValue(cell.t, cell.ptr);
+  let ie = InstrExpr::StaticValue(cell.t, cell.ptr);
   let pointer_type = types::pointer_type(cell.t);
-  let v = push_expr(b, e, pointer_type);
-  Ok(pointer_to_locator(v, true))
+  let v = push_expr(b, e, ie, pointer_type);
+  Ok(pointer_to_locator(v, true)?)
 }
 
 fn compile_array_len(b : &mut Builder, array : Expr) -> Result<Var, Error> {
@@ -839,8 +860,8 @@ fn compile_array_len(b : &mut Builder, array : Expr) -> Result<Var, Error> {
   let info =
     types::type_as_array(&r.t)
     .ok_or_else(|| error(array, "expected array"))?;
-  let e = InstrExpr::LiteralI64(info.length as i64);
-  Ok(push_expr(b, e, b.c.i64_tag))
+  let ie = InstrExpr::LiteralI64(info.length as i64);
+  Ok(push_expr(b, array, ie, b.c.i64_tag))
 }
 
 fn strip_const_wrapper(e : Expr) -> Result<Expr, Error> {
@@ -903,7 +924,7 @@ fn compile_function_call(
           arg_type, arg_type.size_of));
     }
   }
-  let e = {
+  let ie = {
     if info.c_function {
       InstrExpr::InvokeC(f.id, perm_slice_from_vec(arg_values))
     }
@@ -911,7 +932,7 @@ fn compile_function_call(
       InstrExpr::Invoke(f.id, perm_slice_from_vec(arg_values))
     }
   };
-  return Ok(push_expr(b, e, info.returns));
+  return Ok(push_expr(b, e, ie, info.returns));
 }
 
 fn compile_container(
@@ -953,13 +974,13 @@ fn compile_container(
   }
   // Cast args
   let void_ptr_tag = types::pointer_type(b.c.void_tag);
-  let signal_arg = compile_cast(b, signal_expr, signal, b.c.signal_tag)?;
-  let type_arg = compile_type_literal(b, value.t);
+  let signal_arg = compile_cast(b, signal, b.c.signal_tag)?;
+  let type_arg = compile_type_literal(b, value.t, value.loc);
   let value_arg = {
     let v = value.to_ref().get_address(b);
-    compile_cast(b, value_expr, v, void_ptr_tag)?
+    compile_cast(b, v, void_ptr_tag)?
   };
-  let function_arg = compile_cast(b, function_expr, function, void_ptr_tag)?;
+  let function_arg = compile_cast(b, function, void_ptr_tag)?;
   compile_function_call(
     b, e,
     container_function,
@@ -1000,9 +1021,9 @@ fn compile_stream(
   }
   // Cast args
   let void_ptr_tag = types::pointer_type(b.c.void_tag);
-  let signal_arg = compile_cast(b, signal_expr, signal, b.c.signal_tag)?;
-  let type_arg = compile_type_literal(b, state_type);
-  let function_arg = compile_cast(b, function_expr, function, void_ptr_tag)?;
+  let signal_arg = compile_cast(b, signal, b.c.signal_tag)?;
+  let type_arg = compile_type_literal(b, state_type, function_expr);
+  let function_arg = compile_cast(b, function, void_ptr_tag)?;
   compile_function_call(
     b, e,
     stream_function,
@@ -1056,8 +1077,8 @@ fn compile_intrinic_op(b : &mut Builder, e : Expr, op : Operator, args : &[Expr]
     let v1 = compile_expr_to_var(b, *v1)?;
     let v2 = compile_expr_to_var(b, *v2)?;
     if let Some(t) = binary_op_type(&b.c, op, v1.t, v2.t) {
-      let e = InstrExpr::BinaryOp(op, v1.id, v2.id);
-      return Ok(push_expr(b, e, t));
+      let ie = InstrExpr::BinaryOp(op, v1.id, v2.id);
+      return Ok(push_expr(b, e, ie, t));
     }
     return err(e,
       format!("no binary op {} for types {} and {} at",
@@ -1066,8 +1087,8 @@ fn compile_intrinic_op(b : &mut Builder, e : Expr, op : Operator, args : &[Expr]
   if let [v1] = args {
     let v1 = compile_expr_to_var(b, *v1)?;
     if let Some(t) = unary_op_type(&b.c, op, v1.t) {
-      let e = InstrExpr::UnaryOp(op, v1.id);
-      return Ok(push_expr(b, e, t));
+      let ie = InstrExpr::UnaryOp(op, v1.id);
+      return Ok(push_expr(b, e, ie, t));
     }
     return err(e,
       format!("no unary op {} for type {}", op, v1.t));
@@ -1077,9 +1098,9 @@ fn compile_intrinic_op(b : &mut Builder, e : Expr, op : Operator, args : &[Expr]
 }
 
 fn compile_expr_value(b : &mut Builder, expr : Expr) -> Var {
-  let e = InstrExpr::LiteralI64(Ptr::to_ptr(expr) as i64);
+  let ie = InstrExpr::LiteralI64(Ptr::to_ptr(expr) as i64);
   let expr_tag = b.c.expr_tag;
-  push_expr(b, e, expr_tag)
+  push_expr(b, expr, ie, expr_tag)
 }
 
 fn get_cell_value(b : &mut Builder, e : Expr, id : CellIdentifier) -> Result<CellValue, Error> {

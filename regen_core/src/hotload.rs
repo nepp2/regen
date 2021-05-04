@@ -62,22 +62,36 @@ fn is_cell_visible(
   false
 }
 
-enum LinkingStatus {
-  ReuseAllocation,
-  NewAllocation,
+/// Indicates whether dependents require full recompilation (e.g. the
+/// type of the value has changed), or re-evaluation, or just the next
+/// incremental value (e.g. a container)
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum RequiredUpdateFlag {
+  Increment = 1,
+  Eval = 2,
+  Compile = 3,
 }
 
-fn allocate_cell(env : Env, uid : CellUid, t : TypeHandle)
-  -> (*mut (), LinkingStatus)
-{
-  if let Some(cc) = env.cell_compiles.get(&uid) {
-    if cc.allocation.t.size_of == t.size_of {
-      return (cc.allocation.ptr, LinkingStatus::ReuseAllocation);
-    }
+impl RequiredUpdateFlag {
+  fn precedence(self, f : RequiredUpdateFlag) -> RequiredUpdateFlag {
+    if self as i32 > f as i32 { self } else { f }
   }
+
+  fn from_dependency_type(dt : DependencyType) -> Self {
+    use DependencyType::*;
+    use RequiredUpdateFlag::*;
+    match dt {
+      Code => Compile,
+      Value => Eval,
+      Reactive => Increment,
+    }  
+  }
+}
+
+fn allocate_cell(t : TypeHandle) -> *mut ()
+{
   let layout = std::alloc::Layout::from_size_align(t.size_of as usize, 8).unwrap();
-  let ptr = unsafe { std::alloc::alloc(layout) as *mut () };
-  (ptr, LinkingStatus::NewAllocation)
+  unsafe { std::alloc::alloc(layout) as *mut () }
 }
 
 /// Returns the evaluated expr value, and the cell's resolved dependencies
@@ -86,7 +100,7 @@ fn compile_cell(
   hs : &HotloadState,
   uid : CellUid,
   value_expr : Expr,
-) -> Result<LinkingStatus, Option<Error>>
+) -> Result<RequiredUpdateFlag, Option<Error>>
 {
   // get/check dependency values
   let mut dep_values = HashMap::new();
@@ -97,6 +111,7 @@ fn compile_cell(
     }
     else {
       if !is_cell_visible(env, hs, dep_uid) {
+        env.broken_cells.insert(uid);
         let e =
           error(value_expr,
             format!("{} has dependency {}, but it was not found",
@@ -109,16 +124,37 @@ fn compile_cell(
   // compile the expression
   let ctx = CompileContext::new(env, &dep_values);
   let function = {
-    let f = compile::compile_expr_to_function(&ctx, value_expr)?;
-    perm(f)
+    match compile::compile_expr_to_function(&ctx, value_expr) {
+      Ok(f) => perm(f),
+      Err(e) => {
+        env.broken_cells.insert(uid);
+        return Err(Some(e));
+      }
+    }
   };
   let expr_type = types::type_as_function(&function.t).unwrap().returns;
-  let (ptr, link_status) = allocate_cell(env, uid, expr_type);
-  env.cell_compiles.insert(uid, CellCompile {
+  use RequiredUpdateFlag::*;
+  let (ptr, flag) = {
+    if let Some(cc) = env.cell_compiles.get(&uid) {
+      let ptr =
+        if cc.allocation.t.size_of == expr_type.size_of { cc.allocation.ptr }
+        else { allocate_cell(expr_type) };
+      let flag =
+        if cc.allocation.t == expr_type { Eval }
+        else { Compile };
+      (ptr, flag)
+    }
+    else {
+      (allocate_cell(expr_type), Compile)
+    }
+  };
+  let cc = CellCompile {
     allocation: RegenValue { t: expr_type, ptr },
     function,
-  });
-  return Ok(link_status)
+  };
+  env.broken_cells.remove(&uid);
+  env.cell_compiles.insert(uid, cc);
+  return Ok(flag)
 }
 
 fn evaluate_cell(
@@ -265,7 +301,11 @@ fn get_cell_value_mut (env : &mut Env, uid : CellUid) -> &mut CellValue {
 }
 
 fn update_observer(mut env : Env, hs : &mut HotloadState, uid : CellUid, rc : ReactiveCell) -> bool {
-  if hs.change_flags.get(&rc.input).is_none() {
+  // only update if either this cell or the input cell changed in this pass
+  let requires_update =
+    hs.change_flags.contains_key(&rc.input)
+    || hs.change_flags.contains_key(&uid);
+  if !requires_update {
     return false;
   }
   let state_val =
@@ -346,23 +386,31 @@ fn try_hotload_cell(
   }
   hs.visited_cells.insert(uid);
   // Update the value expression
-  use DependencyType::*;
+  use RequiredUpdateFlag::*;
   let mut update_compile = false;
   let mut update_value = false;
   if update_value_expression(env, uid, value_expr, deps) {
     update_compile = true;
   }
+  // Check if the cell hasn't been compiled
+  if !update_compile {
+    if !env.cell_compiles.contains_key(&uid) {
+      if !env.broken_cells.contains(&uid) {
+        update_compile = true;
+      }
+    }
+  }
   // Check if this cell has been flagged for change
   if !update_compile {
     if let Some(dt) = hs.change_flags.get(&uid) {
       match dt {
-        Code => {
+        Compile => {
           update_compile = true;
         }
-        Value => {
+        Eval => {
           update_value = true;
         }
-        Reactive => {
+        Increment => {
           // reactive changes only trigger cell value
           // updates when the cell hasn't been evaluated yet
           if get_cell_value(env, hs, uid, false).is_none() {
@@ -372,31 +420,29 @@ fn try_hotload_cell(
       }
     }
   }
-  if let Some(observe_id) = deps.observe_ref {
-    // value changes shouldn't affect stream cells
-    // what about container cells??
-    let TODO = ();
-    // don't bother compiling if the reactive input hasn't changed
-    let observe_uid = observe_id.uid(env);
-    if !hs.change_flags.contains_key(&observe_uid) {
-      return Ok(());
-    }
-  }
+  let TODO = (); // is this needed?
+  // if let Some(observe_id) = deps.observe_ref {
+  //   // value changes shouldn't affect stream cells
+  //   // what about container cells??
+  //   let TODO = ();
+  //   // don't bother compiling if the reactive input hasn't changed
+  //   let observe_uid = observe_id.uid(env);
+  //   if !hs.change_flags.contains_key(&observe_uid) {
+  //     return Ok(());
+  //   }
+  // }
   // update the cell
   if update_compile {
-    let link_status = compile_cell(env, hs, uid, value_expr)?;
+    let update_flag = compile_cell(env, hs, uid, value_expr)?;
     evaluate_cell(env, uid, value_expr, reactive_cell)?;
-    mark_outputs(env, hs, uid, link_status);
+    mark_outputs(env, hs, uid, update_flag);
   }
   else if update_value {
-    let link_status = if !env.cell_compiles.contains_key(&uid) {
-      compile_cell(env, hs, uid, value_expr)?
+    if env.broken_cells.contains(&uid) {
+      return Err(None);
     }
-    else {
-      LinkingStatus::ReuseAllocation
-    };
     evaluate_cell(env, uid, value_expr, reactive_cell)?;
-    mark_outputs(env, hs, uid, link_status);
+    mark_outputs(env, hs, uid, RequiredUpdateFlag::Eval);
   }
   Ok(())
 }
@@ -469,7 +515,7 @@ fn hotload_def(
   // update observer
   if let Some(rc) = env.reactive_cells.get(&uid) {
     if update_observer(env, hs, uid, *rc) {
-      mark_outputs(env, hs, uid, LinkingStatus::ReuseAllocation);
+      mark_outputs(env, hs, uid, RequiredUpdateFlag::Eval);
     }
   }
 }
@@ -503,38 +549,32 @@ fn hotload_cells(
 
 struct HotloadState {
   active_module : Symbol,
-  change_flags : HashMap<CellUid, DependencyType>,
+  change_flags : HashMap<CellUid, RequiredUpdateFlag>,
   visited_cells : HashSet<CellUid>,
   root_cell : Option<CellUid>,
-}
-
-fn dependency_precedence(a : DependencyType, b : DependencyType) -> DependencyType {
-  use DependencyType::*;
-  match (a, b) {
-    (Code, _) | (_, Code) => Code,
-    (Value, _) | (_, Value) => Value,
-    (Reactive, Reactive) => Reactive,
-  }
 }
 
 fn mark_outputs(
   env : Env,
   hs : &mut HotloadState,
   uid : CellUid,
-  link_status : LinkingStatus,
+  self_flag : RequiredUpdateFlag,
 ) {
+  use RequiredUpdateFlag::*;
   if let Some(outputs) = env.graph.outputs(uid) {
     for (&output_uid, &dt) in outputs {
-      let new_dt = match link_status {
-        LinkingStatus::NewAllocation => DependencyType::Code,
-        LinkingStatus::ReuseAllocation => {
-          if let Some(&prev_dt) = hs.change_flags.get(&output_uid) {
-            dependency_precedence(dt, prev_dt)
-          }
-          else { dt }
-        }
+      let dt_flag = RequiredUpdateFlag::from_dependency_type(dt);
+      let dep_flag =  match (self_flag, dt_flag) {
+        // special case for incremental updates
+        (Eval, Increment) => Increment,
+        // otherwise, use normal precedence
+        _ => self_flag.precedence(dt_flag),
       };
-      hs.change_flags.insert(output_uid, new_dt);
+      let new_flag =
+        hs.change_flags.get(&output_uid)
+        .map(|f| f.precedence(dep_flag))
+        .unwrap_or(dep_flag);
+      hs.change_flags.insert(output_uid, new_flag);
     }
   }
 }
@@ -568,6 +608,7 @@ pub fn hotload_live_module(mut env : Env, module_name : &str, code : &str) {
     visited_cells: HashSet::new(),
     root_cell: None,
   };
+  env.broken_cells.clear();
   hotload_module(env, &mut hs, &exprs);
   env.live_exprs = exprs;
 }
@@ -599,9 +640,9 @@ fn cell_updated(env : Env, uid : CellUid) {
     visited_cells: HashSet::new(),
     root_cell: Some(uid),
   };
-  hs.change_flags.insert(uid, DependencyType::Value);
+  hs.change_flags.insert(uid, RequiredUpdateFlag::Eval);
   hs.visited_cells.insert(uid);
-  mark_outputs(env, &mut hs, uid, LinkingStatus::ReuseAllocation);
+  mark_outputs(env, &mut hs, uid, RequiredUpdateFlag::Eval);
   hotload_module(env, &mut hs, &env.live_exprs);
 }
 
