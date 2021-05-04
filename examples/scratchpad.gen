@@ -197,13 +197,4 @@ reactive game_state = container(
 
 def renderer = create_renderer(window);
 
-reactive render_tick = create_timer(1000 / 60);
-
-reactive render_stream = stream(
-  observe render_tick,
-  fun(v : ptr void, tick : ptr i64) {
-    render_game(renderer, ref game_state.state);
-  }
-);
-
-// print buffered_events.list.length;
+render_game(renderer, ref game_state.state)
