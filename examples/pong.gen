@@ -3,21 +3,21 @@ include(env, ref "examples/lib/prelude.gen");
 include(env, ref "examples/lib/game.gen");
 include(env, ref "examples/lib/list.gen");
 
-embed define_list_type(#game_event_list, #game_event);
+embed define_list_type(#GameEventList, #GameEvent);
 
-def game_event_buffer = struct {
-  list : game_event_list,
+def GameEventBuffer = struct {
+  list : GameEventList,
   capacity : i64,
 }
 
 def create_game_event_buffer = fun(capacity : i64) {
-  let list = game_event_list::new();
-  init game_event_buffer(list, capacity)
+  let list = GameEventList::new();
+  init GameEventBuffer(list, capacity)
 }
 
-def buffer_update = fun(buffer : ptr game_event_buffer, e : ptr game_event) {
+def buffer_update = fun(buffer : ptr GameEventBuffer, e : ptr GameEvent) {
   if buffer.list.length < buffer.capacity {
-    game_event_list::add(buffer.list, *e);
+    GameEventList::add(buffer.list, *e);
     true
   }
   else { false }
@@ -32,39 +32,39 @@ def ball_size = 10;
 
 def window = create_game_window("SDL Example", width, height);
 
-def vec2 = struct { x : i64, y : i64 };
+def Vec2 = struct { x : i64, y : i64 };
 
-def ball = struct { pos : vec2, vel : vec2 };
+def Ball = struct { pos : Vec2, vel : Vec2 };
 
-def paddle = struct { pos : i64, vel : i64 };
+def Paddle = struct { pos : i64, vel : i64 };
 
-def game = struct {
-  p1 : paddle,
-  p2 : paddle,
-  b : ball,
+def Game = struct {
+  p1 : Paddle,
+  p2 : Paddle,
+  b : Ball,
 };
 
-def buffered_game = struct {
+def BufferedGame = struct {
   event_count : i64,
-  initial_state : game,
-  state : game,
+  initial_state : Game,
+  state : Game,
 };
 
 def initial_game_state = {
   let ypos = (height - paddle_height) / 2;
-  let b = init ball(
-    init vec2((width - ball_size) / 2, (height - ball_size) / 2),
-    init vec2(5, 5),
+  let b = init Ball(
+    init Vec2((width - ball_size) / 2, (height - ball_size) / 2),
+    init Vec2(5, 5),
   );
-  init game(
-    init paddle(ypos, 0),
-    init paddle(ypos, 0),
+  init Game(
+    init Paddle(ypos, 0),
+    init Paddle(ypos, 0),
     b,
   )
 };
 
-def new_buffered_game = fun(g : game) {
-  init buffered_game(0, g, g);
+def new_buffered_game = fun(g : Game) {
+  init BufferedGame(0, g, g);
 };
 
 def ARROW_RIGHT = 79 as u32;
@@ -72,7 +72,7 @@ def ARROW_LEFT = 80 as u32;
 def ARROW_DOWN = 81 as u32;
 def ARROW_UP = 82 as u32;
 
-def game_update = fun(state : ptr game, e : ptr game_event) {
+def game_update = fun(state : ptr Game, e : ptr GameEvent) {
   // handle input events
   if e.tag == sdl_event_tag {
     let event_type = e.input.event_type;
@@ -125,22 +125,22 @@ def game_update = fun(state : ptr game, e : ptr game_event) {
   }
 };
 
-def render_game = fun(r : sdl_renderer_handle, state : ptr game) {
+def render_game = fun(r : SdlRendererHandle, state : ptr Game) {
   // render
   sdl_set_draw_color(r, 0 as u8, 0 as u8, 0 as u8, 0 as u8);
   sdl_clear(r);
 
   sdl_set_draw_color(r, 255 as u8, 0 as u8, 0 as u8, 255 as u8);
 
-  // paddle p1
+  // Paddle p1
   let rect = init sdl_rect(50 as i32, state.p1.pos as i32, 10 as i32, 50 as i32);
   sdl_fill_rect(r, ref rect);
 
-  // paddle p2
+  // Paddle p2
   let rect = init sdl_rect(740 as i32, state.p2.pos as i32, 10 as i32, 50 as i32);
   sdl_fill_rect(r, ref rect);
 
-  // ball
+  // Ball
   let rect = init sdl_rect(state.b.pos.x as i32, state.b.pos.y as i32, ball_size as i32, ball_size as i32);
   sdl_fill_rect(r, ref rect);
 
@@ -149,14 +149,14 @@ def render_game = fun(r : sdl_renderer_handle, state : ptr game) {
 
 def min = fun(a : i64, b : i64) { if a < b { a } else { b } }
 
-def buffered_game_update = fun(g : ptr buffered_game, buffer : ptr game_event_buffer) {
+def buffered_game_update = fun(g : ptr BufferedGame, buffer : ptr GameEventBuffer) {
   let len = min(buffer.list.length, buffer.capacity);
   if g.event_count > len {
     g.event_count = 0;
     g.state = g.initial_state;
   }
   for i in g.event_count to len {
-    let e = game_event_list::get_ptr(buffer.list, i);
+    let e = GameEventList::get_ptr(buffer.list, i);
     g.event_count = g.event_count + 1;
     game_update(ref g.state, e);
   }
@@ -168,7 +168,7 @@ reactive sdl_input = stream(observe input_tick, poll_sdl_input);
 
 reactive frame_tick = create_timer(1000/30);
 
-def frame_event = init game_event(tick_event_tag, zero_init sdl_event, frame_tick);
+def frame_event = init GameEvent(tick_event_tag, zero_init SdlEvent, frame_tick);
 
 def event = {
   if sdl_input.tick > frame_event.tick {
@@ -185,7 +185,7 @@ reactive buffered_events = container(
   buffer_update
 );
 
-def tweaked_buffer = init game_event_buffer(
+def tweaked_buffer = init GameEventBuffer(
   buffered_events.list,
   1000,
 );

@@ -2,7 +2,7 @@
 include(env, ref "examples/lib/prelude.gen");
 include(env, ref "examples/lib/game.gen");
 
-def game = struct {
+def Game = struct {
   ticker : i64,
 }
 
@@ -15,7 +15,7 @@ reactive input_tick = create_timer(10);
 
 reactive sdl_input = stream(observe input_tick, poll_sdl_input);
 
-def game_update = fun(state : ptr game, e : ptr game_event) {
+def game_update = fun(state : ptr Game, e : ptr GameEvent) {
   // handle input events
   if e.tag == sdl_event_tag {
     if e.input.event_type == SDL_QUIT {
@@ -31,12 +31,12 @@ def game_update = fun(state : ptr game, e : ptr game_event) {
   }
 }
 
-def initial_game_state = init game(0);
+def initial_game_state = init Game(0);
 
 def renderer =
   sdl_create_renderer(window, -1 as i32, SDL_RENDERER_ACCELERATED);
 
-def render_game = fun (r : sdl_renderer_handle, game_state : ptr game) {
+def render_game = fun (r : SdlRendererHandle, game_state : ptr Game) {
   // render
   sdl_set_draw_color(r, 0 as u8, 0 as u8, 0 as u8, 0 as u8);
   sdl_clear(r);
@@ -53,7 +53,7 @@ def render_game = fun (r : sdl_renderer_handle, game_state : ptr game) {
 
 reactive frame_tick = create_timer(1000/30);
 
-def frame_event = init game_event(tick_event_tag, zero_init sdl_event, frame_tick);
+def frame_event = init GameEvent(tick_event_tag, zero_init SdlEvent, frame_tick);
 
 def event = {
   if sdl_input.tick > frame_event.tick {
@@ -64,7 +64,7 @@ def event = {
   }
 }
 
-reactive game_state = container(observe event, init game(0), game_update);
+reactive game_state = container(observe event, init Game(0), game_update);
 
 reactive render_tick = create_timer(1000 / 60);
 
