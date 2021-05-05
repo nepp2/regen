@@ -51,18 +51,19 @@ def buffered_game = struct {
 };
 
 def initial_game_state = {
-  let g = {
-    let ypos = (height - paddle_height) / 2;
-    let b = init ball(
-      init vec2((width - ball_size) / 2, (height - ball_size) / 2),
-      init vec2(5, 5),
-    );
-    init game(
-      init paddle(ypos, 0),
-      init paddle(ypos, 0),
-      b,
-    )
-  };
+  let ypos = (height - paddle_height) / 2;
+  let b = init ball(
+    init vec2((width - ball_size) / 2, (height - ball_size) / 2),
+    init vec2(5, 5),
+  );
+  init game(
+    init paddle(ypos, 0),
+    init paddle(ypos, 0),
+    b,
+  )
+};
+
+def new_buffered_game = fun(g : game) {
   init buffered_game(0, g, g);
 };
 
@@ -150,6 +151,9 @@ def min = fun(a : i64, b : i64) { if a < b { a } else { b } }
 
 def buffered_game_update = fun(g : ptr buffered_game, buffer : ptr game_event_buffer) {
   let len = min(buffer.list.length, buffer.capacity);
+  if g.event_count == 0 {
+    print "zero count";
+  }
   if g.event_count > len {
     g.event_count = 0;
     g.state = g.initial_state;
@@ -189,11 +193,10 @@ def tweaked_buffer = init game_event_buffer(
   1000,
 );
 
-reactive game_state = container(
-  observe tweaked_buffer,
-  initial_game_state,
-  buffered_game_update
-);
+reactive game_state = {
+  let g = new_buffered_game(initial_game_state);
+  container(observe tweaked_buffer, g, buffered_game_update)
+}
 
 def renderer = create_renderer(window);
 
