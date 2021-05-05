@@ -38,6 +38,7 @@ pub struct Environment {
 
 #[derive(Copy, Clone)]
 pub struct CellCompile {
+  pub reactive_constructor : Option<RegenValue>,
   pub allocation : RegenValue,
   pub function : Ptr<Function>,
 }

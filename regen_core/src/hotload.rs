@@ -1,7 +1,7 @@
 
-use crate::{compile, dependencies::{self, CellDependencies}, env::{self, CellCompile, CellIdentifier, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types::{self, TypeHandle}};
+use crate::{compile::{self, Function}, dependencies::{self, CellDependencies}, env::{self, CellCompile, CellIdentifier, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types::{self, TypeHandle}};
 
-use std::{alloc::{Layout, alloc}, collections::{HashMap, HashSet}};
+use std::collections::{HashMap, HashSet};
 
 use CellIdentifier::*;
 use event_loop::ReactiveConstructor;
@@ -88,12 +88,37 @@ impl RequiredUpdateFlag {
   }
 }
 
+fn alloc_type(t : TypeHandle) -> *mut ()
+{
+  let layout = std::alloc::Layout::from_size_align(t.size_of as usize, 8).unwrap();
+  unsafe { std::alloc::alloc(layout) as *mut () }
+}
+
+fn get_cell_allocation(env : Env, uid : CellUid, t : TypeHandle)
+  -> (*mut (), RequiredUpdateFlag)
+{
+  use RequiredUpdateFlag::*;
+  if let Some(cc) = env.cell_compiles.get(&uid) {
+    let ptr =
+      if cc.allocation.t.size_of == t.size_of { cc.allocation.ptr }
+      else { alloc_type(t) };
+    let flag =
+      if cc.allocation.t == t { Eval }
+      else { Compile };
+    (ptr, flag)
+  }
+  else {
+    (alloc_type(t), Compile)
+  }
+}
+
 /// Returns the evaluated expr value, and the cell's resolved dependencies
 fn compile_cell(
   mut env : Env,
   hs : &HotloadState,
   uid : CellUid,
   value_expr : Expr,
+  reactive : bool,
 ) -> Result<RequiredUpdateFlag, Option<Error>>
 {
   // get/check dependency values
@@ -127,54 +152,66 @@ fn compile_cell(
     }
   };
   let expr_type = types::type_as_function(&function.t).unwrap().returns;
-  use RequiredUpdateFlag::*;
-  let (ptr, flag) = {
-    if let Some(cc) = env.cell_compiles.get(&uid) {
-      let ptr =
-        if cc.allocation.t.size_of == expr_type.size_of { cc.allocation.ptr }
-        else { alloc_cell(expr_type) };
-      let flag =
-        if cc.allocation.t == expr_type { Eval }
-        else { Compile };
-      (ptr, flag)
+  let (flag, cc) = {
+    if reactive {
+      let inner =
+        get_reactive_inner_type(env, expr_type)
+        .ok_or_else(|| error(value_expr, "expected reactive constructor"))?;
+      let (ptr, flag) = get_cell_allocation(env, uid, inner);
+      let cc = CellCompile {
+        reactive_constructor: Some(RegenValue { t: expr_type, ptr: alloc_type(expr_type) }),
+        allocation: RegenValue { t: inner, ptr },
+        function,
+      };
+      (flag, cc)
     }
     else {
-      (alloc_cell(expr_type), Compile)
+      let (ptr, flag) = get_cell_allocation(env, uid, expr_type);
+      let cc = CellCompile {
+        reactive_constructor: None,
+        allocation: RegenValue { t: expr_type, ptr },
+        function,
+      };
+      (flag, cc)
     }
-  };
-  let cc = CellCompile {
-    allocation: RegenValue { t: expr_type, ptr },
-    function,
   };
   env.broken_cells.remove(&uid);
   env.cell_compiles.insert(uid, cc);
-  return Ok(flag)
+  Ok(flag)
+}
+
+fn try_eval<L>(loc : L, f : Ptr<Function>, return_ptr : *mut ())
+  -> Result<(), Error>
+    where L : Into<SrcLocation>
+{
+  std::panic::catch_unwind(|| {
+    interpret::interpret_function(
+      Ptr::to_ptr(f),
+      &[],
+      Some(return_ptr)
+    );
+  }).map_err(|_| {
+    error(loc, "regen eval panic!")
+  })?;
+  Ok(())
 }
 
 fn evaluate_cell(
   mut env : Env,
   uid : CellUid,
   value_expr : Expr,
-  reactive_cell : bool,
 ) -> Result<(), Option<Error>>
 {
   env::unload_cell_value(env, uid);
   let cc = env.cell_compiles.get(&uid).unwrap();
-  std::panic::catch_unwind(|| {
-    interpret::interpret_function(
-      Ptr::to_ptr(cc.function),
-      &[],
-      Some(cc.allocation.ptr)
-    );
-  }).map_err(|_| {
-    error(value_expr, "regen eval panic!")
-  })?;
-  let v = cc.allocation;
   let cv = {
-    if reactive_cell {
-      register_reactive_cell(env, uid, value_expr, v)?
+    if let Some(rc) = cc.reactive_constructor {
+      try_eval(value_expr, cc.function, rc.ptr)?;
+      register_reactive_cell(env, uid, value_expr, rc, cc.allocation)?
     }
     else {
+      let v = cc.allocation;
+      try_eval(value_expr, cc.function, v.ptr)?;
       CellValue{ t: v.t, ptr: v.ptr, initialised: true }
     }
   };
@@ -187,27 +224,38 @@ fn register_reactive_cell(
   uid : CellUid,
   value_expr : Expr,
   constructor_val : RegenValue,
+  val : RegenValue,
 ) -> Result<CellValue, Error>
 {
-  println!("registering reactive cell {}", uid.id(env));
   let constructor = to_reactive_constructor(env, value_expr, constructor_val)?;
   match constructor.variant {
     ConstructorVariant::Timer { millisecond_interval } => {
+      if val.t != env.c.i64_tag {
+        return err(value_expr, "expected reactive i64");
+      }
       let id = event_loop::register_cell_timer(env.event_loop, uid, millisecond_interval);
       let now : i64 = event_loop::current_millisecond(env.event_loop);
       env.timers.insert(uid, id);
+      unsafe {
+        *(val.ptr as *mut i64) = now;
+      }
       let v = CellValue {
-        t: env.c.i64_tag,
-        ptr: alloc_val(now),
+        t: val.t,
+        ptr: val.ptr,
         initialised: false,
       };
       Ok(v)
     }
     ConstructorVariant::Poll { input, initial_value, poll_function } => {
-      let t = constructor.value_type;
+      if let Some(iv) = initial_value {
+        unsafe {
+          std::ptr::copy_nonoverlapping(
+            iv as *const u8, val.ptr as *mut u8, val.t.size_of as usize);
+        }
+      }
       let v = CellValue {
-        t,
-        ptr: alloc_bytes(t.size_of as usize, initial_value),
+        t: val.t,
+        ptr: val.ptr,
         initialised: initial_value.is_some(),
       };
       let input = input.uid(env);
@@ -218,47 +266,25 @@ fn register_reactive_cell(
   }
 }
 
-fn alloc_val<V>(v : V) -> *mut () {
-  // THIS CAUSES LINKING ISSUES
-  // Ptr::to_ptr(perm(v)) as *mut ()
-}
-
-fn alloc_bytes(bytes : usize, initial_value : Option<*const ()>) -> *mut () {
-  // THIS CAUSES LINKING ISSUES
-  // let layout = Layout::from_size_align(bytes, 8).unwrap();
-  // unsafe {
-  //   let ptr = alloc(layout) as *mut ();
-  //   if let Some(v) = initial_value {
-  //     std::ptr::copy_nonoverlapping(v as *const u8, ptr as *mut u8, bytes);
-  //   }
-  //   ptr as *mut ()
-  // }
-}
-
-fn alloc_cell(t : TypeHandle) -> *mut ()
-{
-  let layout = std::alloc::Layout::from_size_align(t.size_of as usize, 8).unwrap();
-  unsafe { std::alloc::alloc(layout) as *mut () }
+fn get_reactive_inner_type(env : Env, t : TypeHandle) -> Option<TypeHandle> {
+  if let Some(poly) = types::type_as_poly(&t) {
+    if poly.t == env.c.reactive_constructor_tag {
+      return Some(poly.param);
+    }
+  }
+  None
 }
 
 fn to_reactive_constructor(env : Env, value_expr : Expr, constructor_val : RegenValue)
   -> Result<Ptr<ReactiveConstructor>, Error>
 {
-  if let Some(poly) = types::type_as_poly(&constructor_val.t) {
-    if poly.t == env.c.reactive_constructor_tag {
-      let c = unsafe { 
-        *(constructor_val.ptr as *const Ptr<ReactiveConstructor>)
-      };
-      if c.value_type == poly.param {
-        return Ok(c);
-      }
-    }
-  }
-  if constructor_val.t == env.c.reactive_constructor_tag {
+  if let Some(t) = get_reactive_inner_type(env, constructor_val.t) {
     let c = unsafe { 
       *(constructor_val.ptr as *const Ptr<ReactiveConstructor>)
     };
-    return Ok(c);
+    if c.value_type == t {
+      return Ok(c);
+    }
   }
   err(value_expr.loc(), format!("expected reactive constructor, found {}", constructor_val.t))
 }
@@ -310,9 +336,6 @@ fn update_observer(mut env : Env, hs : &mut HotloadState, uid : CellUid, rc : Re
     || hs.change_flags.contains_key(&uid);
   if !requires_update {
     return false;
-  }
-  if hs.root_cell == None {
-    println!("update observer {}", uid.id(env));
   }
   let state_val =
     if let Some(v) = get_cell_value(env, hs, uid, false) { v }
@@ -439,24 +462,15 @@ fn try_hotload_cell(
   // }
   // update the cell
   if update_compile {
-    println!("compiling {}", uid.id(env));
-    let update_flag = compile_cell(env, hs, uid, value_expr)?;
-    evaluate_cell(env, uid, value_expr, reactive_cell)?;
+    let update_flag = compile_cell(env, hs, uid, value_expr, reactive_cell)?;
+    evaluate_cell(env, uid, value_expr)?;
     mark_outputs(env, hs, uid, update_flag);
-    if let Some(o) = env.graph.outputs(uid) {
-      for (dep_uid, _) in o {
-        println!("    {} -> {:?}", dep_uid.id(env), hs.change_flags.get(dep_uid));
-      }
-    }
   }
   else if update_value {
     if env.broken_cells.contains(&uid) {
       return Err(None);
     }
-    if hs.root_cell == None {
-      println!("evaluating {}", uid.id(env));
-    }
-    evaluate_cell(env, uid, value_expr, reactive_cell)?;
+    evaluate_cell(env, uid, value_expr)?;
     mark_outputs(env, hs, uid, RequiredUpdateFlag::Eval);
   }
   Ok(())

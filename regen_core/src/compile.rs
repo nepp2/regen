@@ -981,12 +981,14 @@ fn compile_container(
     compile_cast(b, v, void_ptr_tag)?
   };
   let function_arg = compile_cast(b, function, void_ptr_tag)?;
-  compile_function_call(
+  let ret = compile_function_call(
     b, e,
     container_function,
     &[signal_expr, value_expr, value_expr, function_expr],
     vec![signal_arg.id, type_arg.id, value_arg.id, function_arg.id],
-  )
+  )?;
+  let constructor_type = types::poly_type(b.c.reactive_constructor_tag, value.t);
+  compile_cast(b, ret, constructor_type)
 }
 
 fn compile_stream(
@@ -1024,12 +1026,14 @@ fn compile_stream(
   let signal_arg = compile_cast(b, signal, b.c.signal_tag)?;
   let type_arg = compile_type_literal(b, state_type, function_expr);
   let function_arg = compile_cast(b, function, void_ptr_tag)?;
-  compile_function_call(
+  let ret = compile_function_call(
     b, e,
     stream_function,
     &[signal_expr, function_expr, function_expr],
     vec![signal_arg.id, type_arg.id, function_arg.id],
-  )
+  )?;
+  let constructor_type = types::poly_type(b.c.reactive_constructor_tag, state_type);
+  compile_cast(b, ret, constructor_type)
 }
 
 fn binary_op_type(c : &CoreTypes, op : Operator, a : TypeHandle, b : TypeHandle) -> Option<TypeHandle> {

@@ -151,9 +151,6 @@ def min = fun(a : i64, b : i64) { if a < b { a } else { b } }
 
 def buffered_game_update = fun(g : ptr buffered_game, buffer : ptr game_event_buffer) {
   let len = min(buffer.list.length, buffer.capacity);
-  if g.event_count == 0 {
-    print "zero count";
-  }
   if g.event_count > len {
     g.event_count = 0;
     g.state = g.initial_state;

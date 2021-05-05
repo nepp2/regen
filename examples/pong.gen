@@ -3,26 +3,7 @@ include(env, ref "examples/lib/prelude.gen");
 include(env, ref "examples/lib/game.gen");
 include(env, ref "examples/lib/list.gen");
 
-def state_signal_builder = fun(state : expr, event : expr) {
-  #{
-    def update_fn = fn(state : ptr $state, event : ptr $event) => void;
-
-    def builder = fun(
-      input_signal : signal,
-      initial_state : (ptr $state),
-      update_function : update_fn)
-    {
-      register_state_signal(
-        env, event_loop, input_signal,
-        $state, initial_state as (ptr void),
-        update_function as update_fn_type)
-    };
-
-    builder
-  };
-};
-
-def game_event_list = embed new_list_type(#game_event);
+embed define_list_type(#game_event_list, #game_event);
 
 def game_event_buffer = struct {
   list : game_event_list,
@@ -37,7 +18,9 @@ def create_game_event_buffer = fun(capacity : i64) {
 def buffer_update = fun(buffer : ptr game_event_buffer, e : ptr game_event) {
   if buffer.list.length < buffer.capacity {
     game_event_list::add(buffer.list, *e);
+    true
   }
+  else { false }
 }
 
 def width = 800;
@@ -56,10 +39,15 @@ def ball = struct { pos : vec2, vel : vec2 };
 def paddle = struct { pos : i64, vel : i64 };
 
 def game = struct {
-  event_count : i64,
   p1 : paddle,
   p2 : paddle,
   b : ball,
+};
+
+def buffered_game = struct {
+  event_count : i64,
+  initial_state : game,
+  state : game,
 };
 
 def initial_game_state = {
@@ -69,11 +57,14 @@ def initial_game_state = {
     init vec2(5, 5),
   );
   init game(
-    0,
     init paddle(ypos, 0),
     init paddle(ypos, 0),
     b,
   )
+};
+
+def new_buffered_game = fun(g : game) {
+  init buffered_game(0, g, g);
 };
 
 def ARROW_RIGHT = 79 as u32;
@@ -82,15 +73,14 @@ def ARROW_DOWN = 81 as u32;
 def ARROW_UP = 82 as u32;
 
 def game_update = fun(state : ptr game, e : ptr game_event) {
-  state.event_count = state.event_count + 1;
   // handle input events
-  let input = e.input;
-  if input as i64 != 0 {
-    if input.event_type == SDL_QUIT {
+  if e.tag == sdl_event_tag {
+    let event_type = e.input.event_type;
+    if event_type == SDL_QUIT {
       sdl_destroy_window(window);
     }
-    if input.event_type == SDL_KEYDOWN {
-      let k = to_keyboard_event(input);
+    if event_type == SDL_KEYDOWN {
+      let k = to_keyboard_event(ref e.input);
       if k.keysym.scancode == ARROW_DOWN {
         state.p1.vel = paddle_speed;
       }
@@ -98,8 +88,8 @@ def game_update = fun(state : ptr game, e : ptr game_event) {
         state.p1.vel = -paddle_speed;
       }
     }
-    if input.event_type == SDL_KEYUP {
-      let k = to_keyboard_event(input);
+    if event_type == SDL_KEYUP {
+      let k = to_keyboard_event(ref e.input);
       if k.keysym.scancode == ARROW_DOWN {
         state.p1.vel = 0;
       }
@@ -109,8 +99,7 @@ def game_update = fun(state : ptr game, e : ptr game_event) {
     }
   }
   // handle tick events
-  let tick = e.tick;
-  if e.tick as i64 != 0 {
+  if e.tag == tick_event_tag {
     state.p1.pos = state.p1.pos + state.p1.vel;
     state.p2.pos = state.p2.pos + state.p2.vel;
 
@@ -136,9 +125,8 @@ def game_update = fun(state : ptr game, e : ptr game_event) {
   }
 };
 
-def render_game = fun(renderer : ptr sdl_renderer_handle, state : ptr game) {
+def render_game = fun(r : sdl_renderer_handle, state : ptr game) {
   // render
-  let r = *renderer;
   sdl_set_draw_color(r, 0 as u8, 0 as u8, 0 as u8, 0 as u8);
   sdl_clear(r);
 
@@ -161,38 +149,52 @@ def render_game = fun(renderer : ptr sdl_renderer_handle, state : ptr game) {
 
 def min = fun(a : i64, b : i64) { if a < b { a } else { b } }
 
-def buffered_game_update = fun(state : ptr game, buffer : ptr game_event_buffer) {
+def buffered_game_update = fun(g : ptr buffered_game, buffer : ptr game_event_buffer) {
   let len = min(buffer.list.length, buffer.capacity);
-  for i in state.event_count to len {
+  if g.event_count > len {
+    g.event_count = 0;
+    g.state = g.initial_state;
+  }
+  for i in g.event_count to len {
     let e = game_event_list::get_ptr(buffer.list, i);
-    game_update(state, e);
+    g.event_count = g.event_count + 1;
+    game_update(ref g.state, e);
   }
 }
 
-def event_signal =
-  game_input_signal(sdl_input_signal(), tick_signal(1000 / 60));
+reactive input_tick = create_timer(10);
 
-def buffered_event_signal = {
-  print "new event buffer";
-  def builder = embed state_signal_builder(#game_event_buffer, #game_event);
-  let buffer = create_game_event_buffer(1000);
-  builder(event_signal, ref buffer, buffer_update)
-};
+reactive sdl_input = stream(observe input_tick, poll_sdl_input);
 
-def game_state_signal = {
-  print "new game state";
-  def builder = embed state_signal_builder(#game, #game_event_buffer);
-  builder(buffered_event_signal, ref initial_game_state, buffered_game_update)
-};
+reactive frame_tick = create_timer(1000/30);
+
+def frame_event = init game_event(tick_event_tag, zero_init sdl_event, frame_tick);
+
+def event = {
+  if sdl_input.tick > frame_event.tick {
+    sdl_input
+  }
+  else {
+    frame_event
+  }
+}
+
+reactive buffered_events = container(
+  observe event,
+  create_game_event_buffer(1000),
+  buffer_update
+);
+
+def tweaked_buffer = init game_event_buffer(
+  buffered_events.list,
+  1000,
+);
+
+reactive game_state = {
+  let g = new_buffered_game(initial_game_state);
+  container(observe tweaked_buffer, g, buffered_game_update)
+}
 
 def renderer = create_renderer(window);
 
-def render_signal = {
-  let game_sample = sample_signal(
-    tick_signal(1000 / 60) as signal,
-    game_state_signal, game);
-  state_signal(
-    game_sample,
-    sdl_renderer_handle, (ref renderer) as ptr void,
-    render_game as update_fn_type);
-}
+render_game(renderer, ref game_state.state)
