@@ -1,0 +1,73 @@
+
+include(env, ref "examples/lib/prelude.gen");
+include(env, ref "examples/lib/game.gen");
+
+def Scrub = struct {
+  val : i64,
+}
+
+def scrub_width = 400;
+def scrub_height = 50;
+
+def scrub_window = create_game_window("Events", scrub_width, scrub_height);
+
+reactive input_tick = create_timer(10);
+
+reactive sdl_input = stream(observe input_tick, poll_sdl_input);
+
+def SDL_MOUSEDOWN = 1025 as u32;
+def SDL_MOUSEUP = 1026 as u32;
+
+def SdlMouseEvent = struct {
+  blah : i64
+}
+
+def to_mouse_event = fun(e : ptr SdlEvent) {
+  (ref e.content) as (ptr SdlMouseEvent)
+};
+
+def scrub_update = fun(scrub : ptr Scrub, e : ptr GameEvent) {
+  // handle time events
+  if e.tag == sdl_event_tag {
+    if e.input.event_type == SDL_MOUSEDOWN {
+      print e.input.content[0];
+    }
+  }
+}
+
+def initial_scrub_state = init Scrub(100);
+
+def renderer =
+  sdl_create_renderer(scrub_window, -1 as i32, SDL_RENDERER_ACCELERATED);
+
+def render_scrub = fun (r : SdlRendererHandle, scrub : ptr Scrub) {
+  // render
+  sdl_set_draw_color(r, 0 as u8, 0 as u8, 0 as u8, 0 as u8);
+  sdl_clear(r);
+
+  sdl_set_draw_color(r, 255 as u8, 0 as u8, 0 as u8, 255 as u8);
+
+  let w = (scrub_width / 100) * scrub.val;
+
+  let rect = init sdl_rect(0 as i32, 0 as i32, w as i32, scrub_height as i32);
+
+  sdl_fill_rect(r, ref rect);
+  sdl_present(r);
+};
+
+reactive frame_tick = create_timer(1000/30);
+
+def frame_event = init GameEvent(tick_event_tag, zero_init SdlEvent, frame_tick);
+
+def event = {
+  if sdl_input.tick > frame_event.tick {
+    sdl_input
+  }
+  else {
+    frame_event
+  }
+}
+
+reactive scrub = container(observe event, init Scrub(0), scrub_update);
+
+render_scrub(renderer, ref scrub)
