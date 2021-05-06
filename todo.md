@@ -1,6 +1,10 @@
 # TODO
 
 * [x] fix reactive def linking issue
+* [ ] add scrub bar to pong
+* [ ] fix deleted dependency issue
+  * deleted dependencies aren't detected currently
+  * need to do a backwards check on dependencies, instead of the forwards check
 * [ ] solve issue with sample cells
   * value changes shouldn't trigger stream cells
   * what about container cells?

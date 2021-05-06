@@ -2,6 +2,7 @@
 include(env, ref "examples/lib/prelude.gen");
 include(env, ref "examples/lib/game.gen");
 include(env, ref "examples/lib/list.gen");
+include(env, ref "examples/scrub.gen");
 
 embed define_list_type(#GameEventList, #GameEvent);
 
@@ -26,17 +27,23 @@ def buffer_update = fun(buffer : ptr GameEventBuffer, e : ptr GameEvent) {
 def width = 800;
 def height = 600;
 
-def paddle_height = 50;
+def paddle_height = 100;
 def paddle_speed = 10;
-def ball_size = 10;
+def ball_size = 50;
 
-def window = create_game_window("SDL Example", width, height);
+def window = create_game_window("Pong", width, height);
+def window_id = sdl_get_window_id(window);
 
 def Vec2 = struct { x : i64, y : i64 };
 
 def Ball = struct { pos : Vec2, vel : Vec2 };
 
-def Paddle = struct { pos : i64, vel : i64 };
+def Paddle = struct {
+  pos : Vec2,
+  width : i64,
+  height : i64,
+  vel : i64
+};
 
 def Game = struct {
   p1 : Paddle,
@@ -57,8 +64,8 @@ def initial_game_state = {
     init Vec2(5, 5),
   );
   init Game(
-    init Paddle(ypos, 0),
-    init Paddle(ypos, 0),
+    init Paddle(init Vec2(50, ypos), 5, paddle_height, 0),
+    init Paddle(init Vec2(740, ypos), 5, paddle_height, 0),
     b,
   )
 };
@@ -81,31 +88,39 @@ def game_update = fun(state : ptr Game, e : ptr GameEvent) {
     }
     if event_type == SDL_KEYDOWN {
       let k = to_keyboard_event(ref e.input);
-      if k.keysym.scancode == ARROW_DOWN {
-        state.p1.vel = paddle_speed;
-      }
-      if k.keysym.scancode == ARROW_UP {
-        state.p1.vel = -paddle_speed;
+      if k.window_id == window_id {
+        if k.keysym.scancode == ARROW_DOWN {
+          state.p1.vel = paddle_speed;
+        }
+        if k.keysym.scancode == ARROW_UP {
+          state.p1.vel = -paddle_speed;
+        }
       }
     }
     if event_type == SDL_KEYUP {
       let k = to_keyboard_event(ref e.input);
-      if k.keysym.scancode == ARROW_DOWN {
-        state.p1.vel = 0;
-      }
-      if k.keysym.scancode == ARROW_UP {
-        state.p1.vel = 0;
+      if k.window_id == window_id {
+        if k.keysym.scancode == ARROW_DOWN {
+          state.p1.vel = 0;
+        }
+        if k.keysym.scancode == ARROW_UP {
+          state.p1.vel = 0;
+        }
       }
     }
   }
   // handle tick events
   if e.tag == tick_event_tag {
-    state.p1.pos = state.p1.pos + state.p1.vel;
-    state.p2.pos = state.p2.pos + state.p2.vel;
+    // move the paddles
+    state.p1.pos.y = state.p1.pos.y + state.p1.vel;
+    state.p2.pos.y = state.p2.pos.y + state.p2.vel;
 
+    // move the ball
     let b = ref state.b;
+    let prev_ball_pos = b.pos;
     b.pos.x = b.pos.x + b.vel.x;
     b.pos.y = b.pos.y + b.vel.y;
+    // collide with walls
     if b.pos.x > width - ball_size {
       b.pos.x = width - ball_size;
       b.vel.x = -b.vel.x;
@@ -122,6 +137,32 @@ def game_update = fun(state : ptr Game, e : ptr GameEvent) {
       b.pos.y = 0;
       b.vel.y = -b.vel.y;
     }
+
+    // collide with paddle
+    let p1 = ref state.p1;
+    let p2 = ref state.p2;
+    let p1_x = p1.pos.x + p1.width;
+    if b.pos.x < p1_x {
+      if prev_ball_pos.x >= p1_x {
+        if b.pos.y >= p1.pos.y {
+          if b.pos.y <= p1.pos.y + p1.height {
+            b.pos.x = p1_x;
+            b.vel.x = -b.vel.x;
+          }
+        }
+      }
+    }
+    let p2_x = p2.pos.x;
+    if b.pos.x > p2_x {
+      if prev_ball_pos.x <= p2_x {
+        if b.pos.y >= p2.pos.y {
+          if b.pos.y <= p2.pos.y + p2.height {
+            b.pos.x = p2_x;
+            b.vel.x = -b.vel.x;
+          }
+        }
+      }
+    }
   }
 };
 
@@ -130,14 +171,14 @@ def render_game = fun(r : SdlRendererHandle, state : ptr Game) {
   sdl_set_draw_color(r, 0 as u8, 0 as u8, 0 as u8, 0 as u8);
   sdl_clear(r);
 
-  sdl_set_draw_color(r, 255 as u8, 0 as u8, 0 as u8, 255 as u8);
+  sdl_set_draw_color(r, 255 as u8, 255 as u8, 0 as u8, 255 as u8);
 
   // Paddle p1
-  let rect = init sdl_rect(50 as i32, state.p1.pos as i32, 10 as i32, 50 as i32);
+  let rect = init sdl_rect(state.p1.pos.x as i32, state.p1.pos.y as i32, 10 as i32, state.p1.height as i32);
   sdl_fill_rect(r, ref rect);
 
   // Paddle p2
-  let rect = init sdl_rect(740 as i32, state.p2.pos as i32, 10 as i32, 50 as i32);
+  let rect = init sdl_rect(state.p2.pos.x as i32, state.p2.pos.y as i32, 10 as i32, state.p2.height as i32);
   sdl_fill_rect(r, ref rect);
 
   // Ball
@@ -162,9 +203,16 @@ def buffered_game_update = fun(g : ptr BufferedGame, buffer : ptr GameEventBuffe
   }
 }
 
-reactive input_tick = create_timer(10);
+reactive input_tick = create_timer(1);
 
-reactive sdl_input = stream(observe input_tick, poll_sdl_input);
+reactive sdl_input = stream(observe input_tick, poll_game_input);
+
+reactive scrub = {
+  let initial = create_scrub("Events", 400, 50);
+  container(observe sdl_input, initial, scrub_update)
+}
+
+render_scrub(ref scrub);
 
 reactive frame_tick = create_timer(1000/30);
 
@@ -179,15 +227,17 @@ def event = {
   }
 }
 
+def buffer_size = 1050;
+
 reactive buffered_events = container(
   observe event,
-  create_game_event_buffer(1000),
+  create_game_event_buffer(buffer_size),
   buffer_update
 );
 
 def tweaked_buffer = init GameEventBuffer(
   buffered_events.list,
-  1000,
+  (buffer_size * scrub.val) / 100,
 );
 
 reactive game_state = {

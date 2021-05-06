@@ -3,71 +3,65 @@ include(env, ref "examples/lib/prelude.gen");
 include(env, ref "examples/lib/game.gen");
 
 def Scrub = struct {
+  width : i64,
+  height : i64,
+  window : SdlWindowHandle,
+  window_id : u32,
+  renderer : SdlRendererHandle,
   val : i64,
+  mouse_down : bool,
 }
 
-def scrub_width = 400;
-def scrub_height = 50;
-
-def scrub_window = create_game_window("Events", scrub_width, scrub_height);
-
-reactive input_tick = create_timer(10);
-
-reactive sdl_input = stream(observe input_tick, poll_sdl_input);
-
-def SDL_MOUSEDOWN = 1025 as u32;
-def SDL_MOUSEUP = 1026 as u32;
-
-def SdlMouseEvent = struct {
-  blah : i64
-}
-
-def to_mouse_event = fun(e : ptr SdlEvent) {
-  (ref e.content) as (ptr SdlMouseEvent)
-};
-
-def scrub_update = fun(scrub : ptr Scrub, e : ptr GameEvent) {
+def scrub_update = fun(scrub : ptr Scrub, ge : ptr GameEvent) {
   // handle time events
-  if e.tag == sdl_event_tag {
-    if e.input.event_type == SDL_MOUSEDOWN {
-      print e.input.content[0];
+  let e = ref ge.input;
+  if e.event_type == SDL_MOUSEDOWN {
+    let me = to_mouse_button_event(e);
+    if me.window_id == scrub.window_id {
+      scrub.val = ((me.x as i64) * 100) / scrub.width;
+      scrub.mouse_down = true;
+      return true;
     }
   }
+  if e.event_type == SDL_MOUSEUP {
+    let me = to_mouse_button_event(e);
+    if me.window_id == scrub.window_id {
+      scrub.mouse_down = false;
+      return true;
+    }
+  }
+  if e.event_type == SDL_MOUSEMOTION {
+    if scrub.mouse_down {
+      let mm = to_mouse_motion_event(e);
+      if mm.window_id == scrub.window_id {
+        scrub.val = ((mm.x as i64) * 100) / scrub.width;
+        return true;
+      }
+    }
+  }
+  false
 }
 
-def initial_scrub_state = init Scrub(100);
-
-def renderer =
-  sdl_create_renderer(scrub_window, -1 as i32, SDL_RENDERER_ACCELERATED);
-
-def render_scrub = fun (r : SdlRendererHandle, scrub : ptr Scrub) {
+def render_scrub = fun (scrub : ptr Scrub) {
+  let r = scrub.renderer;
   // render
   sdl_set_draw_color(r, 0 as u8, 0 as u8, 0 as u8, 0 as u8);
   sdl_clear(r);
 
   sdl_set_draw_color(r, 255 as u8, 0 as u8, 0 as u8, 255 as u8);
 
-  let w = (scrub_width / 100) * scrub.val;
+  let w = (scrub.width / 100) * scrub.val;
 
-  let rect = init sdl_rect(0 as i32, 0 as i32, w as i32, scrub_height as i32);
+  let rect = init sdl_rect(0 as i32, 0 as i32, w as i32, scrub.height as i32);
 
   sdl_fill_rect(r, ref rect);
   sdl_present(r);
 };
 
-reactive frame_tick = create_timer(1000/30);
-
-def frame_event = init GameEvent(tick_event_tag, zero_init SdlEvent, frame_tick);
-
-def event = {
-  if sdl_input.tick > frame_event.tick {
-    sdl_input
-  }
-  else {
-    frame_event
-  }
+def create_scrub = fun(name : string, width : i64, height : i64) {
+  let window = create_game_window(name, width, height);
+  let window_id = sdl_get_window_id(window);
+  let renderer =
+    sdl_create_renderer(window, -1 as i32, SDL_RENDERER_ACCELERATED);
+  init Scrub(width, height, window, window_id, renderer, 100, false)
 }
-
-reactive scrub = container(observe event, init Scrub(0), scrub_update);
-
-render_scrub(renderer, ref scrub)
