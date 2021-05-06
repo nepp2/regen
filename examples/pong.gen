@@ -27,9 +27,9 @@ def buffer_update = fun(buffer : ptr GameEventBuffer, e : ptr GameEvent) {
 def width = 800;
 def height = 600;
 
-def paddle_height = 100;
+def paddle_height = 50;
 def paddle_speed = 10;
-def ball_size = 50;
+def ball_size = 10;
 
 def window = create_game_window("Pong", width, height);
 def window_id = sdl_get_window_id(window);

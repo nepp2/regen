@@ -1,6 +1,6 @@
 use crate::{compile::Function, event_loop::{self, EventLoop, TriggerId}, ffi_libs::*, parse::{self, CodeModule, Expr, ExprContent, ExprTag, SrcLocation, Val}, perm_alloc::{Ptr, SlicePtr, perm, perm_slice}, symbols::{Symbol, SymbolTable, to_symbol}, types::{TypeHandle, CoreTypes, core_types }};
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 
 /// A heap allocated Regen value
@@ -25,7 +25,7 @@ pub struct Environment {
   pub cell_exprs : HashMap<CellUid, Expr>,
   pub cell_compiles : HashMap<CellUid, CellCompile>,
   pub cell_values : HashMap<CellUid, CellValue>,
-  pub broken_cells : HashSet<CellUid>,
+  pub broken_cells : HashMap<CellUid, UpdateLevel>,
   pub reactive_cells : HashMap<CellUid, ReactiveCell>,
   pub graph : CellGraph,
 
@@ -34,6 +34,20 @@ pub struct Environment {
   pub st : SymbolTable,
   pub c : CoreTypes,
   builtin_dummy_expr : Expr,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum UpdateLevel {
+  NoUpdate = 0,
+  Observer = 1,
+  Evaluate = 2,
+  Compile = 3,
+}
+
+impl UpdateLevel {
+  pub fn precedence(self, other : Self) -> Self {
+    if (self as i32) > other as i32 { self } else { other }
+  }
 }
 
 #[derive(Copy, Clone)]
@@ -53,7 +67,7 @@ pub struct ReactiveCell {
 pub enum DependencyType {
   Code,
   Value,
-  Reactive,
+  Observer,
 }
 
 #[derive(Clone, Default)]
@@ -62,25 +76,25 @@ pub struct CellGraph {
   /// the Uid was calculated from, because these expressions are sensitive
   /// to namespacing. When the code changes they have to be re-checked in
   /// case they resolve to a different Uid.
-  dependency_graph : HashMap<CellUid, HashMap<CellUid, DependencyType>>,
+  input_graph : HashMap<CellUid, HashMap<CellUid, DependencyType>>,
 
   /// The output graph is just the dependency graph inverted
   output_graph : HashMap<CellUid, HashMap<CellUid, DependencyType>>,
 }
 
 impl CellGraph {
-  pub fn dependencies(&self, uid : CellUid) -> Option<&HashMap<CellUid, DependencyType>> {
-    self.dependency_graph.get(&uid)
+  pub fn inputs(&self, uid : CellUid) -> Option<&HashMap<CellUid, DependencyType>> {
+    self.input_graph.get(&uid)
   }
 
   pub fn outputs(&self, uid : CellUid) -> Option<&HashMap<CellUid, DependencyType>> {
     self.output_graph.get(&uid)
   }
 
-  fn clear_dependencies(&mut self, uid : CellUid) {
-    if let Some(deps) = self.dependency_graph.remove(&uid) {
-      for dep_uid in deps.keys() {
-        if let Some(outputs) = self.output_graph.get_mut(dep_uid) {
+  fn remove_uid(&mut self, uid : CellUid) {
+    if let Some(deps) = self.input_graph.remove(&uid) {
+      for input_uid in deps.keys() {
+        if let Some(outputs) = self.output_graph.get_mut(input_uid) {
           outputs.remove(&uid);
         }
       }
@@ -88,19 +102,19 @@ impl CellGraph {
   }
 
   pub fn unload_cell(&mut self, uid : CellUid) {
-    self.clear_dependencies(uid);
+    self.remove_uid(uid);
   }
 
   pub fn set_cell_dependencies(&mut self, uid : CellUid, deps : HashMap<CellUid, DependencyType>) {
     // make sure any old data is removed
-    self.clear_dependencies(uid);
+    self.remove_uid(uid);
     // add the outputs
     for (&dep_uid, &dep_type) in &deps {
       let outputs =
         self.output_graph.entry(dep_uid).or_insert_with(|| HashMap::new());
       outputs.insert(uid, dep_type);
     }
-    self.dependency_graph.insert(uid, deps);
+    self.input_graph.insert(uid, deps);
   }
 }
 
@@ -166,8 +180,12 @@ pub fn get_cell_value(env : Env, uid : CellUid) -> Option<CellValue> {
 pub fn unload_cell(mut env : Env, uid : CellUid) {
   env.cell_exprs.remove(&uid);
   env.graph.unload_cell(uid);
-  env.cell_compiles.remove(&uid);
   env.broken_cells.remove(&uid);
+  unload_cell_compile(env, uid);
+}
+
+pub fn unload_cell_compile(mut env : Env, uid : CellUid) {
+  env.cell_compiles.remove(&uid);
   unload_cell_value(env, uid);
 }
 
@@ -218,7 +236,7 @@ pub fn new_env(st : SymbolTable) -> Env {
     cell_exprs: HashMap::new(),
     cell_compiles: HashMap::new(),
     cell_values: HashMap::new(),
-    broken_cells : HashSet::new(),
+    broken_cells : HashMap::new(),
     reactive_cells: HashMap::new(),
     graph: Default::default(),
     timers: HashMap::new(),
