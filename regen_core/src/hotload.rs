@@ -1,6 +1,7 @@
 
 use crate::{compile::{self, Function}, dependencies::{self, CellDependencies}, env::{self, CellCompile, CellIdentifier, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue, UpdateLevel}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types::{self, TypeHandle}};
 
+use core::panic;
 use std::collections::{HashMap, HashSet};
 
 use CellIdentifier::*;
@@ -211,6 +212,9 @@ fn register_reactive_cell(
 {
   let constructor = to_reactive_constructor(env, value_expr, constructor_val)?;
   match constructor.variant {
+    ConstructorVariant::Watcher { file_path } => {
+      panic!()
+    }
     ConstructorVariant::Timer { millisecond_interval } => {
       if val.t != env.c.i64_tag {
         return err(value_expr, "expected reactive i64");

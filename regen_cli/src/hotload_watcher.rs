@@ -9,7 +9,6 @@ use regen_core::{
   new_env,
   env::Env,
   hotload,
-  perm_alloc::{perm, Ptr},
   event_loop,
 };
 use std::fs;
@@ -40,32 +39,29 @@ pub fn watch_file(path : &str) {
   let (tx, rx) = channel();
   let mut watcher = watcher(tx, Duration::from_millis(500)).unwrap();
   watcher.watch(path, RecursiveMode::Recursive).unwrap();
-  let watch_state = perm(
-    WatchState { rx, watcher, path: path.to_string() }
-  );
-  event_loop::register_native_hook(env.event_loop, 10, watch_state,
-    |env, ws : Ptr<WatchState>| {
-      match ws.rx.try_recv() {
-        Ok(event) => {
-          match event {
-            DebouncedEvent::Write(_) => {
-              hotload_file(env, &ws.path);
-            }
-            _ => (),
-          }
-        },
-        Err(e) => match e {
-          TryRecvError::Disconnected => {
-            println!("watch error: {:?}", e);
-          }
-          TryRecvError::Empty => (),
-        },
-      }
-    }
-  );
-
+  let ws = WatchState { rx, watcher, path: path.to_string() };
   hotload_file(env, path);
   
-  event_loop::start_loop(env);
+  loop {
+    // check for watcher events
+    match ws.rx.try_recv() {
+      Ok(event) => {
+        match event {
+          DebouncedEvent::Write(_) => {
+            hotload_file(env, &ws.path);
+          }
+          _ => (),
+        }
+      },
+      Err(e) => match e {
+        TryRecvError::Disconnected => {
+          println!("watch error: {:?}", e);
+        }
+        TryRecvError::Empty => (),
+      },
+    }
+    // handle timer
+    event_loop::wait_for_next_timer(env, 10);
+  }
 }
 

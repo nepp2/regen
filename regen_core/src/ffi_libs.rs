@@ -138,6 +138,7 @@ pub fn load_ffi_libs(e : Env) {
   let type_tag_ptr = types::pointer_type(type_tag);
   let symbol = e.c.symbol_tag;
   let symbol_ptr = types::pointer_type(symbol);
+  let string_ptr = types::pointer_type(e.c.string_tag);
 
   let c = &e.c;
   for (n, t) in &c.core_types {
@@ -191,6 +192,11 @@ pub fn load_ffi_libs(e : Env) {
     c_function_type(&[void_ptr, u32, u64], void_ptr));
   
   // ----------- Bind signal functions ------------
+
+  define_global(e, "new_watcher_constructor", new_watcher_constructor as u64,
+    c_function_type(
+      &[env_tag, string_ptr],
+      reactive_constructor_tag));
 
   define_global(e, "new_timer_constructor", new_timer_constructor as u64,
     c_function_type(

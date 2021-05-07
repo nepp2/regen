@@ -171,7 +171,7 @@ def render_game = fun(r : SdlRendererHandle, state : ptr Game) {
   sdl_set_draw_color(r, 0 as u8, 0 as u8, 0 as u8, 0 as u8);
   sdl_clear(r);
 
-  sdl_set_draw_color(r, 255 as u8, 255 as u8, 0 as u8, 255 as u8);
+  sdl_set_draw_color(r, 255 as u8, 0 as u8, 0 as u8, 255 as u8);
 
   // Paddle p1
   let rect = init sdl_rect(state.p1.pos.x as i32, state.p1.pos.y as i32, 10 as i32, state.p1.height as i32);
