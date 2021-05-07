@@ -56,6 +56,7 @@ pub enum ExprTag {
   ConstExpr,
   Def,
   Reactive,
+  Cells,
   Observe,
   Container,
   Stream,

@@ -85,7 +85,7 @@ print add(6, 7); // 13
 
 // include
 
-include(env, ref "examples/lib/prelude.gen");
+embed load_expr(env, ref "examples/lib/prelude.gen");
 
 // while loops
 

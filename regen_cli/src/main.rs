@@ -16,7 +16,7 @@ pub fn run_file(path : &str) {
     .expect("Something went wrong reading the file");
   let env = new_env();
   ffi_libs::bind_libs(env);
-  hotload::interpret_module(env, path, &code);
+  hotload::hotload_module(env, path, &code);
 }
 
 fn main(){

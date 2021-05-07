@@ -10,7 +10,7 @@ pub type DependencyValues = HashMap<CellUid, CellValue>;
 
 pub struct CompileContext<'l> {
   pub env : Env,
-  deps : &'l DependencyValues,
+  pub deps : &'l DependencyValues,
 }
 
 impl <'l> CompileContext<'l> {
@@ -289,18 +289,19 @@ fn update_value_expression(
   env.cell_exprs.insert(uid, value_expr);
   // update dependencies
   let mut graph_deps = HashMap::new();
-  if let Some(observe_id) = deps.observe_ref {
+  for &dep_id in &deps.ids {
+    let dt = match dep_id {
+      CellIdentifier::DefCell(_, _) => DependencyType::Value,
+      CellIdentifier::ExprCell(_) => DependencyType::Code,
+      CellIdentifier::EmbedCell(_) => DependencyType::Code,
+    };
+    graph_deps.insert(dep_id.uid(env), dt);
+  }
+  if let Some(observe_id) = deps.observe_id {
     graph_deps.insert(observe_id.uid(env), DependencyType::Observer);
   }
-  for &dep_id in &deps.def_refs {
-    graph_deps.insert(dep_id.uid(env), DependencyType::Value);
-  }
   for &e in &deps.embeds {
-    let dep_uid = CellIdentifier::expr(e).uid(env);
-    graph_deps.insert(dep_uid, DependencyType::Code);
-  }
-  for &e in &deps.const_exprs {
-    let dep_uid = CellIdentifier::expr(e).uid(env);
+    let dep_uid = CellIdentifier::EmbedCell(e).uid(env);
     graph_deps.insert(dep_uid, DependencyType::Code);
   }
   env.graph.set_cell_dependencies(uid, graph_deps);
@@ -364,7 +365,7 @@ fn update_observer(mut env : Env, hs : &mut HotloadState, uid : CellUid) -> Chan
   }
 }
 
-fn hotload_cell(
+fn hotload_cell_value(
   mut env : Env,
   hs : &mut HotloadState,
   uid : CellUid,
@@ -373,7 +374,7 @@ fn hotload_cell(
   reactive_cell : bool,
 )
 {
-  let r = try_hotload_cell(env, hs, uid, value_expr, deps, reactive_cell);
+  let r = try_hotload_cell_value(env, hs, uid, value_expr, deps, reactive_cell);
   if let Err(he) = r {
     if let HotloadError::Visible(e, ut) = he {
       env.broken_cells.insert(uid, ut);
@@ -470,7 +471,7 @@ fn apply_update(
   }
 }
 
-fn try_hotload_cell(
+fn try_hotload_cell_value(
   env : Env,
   hs : &mut HotloadState,
   uid : CellUid,
@@ -492,6 +493,9 @@ fn try_hotload_cell(
         return Err(HotloadError::Visible(e, UpdateLevel::NoUpdate));
       }
       ExprCell(_) => {
+        return Ok(());
+      }
+      EmbedCell(_) => {
         return Ok(());
       }
     }
@@ -528,22 +532,30 @@ fn hotload_embedded(
   env : Env,
   hs : &mut HotloadState,
   namespace : Namespace,
-  embeds : &[Expr],
+  const_expr : Expr,
 )
 {
-  hotload_cells(env, hs, namespace, embeds);
-  for &e in embeds {
-    let uid = CellIdentifier::expr(e).uid(env);
-    if let Some(cv) = get_cell_value(env, hs, uid, true) {
-      if cv.t == env.c.expr_tag {
-        let e = unsafe { *(cv.ptr as *const Expr) };
-        let deps = dependencies::get_cell_dependencies(env.st, e);
-        hotload_nested_cells(env, hs, namespace, &deps);
-      }
-      else {
-        let e = error(e, format!("expected expression of type 'expr', found {}", cv.t));
-        println!("{}", e.display());
-      }
+  let embed_uid = CellIdentifier::EmbedCell(const_expr).uid(env);
+  if hs.visited_cells.contains(&embed_uid) {
+    return;
+  }
+  let const_expr_id = CellIdentifier::expr(const_expr);
+  hotload_cell(env, hs, namespace, const_expr);
+  if let Some(cv) = get_cell_value(env, hs, const_expr_id.uid(env), true) {
+    if cv.t == env.c.expr_tag {
+      let e = unsafe { *(cv.ptr as *const Expr) };
+      let mut deps = dependencies::get_cell_dependencies(env.st, e);
+      hotload_nested_cells(env, hs, namespace, &deps);
+      // make sure the embed depends on the const expr
+      deps.ids.push(const_expr_id);
+      // hotload the const expression initialiser
+      hotload_cell_value(env, hs, embed_uid, e, &deps, false);
+    }
+    else {
+      let e =
+        error(const_expr,
+          format!("expected expression of type 'expr', found {}", cv.t));
+      println!("{}", e.display());
     }
   }
 }
@@ -554,9 +566,10 @@ fn hotload_nested_cells(
   namespace : Namespace,
   deps : &CellDependencies,
 ) {
-  hotload_cells(env, hs, namespace, &deps.defs);
-  hotload_cells(env, hs, namespace, &deps.const_exprs);
-  hotload_embedded(env, hs, namespace, &deps.embeds);
+  hotload_cells(env, hs, namespace, &deps.inner_cells);
+  for &e in &deps.embeds {
+    hotload_embedded(env, hs, namespace, e);
+  }
 }
 
 fn hotload_def(
@@ -574,7 +587,34 @@ fn hotload_def(
   hotload_nested_cells(env, hs, nested_namespace, &deps);
   // hotload the def initialiser
   let uid = CellIdentifier::def(namespace, name).uid(env);
-  hotload_cell(env, hs, uid, value_expr, &deps, reactive_cell);
+  hotload_cell_value(env, hs, uid, value_expr, &deps, reactive_cell);
+}
+
+fn hotload_cell(
+  env : Env,
+  hs : &mut HotloadState,
+  namespace : Namespace,
+  cell_expr : Expr,
+) {
+  match cell_expr.shape() {
+    ExprShape::List(ExprTag::Def, &[name, value_expr]) => {
+      hotload_def(env, hs, namespace, name.as_symbol(), value_expr, false);
+    }
+    ExprShape::List(ExprTag::Reactive, &[name, value_expr]) => {
+      hotload_def(env, hs, namespace, name.as_symbol(), value_expr, true);
+    }
+    ExprShape::List(ExprTag::Cells, cell_exprs) => {
+      hotload_cells(env, hs, namespace, cell_exprs);
+    }
+    _ => {
+      // hotload nested cells
+      let deps = dependencies::get_cell_dependencies(env.st, cell_expr);
+      hotload_nested_cells(env, hs, namespace, &deps);
+      // hotload the const expression initialiser
+      let uid = CellIdentifier::expr(cell_expr).uid(env);
+      hotload_cell_value(env, hs, uid, cell_expr, &deps, false);
+    }
+  }
 }
 
 fn hotload_cells(
@@ -585,22 +625,7 @@ fn hotload_cells(
 )
 {
   for &e in cell_exprs {
-    match e.shape() {
-      ExprShape::List(ExprTag::Def, &[name, value_expr]) => {
-        hotload_def(env, hs, namespace, name.as_symbol(), value_expr, false);
-      }
-      ExprShape::List(ExprTag::Reactive, &[name, value_expr]) => {
-        hotload_def(env, hs, namespace, name.as_symbol(), value_expr, true);
-      }
-      _ => {
-        // hotload nested cells
-        let deps = dependencies::get_cell_dependencies(env.st, e);
-        hotload_nested_cells(env, hs, namespace, &deps);
-        // hotload the const expression initialiser
-        let uid = CellIdentifier::expr(e).uid(env);
-        hotload_cell(env, hs, uid, e, &deps, false);
-      }
-    }
+    hotload_cell(env, hs, namespace, e)
   }
 }
 
@@ -669,9 +694,9 @@ fn required_output_update(input_change : ChangeType, input_type : DependencyType
   Some(v)
 }
 
-fn hotload_module(env : Env, hs : &mut HotloadState, exprs : &[Expr]) {
+fn update_module(env : Env, hs : &mut HotloadState, module_expr : Expr) {
   // Find new and unchanged cells
-  hotload_cells(env, hs, env::new_namespace(&[]), exprs);
+  hotload_cell(env, hs, env::new_namespace(&[]), module_expr);
 
   // unload any cells that were deleted
   for (id, e) in &env.cell_exprs {
@@ -683,10 +708,13 @@ fn hotload_module(env : Env, hs : &mut HotloadState, exprs : &[Expr]) {
   }
 }
 
-pub fn hotload_live_module(mut env : Env, module_name : &str, code : &str) {
+pub fn hotload_module(mut env : Env, module_name : &str, code : &str) {
   let module_name = to_symbol(env.st, module_name);
+  if env.root_module.is_none() {
+    env.root_module = Some(module_name);
+  }
   // Parse file
-  let exprs = {
+  let module_expr = {
     let r = std::panic::catch_unwind(|| {
       parse::parse_module(env.st, module_name, &code).unwrap()
     });
@@ -694,30 +722,17 @@ pub fn hotload_live_module(mut env : Env, module_name : &str, code : &str) {
   };
   let mut hs = HotloadState::new(module_name, None);
   env.broken_cells.clear();
-  hotload_module(env, &mut hs, &exprs);
-  env.live_exprs = exprs;
-}
-
-pub fn interpret_module(env : Env, module_name : &str, code : &str) {
-  let module_name = to_symbol(env.st, module_name);
-  // Parse file
-  let exprs = {
-    let r = std::panic::catch_unwind(|| {
-      parse::parse_module(env.st, module_name, &code).unwrap()
-    });
-    if let Ok(n) = r { n } else { return }
-  };
-  let mut hs = HotloadState::new(module_name, None);
-  hotload_module(env, &mut hs, &exprs);
+  update_module(env, &mut hs, module_expr);
+  env.module_exprs.insert(module_name, module_expr);
 }
 
 /// Recalculate cell values in response to an updated cell
 fn cell_updated(env : Env, uid : CellUid) {
-  let module_name = env.cell_exprs[&uid].loc().module.name;
-  let mut hs = HotloadState::new(module_name, Some(uid));
+  let root_module = env.root_module.unwrap();
+  let mut hs = HotloadState::new(root_module, Some(uid));
   hs.cell_changes.insert(uid, ChangeType::Value);
   hs.visited_cells.insert(uid);
-  hotload_module(env, &mut hs, &env.live_exprs);
+  update_module(env, &mut hs, env.module_exprs[&root_module]);
 }
 
 /// Called by the event loop when the value of a reactive cell has changed

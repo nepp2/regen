@@ -459,7 +459,20 @@ fn compile_cast(b : &mut Builder, v : Var, t : TypeHandle)
   Ok(push_expr(b, v.loc, InstrExpr::Cast(v.id), t))
 }
 
+/// Returns true for tags that the code generation ignores
+/// These are used by other compile stages
+fn is_ignored_tag(t : ExprTag) -> bool {
+  use ExprTag::*;
+  match t {
+    Def | Reactive | Cells => true,
+    _ => false,
+  }
+}
+
 fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
+  if is_ignored_tag(e.tag) {
+    return Ok(None);
+  }
   use ExprShape::*;
   use ExprTag::*;
   match e.shape() {
@@ -735,19 +748,13 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
       let num_locals = b.scoped_vars.len();
       for &c in exprs {
         // Ignore nested defs
-        if c.tag != Def && c.tag != Reactive {
+        if !is_ignored_tag(c.tag) {
           v = compile_expr(b, c)?;
         }
       }
       b.scoped_vars.drain(num_locals..).for_each(|_| ());
       let result = v.map(|v| v.to_var(b)); // Can't pass ref out of block scope
       return Ok(result.map(|x| x.to_ref()));
-    }
-    List(Def, _) => {
-      // Ignore defs
-    }
-    List(Reactive, _) => {
-      // Ignore defs
     }
     // debug
     List(Debug, &[v]) => {
@@ -756,12 +763,11 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
     }
     // embed
     List(Embed, &[e]) => {
-      let cev = const_expr_value(b, e)?;
-      if cev.t != b.c.expr_tag {
-        return err(e, format!("expected expression of type 'expr', found {}", cev.t));
-      }
-      let expr_value = unsafe { *(cev.ptr as *const Expr) };
-      return compile_expr(b, expr_value);
+      let uid = CellIdentifier::EmbedCell(e);
+      let cv = get_cell_value(b, e, uid)?;
+      let ie = InstrExpr::StaticValue(cv.t, cv.ptr);
+      let v = push_expr(b, e, ie, types::pointer_type(cv.t));
+      return Ok(Some(pointer_to_locator(v, false)?));
     }
     // typeof
     List(TypeOf, &[v]) => {
@@ -1116,5 +1122,5 @@ fn get_cell_value(b : &mut Builder, e : Expr, id : CellIdentifier) -> Result<Cel
       return err(e, format!("cell {} not yet initialised", id));
     }
   }
-  err(e, format!("no value found for cell"))
+  err(e, format!("no value found for {}", id))
 }

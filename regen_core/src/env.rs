@@ -13,12 +13,12 @@ pub struct RegenValue {
 /// Environment for regen editing session
 #[derive(Clone)]
 pub struct Environment {
-  pub live_exprs : Vec<Expr>,
-
-  uid_counter : u64,
+  pub root_module : Option<Symbol>,
+  pub module_exprs : HashMap<Symbol, Expr>,
 
   /// TODO: these ids are not cleared, so they
   /// will leak memory over long editing sessions
+  uid_counter : u64,
   cell_uids : HashMap<CellIdentifier, CellUid>,
   cell_ids : HashMap<CellUid, CellIdentifier>,
 
@@ -126,6 +126,7 @@ pub type Namespace = SlicePtr<Symbol>;
 pub enum CellIdentifier {
   DefCell(Namespace, Symbol),
   ExprCell(Expr),
+  EmbedCell(Expr),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -229,8 +230,9 @@ pub fn new_env(st : SymbolTable) -> Env {
   };
 
   let env = perm(Environment {
+    root_module: None,
+    module_exprs: HashMap::new(),
     uid_counter: 0,
-    live_exprs: vec![],
     cell_uids:  HashMap::new(),
     cell_ids:  HashMap::new(),
     cell_exprs: HashMap::new(),
@@ -259,6 +261,7 @@ impl fmt::Display for CellIdentifier {
         write!(f, "{}", name)
       },
       ExprCell(expr) => write!(f, "expr({})", expr.loc()),
+      EmbedCell(expr) => write!(f, "embed({})", expr.loc()),
     }
   }
 }

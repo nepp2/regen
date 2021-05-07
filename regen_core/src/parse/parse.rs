@@ -8,7 +8,7 @@ use std::str::FromStr;
 
 use ExprTag::*;
 
-pub fn parse_module(st : SymbolTable, module_name : Symbol, code : &str) -> Result<Vec<Expr>, Error> {
+pub fn parse_module(st : SymbolTable, module_name : Symbol, code : &str) -> Result<Expr, Error> {
   let module = perm(CodeModule { name: module_name, code: code.into() });
   let tokens = lex(&module)?;
   parse_top_level(module, tokens, st)
@@ -17,8 +17,8 @@ pub fn parse_module(st : SymbolTable, module_name : Symbol, code : &str) -> Resu
 pub fn parse_expression(st : SymbolTable, module_name : Symbol, code : &str) -> Result<Expr, Error> {
   let module = perm(CodeModule { name: module_name, code: code.into() });
   let tokens = lex(&module)?;
-  let es = parse_top_level(module, tokens, st)?;
-  if let &[e] = es.as_slice() {
+  let e = parse_top_level(module, tokens, st)?;
+  if let &[e] = e.children() {
     return Ok(e);
   }
   let loc = SrcLocation { start: 0, end: code.len(), module };
@@ -916,16 +916,18 @@ fn parse_expression_term(ps : &mut ParseState) -> Result<Expr, Error> {
   }
 }
 
-fn parse_top_level(module : Ptr<CodeModule>, tokens : Vec<Token>, st : SymbolTable) -> Result<Vec<Expr>, Error> {
+fn parse_top_level(module : Ptr<CodeModule>, tokens : Vec<Token>, st : SymbolTable) -> Result<Expr, Error> {
   let config = parse_config();
   let mut ps = ParseState::new(module, tokens, &config, st);
   let mut es = vec![];
+  let start = ps.peek_marker();
   parse_semicolon_expr_list(&mut ps, &mut es)?;
   if ps.has_tokens() {
     let t = ps.peek()?;
     return err(t.loc, format!("Unexpected token '{}' of type '{:?}'", t.to_string(), t.token_type));
   }
-  return Ok(es);
+  let e = ps.list_expr(Cells, es, start);
+  return Ok(e);
 }
 
 fn to_template_expr(st : SymbolTable, quoted : Expr) -> Expr {

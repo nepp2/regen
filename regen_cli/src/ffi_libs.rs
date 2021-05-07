@@ -1,5 +1,5 @@
 
-use regen_core::{env, env::{CellIdentifier, Env, define_global}, ffi_libs::RegenString, hotload, symbols::{Symbol, to_symbol}, types, types::c_function_type};
+use regen_core::{env::{self, CellIdentifier, Env, define_global}, ffi_libs::RegenString, hotload, parse::{self, Expr}, symbols::{Symbol, to_symbol}, types, types::c_function_type};
 use std::fs;
 use std::path::Path;
 use std::ffi::CString;
@@ -21,10 +21,21 @@ pub extern "C" fn include(env : Env, file_name : &RegenString) {
     let code =
       fs::read_to_string(&path)
       .expect("Something went wrong reading the file");
-    hotload::interpret_module(env, file_name, &code);
+    hotload::hotload_module(env, file_name, &code);
     let u64 = env.c.u64_tag;
     define_global(env, path_symbol.as_str(), path_symbol.as_u64(), u64);
   }
+}
+
+pub extern "C" fn load_expr(env : Env, file_name : &RegenString) -> Expr {
+  let file_name = file_name.as_str();
+  let module_name = to_symbol(env.st, file_name);
+  env.root_module.unwrap();
+  let path = format!("{}/{}", LIB_PATH, file_name);
+  let code =
+    fs::read_to_string(&path)
+    .expect("Something went wrong reading the file");
+  parse::parse_module(env.st, module_name, &code).unwrap()
 }
 
 pub extern "C" fn load_library(path : Symbol) -> *const Library {
@@ -56,8 +67,11 @@ pub fn bind_libs(env : Env) {
   let void = env.c.void_tag;
   let void_ptr = types::pointer_type(void);
   let string_ptr = types::pointer_type(env.c.string_tag);
+  let expr_tag = env.c.expr_tag;
   define_global(env, "include", include as u64,
     c_function_type(&[void_ptr, string_ptr], void));
+  define_global(env, "load_expr", load_expr as u64,
+    c_function_type(&[void_ptr, string_ptr], expr_tag));
   define_global(env, "load_library", load_library as u64,
     c_function_type(&[symbol_tag], void_ptr));
   define_global(env, "load_library_symbol", load_library_symbol as u64,

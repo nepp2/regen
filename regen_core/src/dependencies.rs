@@ -1,11 +1,10 @@
 use crate::{env::{CellIdentifier}, parse::{self, Expr, ExprTag, ExprShape}, perm_alloc::{perm_slice_from_vec, perm_slice}, symbols::{to_symbol, Symbol, SymbolTable}};
 
 pub struct CellDependencies {
-  pub defs : Vec<Expr>,
-  pub const_exprs : Vec<Expr>,
-  pub def_refs : Vec<CellIdentifier>,
-  pub observe_ref : Option<CellIdentifier>,
+  pub inner_cells : Vec<Expr>,
+  pub ids : Vec<CellIdentifier>,
   pub embeds : Vec<Expr>,
+  pub observe_id : Option<CellIdentifier>,
 }
 
 pub fn get_cell_dependencies(st : SymbolTable, expr : Expr) -> CellDependencies {
@@ -23,21 +22,18 @@ pub fn get_cell_dependencies(st : SymbolTable, expr : Expr) -> CellDependencies 
           return;
         }
         if locals.iter().find(|&l| *l == name).is_none() {
-          let uid = expr_to_id(expr).unwrap();
-          deps.def_refs.push(uid);
+          let id = expr_to_id(expr).unwrap();
+          deps.ids.push(id);
         }
       }
       List(ExprTag::Observe, &[e]) => {
-        if let Some(uid) = expr_to_id(e) {
-          if deps.observe_ref.is_some() {
-            panic!("only permit one observe per definition")
-          }
-          deps.observe_ref = Some(uid);
+        if let Some(id) = expr_to_id(e) {
+          deps.observe_id = Some(id);
         }
       }
       List(ExprTag::Namespace, _) => {
-        if let Some(uid) = expr_to_id(expr) {
-          deps.def_refs.push(uid);
+        if let Some(id) = expr_to_id(expr) {
+          deps.ids.push(id);
         }
       }
       List(ExprTag::Let, &[name, value]) => {
@@ -45,13 +41,20 @@ pub fn get_cell_dependencies(st : SymbolTable, expr : Expr) -> CellDependencies 
         locals.push(name.as_symbol());
       }
       List(ExprTag::Def, _) | List(ExprTag::Reactive, _) => {
-        deps.defs.push(expr);
+        deps.inner_cells.push(expr);
+      }
+      List(ExprTag::Cells, cell_exprs) => {
+        for &ce in cell_exprs {
+          deps.inner_cells.push(ce);
+        }
       }
       List(ExprTag::ConstExpr, &[c]) => {
-        deps.const_exprs.push(c);
+        deps.inner_cells.push(c);
+        deps.ids.push(CellIdentifier::expr(c))
       }
-      List(ExprTag::Embed, &[e]) => {
-        deps.embeds.push(e);
+      List(ExprTag::Embed, &[inner]) => {
+        deps.embeds.push(inner);
+        deps.ids.push(CellIdentifier::expr(inner))
       }
       List(ExprTag::Quote, _) => {
         // expression literals should be ignored!
@@ -75,19 +78,23 @@ pub fn get_cell_dependencies(st : SymbolTable, expr : Expr) -> CellDependencies 
         find_nested_cells(st, &mut new_locals, deps, body);
       }
       List(ExprTag::Container, exprs) => {
-        let TODO = (); // temporary hack to get around compiler macro issue
+        // hack to get around compiler macro issue;
+        // dependencies are detected before the compiler
+        // macro inserts this symbol
         let sym = to_symbol(st, "create_container");
-        let uid = CellIdentifier::DefCell(perm_slice(&[]), sym);
-        deps.def_refs.push(uid);
+        let id = CellIdentifier::DefCell(perm_slice(&[]), sym);
+        deps.ids.push(id);
         for &c in exprs {
           find_nested_cells(st, locals, deps, c);
         }
       }
       List(ExprTag::Stream, exprs) => {
-        let TODO = (); // temporary hack to get around compiler macro issue
+        // hack to get around compiler macro issue;
+        // dependencies are detected before the compiler
+        // macro inserts this symbol
         let sym = to_symbol(st, "create_stream");
-        let uid = CellIdentifier::DefCell(perm_slice(&[]), sym);
-        deps.def_refs.push(uid);
+        let id = CellIdentifier::DefCell(perm_slice(&[]), sym);
+        deps.ids.push(id);
         for &c in exprs {
           find_nested_cells(st, locals, deps, c);
         }
@@ -101,11 +108,10 @@ pub fn get_cell_dependencies(st : SymbolTable, expr : Expr) -> CellDependencies 
   }
 
   let mut deps = CellDependencies {
-    defs: vec![],
-    const_exprs: vec![],
-    def_refs: vec![],
-    observe_ref: None,
-    embeds: vec![]
+    ids: vec![],
+    inner_cells: vec![],
+    embeds: vec![],
+    observe_id: None,
   };
   let mut locals = vec![];
   find_nested_cells(st, &mut locals, &mut deps, expr);

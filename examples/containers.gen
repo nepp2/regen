@@ -1,6 +1,6 @@
 
-include(env, ref "examples/lib/prelude.gen");
-include(env, ref "examples/lib/game.gen");
+embed load_expr(env, ref "examples/lib/prelude.gen");
+embed load_expr(env, ref "examples/lib/game.gen");
 
 def Game = struct {
   ticker : i64,

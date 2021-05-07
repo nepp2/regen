@@ -10,6 +10,6 @@ use regen_core::hotload;
 #[wasm_bindgen]
 pub fn interpret(code : String) -> String {
   let env = regen_core::new_env();
-  hotload::interpret_module(env, "wasm_test_module", &code);
+  hotload::hotload_module(env, "wasm_test_module", &code);
   format!("Regen launched")
 }
