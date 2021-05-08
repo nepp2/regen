@@ -30,7 +30,6 @@ pub extern "C" fn include(env : Env, file_name : &RegenString) {
 pub extern "C" fn load_expr(env : Env, file_name : &RegenString) -> Expr {
   let file_name = file_name.as_str();
   let module_name = to_symbol(env.st, file_name);
-  env.root_module.unwrap();
   let path = format!("{}/{}", LIB_PATH, file_name);
   let code =
     fs::read_to_string(&path)

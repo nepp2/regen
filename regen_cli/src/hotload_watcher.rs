@@ -1,6 +1,6 @@
 
 use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher, watcher};
-use std::{sync::mpsc::{Receiver, TryRecvError, channel}};
+use std::{collections::HashMap, path::{PathBuf}, sync::mpsc::{Receiver, TryRecvError, channel}};
 use std::time::Duration;
 
 use crate::ffi_libs;
@@ -39,16 +39,34 @@ pub fn watch_file(path : &str) {
   let (tx, rx) = channel();
   let mut watcher = watcher(tx, Duration::from_millis(500)).unwrap();
   watcher.watch(path, RecursiveMode::Recursive).unwrap();
-  let ws = WatchState { rx, watcher, path: path.to_string() };
+  let mut ws = WatchState { rx, watcher, path: path.to_string() };
   hotload_file(env, path);
+
+  let root = PathBuf::from(path).canonicalize().unwrap();
+
+  let mut watched_files = HashMap::new();
   
   loop {
+    // check for watch requests
+    event_loop::process_watch_requests(env, |path| {
+      let canonical = PathBuf::from(path.as_str()).canonicalize().unwrap();
+      if watched_files.insert(canonical.clone(), path).is_none() {
+        ws.watcher.watch(canonical, RecursiveMode::Recursive).unwrap();
+      }
+    });
+
     // check for watcher events
     match ws.rx.try_recv() {
       Ok(event) => {
         match event {
-          DebouncedEvent::Write(_) => {
-            hotload_file(env, &ws.path);
+          DebouncedEvent::Write(path_buf) => {
+            println!("hotloading {}", path_buf.to_str().unwrap());
+            if path_buf == root {
+              hotload_file(env, &ws.path);
+            }
+            else if let Some(watched_path) = watched_files.get(&path_buf) {
+              event_loop::handle_watch_event(env, *watched_path);
+            }
           }
           _ => (),
         }
@@ -61,7 +79,7 @@ pub fn watch_file(path : &str) {
       },
     }
     // handle timer
-    event_loop::wait_for_next_timer(env, 10);
+    event_loop::handle_next_timer(env, 10);
   }
 }
 

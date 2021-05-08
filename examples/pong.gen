@@ -6,6 +6,9 @@ embed load_expr(env, ref "examples/scrub.gen");
 
 embed define_list_type(#GameEventList, #GameEvent);
 
+reactive my_file = create_watcher("examples/scratchpad.gen");
+embed load_expr(env, ref my_file);
+
 def GameEventBuffer = struct {
   list : GameEventList,
   capacity : i64,

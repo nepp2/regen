@@ -1,8 +1,14 @@
 
-def timer_constructor = poly_type(reactive_constructor, i64);
+def WatcherConstructor = poly_type(reactive_constructor, string);
+
+def create_watcher = fun(path : string) {
+  new_watcher_constructor(env, ref path) as WatcherConstructor;
+};
+
+def TimerConstructor = poly_type(reactive_constructor, i64);
 
 def create_timer = fun(millisecond_interval : i64) {
-  new_timer_constructor(env, millisecond_interval) as timer_constructor;
+  new_timer_constructor(env, millisecond_interval) as TimerConstructor;
 };
 
 def create_container = fun(

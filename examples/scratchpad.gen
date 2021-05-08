@@ -1,8 +1,6 @@
 
-embed load_expr(env, ref "examples/lib/prelude.gen");
+print 10;
 
-def foo = 5;
-print embed #foo;
+print 2000;
 
-print embed #10;
-
+print 6000;

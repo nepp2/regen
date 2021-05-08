@@ -1,7 +1,6 @@
 
-use crate::{compile::{self, Function}, dependencies::{self, CellDependencies}, env::{self, CellCompile, CellIdentifier, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue, UpdateLevel}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types::{self, TypeHandle}};
+use crate::{compile::{self, Function}, dependencies::{self, CellDependencies}, env::{self, CellCompile, CellIdentifier, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue, UpdateLevel}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, ffi_libs::RegenString, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types::{self, TypeHandle}};
 
-use core::panic;
 use std::collections::{HashMap, HashSet};
 
 use CellIdentifier::*;
@@ -60,8 +59,8 @@ fn is_cell_visible(
     return true;
   }
   // Accept defs that aren't part of the active module
-  if let Some(e) = env.cell_exprs.get(&uid) {
-    if e.loc().module.name != hs.active_module {
+  if env.cell_exprs.contains_key(&uid) {
+    if !is_cell_active(env, uid) {
       return true;
     }
   }
@@ -213,13 +212,26 @@ fn register_reactive_cell(
   let constructor = to_reactive_constructor(env, value_expr, constructor_val)?;
   match constructor.variant {
     ConstructorVariant::Watcher { file_path } => {
-      panic!()
+      if val.t != env.c.string_tag {
+        return err(value_expr, "expected reactive string");
+      }
+      event_loop::register_watcher(env.event_loop, uid, file_path);
+      env.watchers.insert(uid, file_path);
+      unsafe {
+        *(val.ptr as *mut RegenString) = file_path;
+      }
+      let v = CellValue {
+        t: val.t,
+        ptr: val.ptr,
+        initialised: true,
+      };
+      Ok(v)
     }
     ConstructorVariant::Timer { millisecond_interval } => {
       if val.t != env.c.i64_tag {
         return err(value_expr, "expected reactive i64");
       }
-      let id = event_loop::register_cell_timer(env.event_loop, uid, millisecond_interval);
+      let id = event_loop::register_timer(env.event_loop, uid, millisecond_interval);
       let now : i64 = event_loop::current_millisecond(env.event_loop);
       env.timers.insert(uid, id);
       unsafe {
@@ -271,6 +283,7 @@ fn to_reactive_constructor(env : Env, value_expr : Expr, constructor_val : Regen
     if c.value_type == t {
       return Ok(c);
     }
+    return err(value_expr.loc(), format!("expected {}, found {}", c.value_type, t));
   }
   err(value_expr.loc(), format!("expected reactive constructor, found {}", constructor_val.t))
 }
@@ -484,17 +497,18 @@ fn try_hotload_cell_value(
   reactive_cell : bool,
 ) -> Result<(), HotloadError>
 {
-  if hs.root_cell == Some(uid) {
-    // This cell has already been updated
-    return Ok(());
-  }
   // Check if this cell has already been visited
   if hs.visited_cells.contains(&uid) {
     let id = uid.id(env);
     match id {
       DefCell(_, _) => {
-        let e = error(value_expr, format!("def {} defined twice!", id));
-        return Err(HotloadError::Visible(e, UpdateLevel::NoUpdate));
+        if env.cell_exprs[&uid] != value_expr {
+          let e = error(value_expr, format!("def {} defined twice!", id));
+          return Err(HotloadError::Visible(e, UpdateLevel::NoUpdate));
+        }
+        else {
+          return Ok(());
+        }
       }
       ExprCell(_) => {
         return Ok(());
@@ -634,21 +648,21 @@ fn hotload_cells(
 }
 
 struct HotloadState {
-  active_module : Symbol,
   cell_changes : HashMap<CellUid, ChangeType>,
   visited_cells : HashSet<CellUid>,
-  root_cell : Option<CellUid>,
 }
 
 impl HotloadState {
-  fn new(active_module : Symbol, root_cell : Option<CellUid>) -> Self {
+  fn new() -> Self {
     Self {
-      active_module,
       cell_changes: HashMap::new(),
       visited_cells: HashSet::new(),
-      root_cell,
     }
   }
+}
+
+fn is_cell_active(env : Env, uid : CellUid) -> bool {
+  env.active_cells.contains(&uid)
 }
 
 fn get_change(env : Env, hs : &HotloadState, uid : CellUid) -> ChangeType {
@@ -656,8 +670,8 @@ fn get_change(env : Env, hs : &HotloadState, uid : CellUid) -> ChangeType {
     return c;
   }
   // Accept defs that aren't part of the active module
-  if let Some(e) = env.cell_exprs.get(&uid) {
-    if e.loc().module.name != hs.active_module {
+  if env.cell_exprs.contains_key(&uid) {
+    if !is_cell_active(env, uid) {
       return ChangeType::Unchanged;
     }
   }
@@ -698,25 +712,22 @@ fn required_output_update(input_change : ChangeType, input_type : DependencyType
   Some(v)
 }
 
-fn update_module(env : Env, hs : &mut HotloadState, module_expr : Expr) {
+fn update_module(mut env : Env, mut hs : HotloadState, module_expr : Expr) {
   // Find new and unchanged cells
-  hotload_cell(env, hs, env::new_namespace(&[]), module_expr);
+  hotload_cell(env, &mut hs, env::new_namespace(&[]), module_expr);
 
   // unload any cells that were deleted
-  for (id, e) in &env.cell_exprs {
-    if e.loc().module.name == hs.active_module {
-      if !hs.visited_cells.contains(id) {
-        env::unload_cell(env, *id);
-      }
+  let mut cells = hs.visited_cells;
+  std::mem::swap(&mut env.active_cells, &mut cells);
+  for uid in cells.drain() {
+    if !env.active_cells.contains(&uid) {
+      env::unload_cell(env, uid);
     }
   }
 }
 
 pub fn hotload_module(mut env : Env, module_name : &str, code : &str) {
   let module_name = to_symbol(env.st, module_name);
-  if env.root_module.is_none() {
-    env.root_module = Some(module_name);
-  }
   // Parse file
   let module_expr = {
     let r = std::panic::catch_unwind(|| {
@@ -724,27 +735,33 @@ pub fn hotload_module(mut env : Env, module_name : &str, code : &str) {
     });
     if let Ok(n) = r { n } else { return }
   };
-  let mut hs = HotloadState::new(module_name, None);
+  let hs = HotloadState::new();
   env.broken_cells.clear();
-  update_module(env, &mut hs, module_expr);
-  env.module_exprs.insert(module_name, module_expr);
+  update_module(env, hs, module_expr);
+  env.root_expr = Some(module_expr);
 }
 
 /// Recalculate cell values in response to an updated cell
-fn cell_updated(env : Env, uid : CellUid) {
-  let root_module = env.root_module.unwrap();
-  let mut hs = HotloadState::new(root_module, Some(uid));
-  hs.cell_changes.insert(uid, ChangeType::Value);
-  hs.visited_cells.insert(uid);
-  update_module(env, &mut hs, env.module_exprs[&root_module]);
+fn cells_updated(env : Env, cells : &[CellUid]) {
+  let mut hs = HotloadState::new();
+  for &uid in cells {
+    hs.cell_changes.insert(uid, ChangeType::Value);
+    hs.visited_cells.insert(uid);
+  }
+  update_module(env, hs, env.root_expr.unwrap());
 }
 
-/// Called by the event loop when the value of a reactive cell has changed
+/// Called by the event loop when a file watcher pulses
+pub fn update_watcher_cells(env : Env, cells : &[CellUid]) {
+  cells_updated(env, cells);
+}
+
+/// Called by the event loop when a timer pulses
 pub fn update_timer_cell(mut env : Env, uid : CellUid, millisecond : i64) {
   let c = get_cell_value_mut(&mut env, uid);
   unsafe {
     *(c.ptr as *mut i64) = millisecond;
   }
   c.initialised = true;
-  cell_updated(env, uid);
+  cells_updated(env, &[uid]);
 }

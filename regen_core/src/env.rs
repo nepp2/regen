@@ -1,6 +1,6 @@
-use crate::{compile::Function, event_loop::{self, EventLoop, TriggerId}, ffi_libs::*, parse::{self, CodeModule, Expr, ExprContent, ExprTag, SrcLocation, Val}, perm_alloc::{Ptr, SlicePtr, perm, perm_slice}, symbols::{Symbol, SymbolTable, to_symbol}, types::{TypeHandle, CoreTypes, core_types }};
+use crate::{compile::Function, event_loop::{self, EventLoop, TimerId}, ffi_libs::*, parse::{self, CodeModule, Expr, ExprContent, ExprTag, SrcLocation, Val}, perm_alloc::{Ptr, SlicePtr, perm, perm_slice}, symbols::{Symbol, SymbolTable, to_symbol}, types::{TypeHandle, CoreTypes, core_types }};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 /// A heap allocated Regen value
@@ -13,14 +13,15 @@ pub struct RegenValue {
 /// Environment for regen editing session
 #[derive(Clone)]
 pub struct Environment {
-  pub root_module : Option<Symbol>,
-  pub module_exprs : HashMap<Symbol, Expr>,
+  pub root_expr : Option<Expr>,
 
   /// TODO: these ids are not cleared, so they
   /// will leak memory over long editing sessions
   uid_counter : u64,
   cell_uids : HashMap<CellIdentifier, CellUid>,
   cell_ids : HashMap<CellUid, CellIdentifier>,
+
+  pub active_cells : HashSet<CellUid>,
 
   pub cell_exprs : HashMap<CellUid, Expr>,
   pub cell_compiles : HashMap<CellUid, CellCompile>,
@@ -29,7 +30,8 @@ pub struct Environment {
   pub reactive_cells : HashMap<CellUid, ReactiveCell>,
   pub graph : CellGraph,
 
-  pub timers : HashMap<CellUid, TriggerId>,
+  pub watchers : HashMap<CellUid, RegenString>,
+  pub timers : HashMap<CellUid, TimerId>,
   pub event_loop : Ptr<EventLoop>,
   pub st : SymbolTable,
   pub c : CoreTypes,
@@ -191,9 +193,11 @@ pub fn unload_cell_compile(mut env : Env, uid : CellUid) {
 }
 
 pub fn unload_cell_value(mut env : Env, uid : CellUid) {
-  if let Some(&id) = env.timers.get(&uid) {
-    event_loop::remove_trigger(env.event_loop, id);
-    env.timers.remove(&uid);
+  if let Some(id) = env.timers.remove(&uid) {
+    event_loop::remove_timer(env.event_loop, id);
+  }
+  if let Some(path) = env.watchers.remove(&uid) {
+    event_loop::remove_watcher(env.event_loop, uid, path);
   }
   env.cell_values.remove(&uid);
   env.reactive_cells.remove(&uid);
@@ -230,11 +234,11 @@ pub fn new_env(st : SymbolTable) -> Env {
   };
 
   let env = perm(Environment {
-    root_module: None,
-    module_exprs: HashMap::new(),
+    root_expr: None,
     uid_counter: 0,
     cell_uids:  HashMap::new(),
     cell_ids:  HashMap::new(),
+    active_cells: HashSet::new(),
     cell_exprs: HashMap::new(),
     cell_compiles: HashMap::new(),
     cell_values: HashMap::new(),
@@ -242,6 +246,7 @@ pub fn new_env(st : SymbolTable) -> Env {
     reactive_cells: HashMap::new(),
     graph: Default::default(),
     timers: HashMap::new(),
+    watchers: HashMap::new(),
     event_loop: event_loop::create_event_loop(),
     st,
     c: core_types(st),

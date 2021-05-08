@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use crate::{compile::Function, env::{CellIdentifier, CellUid, Env}, ffi_libs::RegenString, hotload, perm_alloc::{Ptr, perm}, types::TypeHandle};
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
-pub struct TriggerId(pub u64);
+pub struct TimerId(pub u64);
 
 #[derive(Clone, Copy)]
 pub struct ReactiveConstructor {
@@ -37,69 +37,89 @@ pub type SignalInput = Ptr<CellIdentifier>;
 pub struct EventLoop {
   start_time : Instant,
   id_counter : u64,
-  cell_mappings : HashMap<TriggerId, CellUid>,
-  timers : HashMap<TriggerId, TimerState>,
+  timers : HashMap<TimerId, Timer>,
+  watchers : HashMap<RegenString, Vec<CellUid>>,
+  watch_requests : Vec<RegenString>,
 }
 
 #[derive(Copy, Clone)]
 #[repr(C)]
-pub struct TimerState {
+pub struct Timer {
   pub millisecond_interval : i64,
   pub next_tick_millisecond : i64,
+  pub cell : CellUid,
 }
 
 pub fn create_event_loop() -> Ptr<EventLoop> {
   perm(EventLoop {
     start_time: Instant::now(),
     id_counter: 0,
-    cell_mappings: HashMap::new(),
     timers: HashMap::new(),
+    watchers: HashMap::new(),
+    watch_requests: vec![],
   })
 }
 
-fn next_id(mut el : Ptr<EventLoop>) -> TriggerId {
-  let id = TriggerId(el.id_counter);
+fn next_id(mut el : Ptr<EventLoop>) -> TimerId {
+  let id = TimerId(el.id_counter);
   el.id_counter += 1;
   id
 }
 
-pub fn remove_trigger(mut el : Ptr<EventLoop>, id : TriggerId) {
-  el.cell_mappings.remove(&id);
+pub fn remove_timer(mut el : Ptr<EventLoop>, id : TimerId) {
   el.timers.remove(&id);
 }
 
-pub fn register_cell_timer(mut el : Ptr<EventLoop>, cell : CellUid, millisecond_interval : i64) -> TriggerId {
-  let id = create_timer(el, millisecond_interval);
-  el.cell_mappings.insert(id, cell);
-  id
-}
-
-fn create_timer(mut el : Ptr<EventLoop>, millisecond_interval : i64) -> TriggerId {
+pub fn register_timer(mut el : Ptr<EventLoop>, cell : CellUid, millisecond_interval : i64) -> TimerId {
   let now = current_millisecond(el);
-  let timer_state = TimerState {
+  let timer_state = Timer {
     millisecond_interval,
     next_tick_millisecond: now + millisecond_interval,
+    cell,
   };
   let id = next_id(el);
   el.timers.insert(id, timer_state);
   id
 }
 
+pub fn register_watcher(mut el : Ptr<EventLoop>, cell : CellUid, file_path : RegenString) {
+  el.watchers.entry(file_path).or_insert(vec![]).push(cell);
+  el.watch_requests.push(file_path);
+}
+
+pub fn remove_watcher(mut el : Ptr<EventLoop>, cell : CellUid, file_path : RegenString) {
+  let cs = el.watchers.entry(file_path).or_insert(vec![]);
+  if let Some(i) = cs.iter().position(|&uid| uid == cell) {
+    cs.remove(i);
+  }
+}
+
 pub fn current_millisecond(el : Ptr<EventLoop>) -> i64 {
   Instant::now().duration_since(el.start_time).as_millis() as i64
 }
 
-fn handle_timer_pulse(env : Env, id : TriggerId) {
+fn handle_timer_pulse(env : Env, id : TimerId) {
   let mut el = env.event_loop;
   let now = current_millisecond(el);
   let timer = el.timers.get_mut(&id).unwrap();
   timer.next_tick_millisecond = now + timer.millisecond_interval;
-  if let Some(&cell) = env.event_loop.cell_mappings.get(&id) {
-    hotload::update_timer_cell(env, cell, now);
+  hotload::update_timer_cell(env, timer.cell, now);
+}
+
+pub fn process_watch_requests(mut env : Env, mut process : impl FnMut(RegenString)) {
+  for s in env.event_loop.watch_requests.drain(..) {
+    process(s);
   }
 }
 
-pub fn wait_for_next_timer(env : Env, max_wait_millis : i64) {
+pub fn handle_watch_event(env : Env, file_path : RegenString) {
+  let event_loop = env.event_loop;
+  if let Some(cells) = event_loop.watchers.get(&file_path) {
+    hotload::update_watcher_cells(env, cells);
+  }
+}
+
+pub fn handle_next_timer(env : Env, max_wait_millis : i64) {
   let event_loop = env.event_loop;
   // handle watcher event
   if event_loop.timers.is_empty() {
@@ -148,7 +168,7 @@ pub mod ffi {
   ) -> Ptr<ReactiveConstructor>
   {
     perm(ReactiveConstructor {
-      value_type: env.c.i64_tag,
+      value_type: env.c.string_tag,
       variant : ConstructorVariant::Watcher { file_path: *file_path }
     })
   }
