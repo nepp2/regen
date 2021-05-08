@@ -1,7 +1,5 @@
 # TODO
 
-* [ ] observer handlers don't catch panics
-* [ ] nested hotloads don't separate errors clearly
 * [ ] swap to traditional syntax
   * [ ] function definition
   * [ ] struct definition
