@@ -21,7 +21,7 @@ pub enum ConstructorVariant {
   Poll {
     input : SignalInput,
     initial_value : Option<*const ()>,
-    poll_function : *const Function,
+    poll_function : Ptr<Function>,
   }
 }
 
@@ -177,7 +177,7 @@ pub mod ffi {
     input : SignalInput,
     value_type : TypeHandle,
     initial_value : *const (),
-    poll_function : *const Function,
+    poll_function : Ptr<Function>,
   ) -> Ptr<ReactiveConstructor>
   {
     perm(ReactiveConstructor {
@@ -193,7 +193,7 @@ pub mod ffi {
   pub extern "C" fn new_poll_constructor(
     input : SignalInput,
     value_type : TypeHandle,
-    poll_function : *const Function,
+    poll_function : Ptr<Function>,
   ) -> Ptr<ReactiveConstructor>
   {
     perm(ReactiveConstructor {

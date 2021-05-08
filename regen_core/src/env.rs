@@ -62,7 +62,7 @@ pub struct CellCompile {
 #[derive(Copy, Clone)]
 pub struct ReactiveCell {
   pub input : CellUid,
-  pub update_handler : *const Function,
+  pub update_handler : Ptr<Function>,
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]

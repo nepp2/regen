@@ -160,19 +160,19 @@ fn compile_cell(
   Ok(flag)
 }
 
-fn try_eval<L>(loc : L, f : Ptr<Function>, return_ptr : *mut ())
+fn try_eval<L>(loc : L, level : UpdateLevel, f : Ptr<Function>, args : &[u64], return_ptr : Option<*mut ()>)
   -> Result<(), HotloadError>
     where L : Into<SrcLocation>
 {
   std::panic::catch_unwind(|| {
     interpret::interpret_function(
       Ptr::to_ptr(f),
-      &[],
-      Some(return_ptr)
+      args,
+      return_ptr
     );
   }).map_err(|_| {
     let e = error(loc, "regen eval panic!");
-    HotloadError::Visible(e, UpdateLevel::Evaluate)
+    HotloadError::Visible(e, level)
   })?;
   Ok(())
 }
@@ -187,13 +187,17 @@ fn evaluate_cell(
   let cc = env.cell_compiles.get(&uid).unwrap();
   let cv = {
     if let Some(rc) = cc.reactive_constructor {
-      try_eval(value_expr, cc.function, rc.ptr)?;
+      try_eval(
+        value_expr, UpdateLevel::Evaluate,
+        cc.function, &[], Some(rc.ptr))?;
       register_reactive_cell(env, uid, value_expr, rc, cc.allocation)
         .map_err(|e| HotloadError::Visible(e, UpdateLevel::Evaluate))?
     }
     else {
       let v = cc.allocation;
-      try_eval(value_expr, cc.function, v.ptr)?;
+      try_eval(
+        value_expr, UpdateLevel::Evaluate,
+        cc.function, &[], Some(v.ptr))?;
       CellValue{ t: v.t, ptr: v.ptr, initialised: true }
     }
   };
@@ -329,7 +333,10 @@ fn get_cell_value_mut (env : &mut Env, uid : CellUid) -> &mut CellValue {
   env.cell_values.get_mut(&uid).unwrap()
 }
 
-fn update_observer(mut env : Env, hs : &mut HotloadState, uid : CellUid) -> ChangeType {
+fn update_observer<L>(mut env : Env, hs : &mut HotloadState, uid : CellUid, loc : L)
+  -> Result<ChangeType, HotloadError>
+    where L : Into<SrcLocation>
+{
   use ChangeType::*;
   // check if there is an observer
   let rc = {
@@ -337,7 +344,7 @@ fn update_observer(mut env : Env, hs : &mut HotloadState, uid : CellUid) -> Chan
       *rc
     }
     else {
-      return Unchanged;
+      return Ok(Unchanged);
     }
   };
   // only update if either this cell or the input cell changed in this pass
@@ -345,40 +352,42 @@ fn update_observer(mut env : Env, hs : &mut HotloadState, uid : CellUid) -> Chan
     get_change(env, hs, rc.input) != Unchanged
     || get_change(env, hs, uid) != Unchanged;
   if !requires_update {
-    return Unchanged;
+    return Ok(Unchanged);
   }
   let state_val =
     if let Some(v) = get_cell_value(env, hs, uid, false) { v }
-    else { return Unchanged; };
+    else { return Ok(Unchanged); };
   let input_val =
     if let Some(v) = get_cell_value(env, hs, rc.input, true) { v }
-    else { return Unchanged; };
+    else { return Ok(Unchanged); };
   let returns_bool = {
-    let f = unsafe { &*rc.update_handler };
+    let f = rc.update_handler;
     let return_type = types::type_as_function(&f.t).unwrap().returns;
     return_type == env.c.bool_tag
   };
   if returns_bool {
     let mut value_changed = true;
-    interpret::interpret_function(
+    try_eval(
+      loc, UpdateLevel::Observer,
       rc.update_handler,
       &[state_val.ptr as u64, input_val.ptr as u64],
-      Some((&mut value_changed) as *mut bool as *mut ()));
+      Some((&mut value_changed) as *mut bool as *mut ()))?;
     if value_changed {
       get_cell_value_mut(&mut env, uid).initialised = true;
-      Value
+      Ok(Value)
     }
     else {
-      Unchanged
+      Ok(Unchanged)
     }
   }
   else {
-    interpret::interpret_function(
+    try_eval(
+      loc, UpdateLevel::Observer,
       rc.update_handler,
       &[state_val.ptr as u64, input_val.ptr as u64],
-      None);
+      None)?;
       get_cell_value_mut(&mut env, uid).initialised = true;
-    Value
+      Ok(Value)
   }
 }
 
@@ -472,17 +481,19 @@ fn apply_update(
         compile_cell(env, hs, uid, value_expr, reactive_cell)?;
       change.accumulate(
         evaluate_cell(env, uid, value_expr)?);
+      change.accumulate(
+        update_observer(env, hs, uid, value_expr)?);
       Ok(change)
     }
     Evaluate => {
       let mut change =
         evaluate_cell(env, uid, value_expr)?;
       change.accumulate(
-        update_observer(env, hs, uid));
+        update_observer(env, hs, uid, value_expr)?);
       Ok(change)
     },
     Observer => {
-      let change = update_observer(env, hs, uid);
+      let change = update_observer(env, hs, uid, value_expr)?;
       Ok(change)
     },
   }
