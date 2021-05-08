@@ -834,8 +834,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
     }
     _ => {
       return err(e,
-        format!("encountered invalid expression '{}'",
-          e.loc().src_snippet()));
+        format!("encountered invalid expression '{}'", e));
     }
   }
   Ok(None)

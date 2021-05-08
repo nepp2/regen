@@ -726,6 +726,19 @@ fn update_module(mut env : Env, mut hs : HotloadState, module_expr : Expr) {
   }
 }
 
+pub fn preload_module(env : Env, module_name : &str, code : &str) {
+  let module_name = to_symbol(env.st, module_name);
+  // Parse file
+  let module_expr = {
+    let r = std::panic::catch_unwind(|| {
+      parse::parse_module(env.st, module_name, &code).unwrap()
+    });
+    if let Ok(n) = r { n } else { return }
+  };
+  let mut hs = HotloadState::new();
+  hotload_cell(env, &mut hs, env::new_namespace(&[]), module_expr);
+}
+
 pub fn hotload_module(mut env : Env, module_name : &str, code : &str) {
   let module_name = to_symbol(env.st, module_name);
   // Parse file

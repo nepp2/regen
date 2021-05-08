@@ -27,3 +27,16 @@ def create_stream = fun(
 {
   new_poll_constructor(input_signal, state_type, poll_function)
 };
+
+def load_module = fun(path : string) {
+  load_expr(env, ref path)
+}
+
+def import = fun(path : string) {
+  let symbol_expr = new_symbol_expr(env, ref path, #import_symbol);
+  let path_expr = new_string_expr(env, ref path, #import_path);
+  #(def_scope {
+    reactive $symbol_expr = create_watcher($path_expr);
+    embed load_module($symbol_expr);
+  })
+}

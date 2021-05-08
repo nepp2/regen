@@ -1,6 +1,6 @@
 
 // example usage:
-// def list_i32 = embed new_list_type(#i32);
+// embed define_list_type(#list_i32, #i32);
 
 def define_list_type = fun(name : expr, t : expr) {
   #(def $name = {

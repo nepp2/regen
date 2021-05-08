@@ -13,13 +13,16 @@ use regen_core::{
 };
 use std::fs;
 
-fn hotload_file(env : Env, path : &str) {
+fn print_hotload_message(path : &str) {
   println!();
   println!();
   println!("-----------------------------------");
   println!("Hotloading file '{}'", path);
   println!("-----------------------------------");
   println!();
+}
+
+fn hotload_file(env : Env, path : &str) {
   let code =
     fs::read_to_string(path)
     .expect("Something went wrong reading the file");
@@ -60,11 +63,13 @@ pub fn watch_file(path : &str) {
       Ok(event) => {
         match event {
           DebouncedEvent::Write(path_buf) => {
-            println!("hotloading {}", path_buf.to_str().unwrap());
+            let path_buf = path_buf.canonicalize().unwrap();
             if path_buf == root {
+              print_hotload_message(&ws.path);
               hotload_file(env, &ws.path);
             }
             else if let Some(watched_path) = watched_files.get(&path_buf) {
+              print_hotload_message(watched_path.as_str());
               event_loop::handle_watch_event(env, *watched_path);
             }
           }

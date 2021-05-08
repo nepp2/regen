@@ -234,7 +234,7 @@ impl fmt::Display for Val {
     match self {
       I64(v) => write!(f, "{}", v)?,
       F64(v) => write!(f, "{}", v)?,
-      String(v) => write!(f, "{}", v.as_str())?,
+      String(v) => write!(f, "\"{}\"", v.as_str())?,
       Bool(v) => write!(f, "{}", v)?,
       Void => write!(f, "void")?,
       Operator(v) => write!(f, "{}", v)?,

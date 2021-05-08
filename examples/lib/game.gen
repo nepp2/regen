@@ -1,6 +1,4 @@
 
-embed load_expr(env, ref "examples/lib/sdl2.gen");
-
 def create_game_window = fun(title : string, width : i64, height : i64) {
   sdl_init(SDL_INIT_VIDEO);
   sdl_create_window(

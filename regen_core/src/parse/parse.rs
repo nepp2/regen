@@ -777,6 +777,14 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       ps.expect(")")?;
       ps.list_expr(Call, vec![f, element, length], start)
     }
+    "def_scope" => {
+      ps.pop_type(TokenType::Symbol)?;
+      ps.expect("{")?;
+      let mut list = vec![];
+      parse_semicolon_expr_list(ps, &mut list)?;
+      ps.expect("}")?;
+      ps.list_expr(Cells, list, start)
+    }
     _ => return Ok(None),
   };
   Ok(Some(expr))

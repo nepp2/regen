@@ -1,7 +1,7 @@
 use core::panic;
 use std::hash::{Hash, Hasher};
 
-use crate::{env, event_loop::ffi::*, parse::templates::template, parse::Expr, perm_alloc, symbols::Symbol, types, types::{TypeHandle, c_function_type}};
+use crate::{env, event_loop::ffi::*, parse::templates::template, parse::{self, Expr, ExprContent, ExprTag, Val}, perm_alloc::{self, perm}, symbols::{Symbol, to_symbol}, types, types::{TypeHandle, c_function_type}};
 
 use env::{Env, define_global};
 use perm_alloc::{Ptr, SlicePtr, perm_slice_from_vec, perm_slice};
@@ -118,6 +118,16 @@ pub extern "C" fn template_quote(e : Expr, args_ptr : *const Expr, num_args : u6
   template(e, args)
 }
 
+pub extern "C" fn new_symbol_expr(env : Env, s : Ptr<RegenString>, e : Expr) -> Expr {
+  let sym = to_symbol(env.st, s.as_str());
+  parse::expr(ExprTag::Name, ExprContent::Sym(sym), e.loc())
+}
+
+pub extern "C" fn new_string_expr(_env : Env, s : Ptr<RegenString>, e : Expr) -> Expr {
+  let s = perm(*s);
+  parse::expr(ExprTag::LiteralVal, ExprContent::Value(Val::String(s)), e.loc())
+}
+
 pub extern "C" fn type_sizeof(t : TypeHandle) -> u64 {
   t.size_of
 }
@@ -213,13 +223,21 @@ pub fn load_ffi_libs(e : Env) {
       &[signal_tag, type_tag, void_ptr],
       reactive_constructor_tag));
 
+  // ----------- Bind metaprogramming functions ------------
+  
+  define_global(e, "template_quote", template_quote as u64,
+    c_function_type(&[expr, types::pointer_type(expr), i64], expr));
+
+  define_global(e, "new_symbol_expr", new_symbol_expr as u64,
+    c_function_type(&[env_tag, string_ptr, expr], expr));
+
+  define_global(e, "new_string_expr", new_string_expr as u64,
+    c_function_type(&[env_tag, string_ptr, expr], expr));
+
   // ----------- Bind language introspection functions ------------
 
   define_global(e, "symbol_display", symbol_display as u64,
     c_function_type(&[u64], void));
-
-  define_global(e, "template_quote", template_quote as u64,
-    c_function_type(&[expr, types::pointer_type(expr), i64], expr));
 
   define_global(e, "calculate_packed_field_offsets", calculate_packed_field_offsets as u64,
     c_function_type(&[u64, u64], u64));

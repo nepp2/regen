@@ -1,13 +1,10 @@
 
-embed load_expr(env, ref "examples/lib/prelude.gen");
-embed load_expr(env, ref "examples/lib/game.gen");
-embed load_expr(env, ref "examples/lib/list.gen");
-embed load_expr(env, ref "examples/scrub.gen");
+embed import("examples/lib/sdl2.gen");
+embed import("examples/lib/game.gen");
+embed import("examples/lib/list.gen");
+embed import("examples/scrub.gen");
 
 embed define_list_type(#GameEventList, #GameEvent);
-
-reactive my_file = create_watcher("examples/scratchpad.gen");
-embed load_expr(env, ref my_file);
 
 def GameEventBuffer = struct {
   list : GameEventList,
@@ -210,10 +207,13 @@ reactive input_tick = create_timer(1);
 
 reactive sdl_input = stream(observe input_tick, poll_game_input);
 
-reactive scrub = {
-  let initial = create_scrub("Events", 400, 50);
-  container(observe sdl_input, initial, scrub_update)
-}
+def scrub_view = create_scrub_view("Events", 400, 50);
+
+reactive scrub = container(
+  observe sdl_input,
+  create_scrub(scrub_view),
+  scrub_update,
+);
 
 render_scrub(ref scrub);
 
