@@ -2,7 +2,7 @@
 embed import("examples/lib/sdl2.gen");
 embed import("examples/lib/game.gen");
 embed import("examples/lib/list.gen");
-embed import("examples/scrub.gen");
+embed import("examples/scrub/scrub.gen");
 
 embed define_list_type(#GameEventList, #GameEvent);
 
@@ -240,7 +240,7 @@ reactive buffered_events = container(
 
 def tweaked_buffer = init GameEventBuffer(
   buffered_events.list,
-  (buffer_size * scrub.val) / 100,
+  (buffer_size * scrub.slider_val) / 100,
 );
 
 reactive game_state = {
@@ -250,20 +250,6 @@ reactive game_state = {
 
 def renderer = create_renderer(window);
 
+render_game(renderer, ref game_state.state);
+
 sdl_img_init(IMG_INIT_PNG);
-
-def path = "C:\Users\Andy\Pictures\monstar.png";
-
-def image = sdl_img_load(path.data);
-
-def tex = sdl_create_texture_from_surface(renderer, image);
-
-print tex as u64;
-
-{
-  render_game(renderer, ref game_state.state);
-
-  sdl_render_copy(renderer, tex, 0 as ptr SdlRect, 0 as ptr SdlRect);
-
-  sdl_present(renderer);
-}

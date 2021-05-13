@@ -1,0 +1,158 @@
+
+sdl_img_init(IMG_INIT_PNG);
+
+def play_image = sdl_img_load("examples/scrub/play.png".data);
+def pause_image = sdl_img_load("examples/scrub/pause.png".data);
+def stop_image = sdl_img_load("examples/scrub/stop.png".data);
+
+def ScrubView = struct {
+  width : i64,
+  height : i64,
+  window : SdlWindowHandle,
+  window_id : u32,
+  renderer : SdlRendererHandle,
+  play_texture : SdlTextureHandle,
+  pause_texture : SdlTextureHandle,
+  stop_texture : SdlTextureHandle,
+  play_pause_rect : SdlRect,
+  stop_rect : SdlRect,
+  slider_rect : SdlRect,
+  button_size : i64,
+}
+
+def Scrub = struct {
+  view : ScrubView,
+  slider_val : i64,
+  mouse_down : bool,
+  playing : bool,
+}
+
+def rect_contains = fun(r : SdlRect, x : i64, y : i64) {
+  let rx = r.x as i64;
+  let ry = r.y as i64;
+  let rw = r.w as i64;
+  let rh = r.h as i64;
+  if x >= rx {
+    if x < rx + rw {
+      if y >= ry {
+        if y < ry + rh {
+          return true;
+        }
+      }
+    }
+  }
+  false
+}
+
+def update_slider = fun(scrub : ptr Scrub, x : i64, y : i64) {
+  let sr = scrub.view.slider_rect;
+  if rect_contains(sr, x, y) {
+    let pos = x - (sr.x as i64);
+    scrub.slider_val = (pos * 100) / (sr.w as i64);
+  }
+}
+
+def handle_click = fun(scrub : ptr Scrub, x : i64, y : i64) {
+  scrub.mouse_down = true;
+  update_slider(scrub, x, y);
+
+  let v = ref scrub.view;
+  if rect_contains(v.play_pause_rect, x, y) {
+    scrub.playing = !scrub.playing;
+  }
+  if rect_contains(v.stop_rect, x, y) {
+    scrub.playing = false;
+  }
+}
+
+def scrub_update = fun(scrub : ptr Scrub, ge : ptr GameEvent) {
+  // handle time events
+  let e = ref ge.input;
+  if e.event_type == SDL_MOUSEDOWN {
+    let me = to_mouse_button_event(e);
+    if me.window_id == scrub.view.window_id {
+      handle_click(scrub, me.x as i64, me.y as i64);
+      return true;
+    }
+  }
+  if e.event_type == SDL_MOUSEUP {
+    let me = to_mouse_button_event(e);
+    if me.window_id == scrub.view.window_id {
+      scrub.mouse_down = false;
+      return true;
+    }
+  }
+  if e.event_type == SDL_MOUSEMOTION {
+    if scrub.mouse_down {
+      let mm = to_mouse_motion_event(e);
+      if mm.window_id == scrub.view.window_id {
+        update_slider(scrub, mm.x as i64, mm.y as i64);
+        return true;
+      }
+    }
+  }
+  false
+}
+
+def new_rect = fun(x : i64, y : i64, w : i64, h : i64) {
+  init SdlRect(x as i32, y as i32, w as i32, h as i32)
+}
+
+def set_color = fun(rend: SdlRendererHandle, r : i64, g : i64, b : i64) {
+  sdl_set_draw_color(rend, r as u8, g as u8, b as u8, 255 as u8);
+}
+
+def render_scrub = fun (scrub : ptr Scrub) {
+  let r = scrub.view.renderer;
+  let v = ref scrub.view;
+  // render
+  set_color(r, 200, 200, 200);
+  sdl_clear(r);
+
+  if scrub.playing {
+    set_color(r, 0, 255, 0);
+    sdl_fill_rect(r, ref v.play_pause_rect);
+    sdl_render_copy(r, v.pause_texture, 0 as ptr SdlRect, ref v.play_pause_rect);
+  }
+  else {
+    sdl_render_copy(r, v.play_texture, 0 as ptr SdlRect, ref v.play_pause_rect);
+  }
+
+  sdl_render_copy(r, v.stop_texture, 0 as ptr SdlRect, ref v.stop_rect);
+
+  let sr = v.slider_rect;
+  let bar_len = ((sr.w as i64) * scrub.slider_val) / 100;
+  let bar_rect = init SdlRect(sr.x, sr.y, bar_len as i32, sr.h);
+  set_color(r, 0, 0, 255);
+  sdl_fill_rect(r, ref bar_rect);
+
+
+  sdl_present(r);
+};
+
+def create_scrub_view = fun(name : string, width : i64, height : i64) {
+  let window = create_game_window(name, width, height);
+  let window_id = sdl_get_window_id(window);
+  let renderer =
+    sdl_create_renderer(window, -1 as i32, SDL_RENDERER_ACCELERATED);
+  let play_texture = sdl_create_texture_from_surface(renderer, play_image);
+  let pause_texture = sdl_create_texture_from_surface(renderer, pause_image);
+  let stop_texture = sdl_create_texture_from_surface(renderer, stop_image);
+
+  let button_size = height;
+  let play_pause_rect = new_rect(0, 0, button_size, button_size);
+  let stop_rect = new_rect(button_size, 0, button_size, button_size);
+  let slider_offset = button_size * 2;
+  let slider_length = width - slider_offset;
+  let slider_rect = new_rect(slider_offset, 0, slider_length, height);
+  init ScrubView(
+    width, height, window, window_id, renderer,
+    play_texture, pause_texture, stop_texture,
+    play_pause_rect, stop_rect, slider_rect, button_size,
+  )
+}
+
+
+def create_scrub = fun(view : ScrubView) {
+  init Scrub(view, 100, false, false)
+}
