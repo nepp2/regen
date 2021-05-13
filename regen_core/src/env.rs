@@ -22,11 +22,13 @@ pub struct Environment {
   cell_ids : HashMap<CellUid, CellIdentifier>,
 
   pub active_cells : HashSet<CellUid>,
+  pub update_lists : HashMap<CellUid, Vec<CellUid>>,
 
-  pub cell_exprs : HashMap<CellUid, Expr>,
+  pub cell_src : HashMap<CellUid, CellSrc>,
   pub cell_compiles : HashMap<CellUid, CellCompile>,
   pub cell_values : HashMap<CellUid, CellValue>,
-  pub broken_cells : HashMap<CellUid, UpdateLevel>,
+  pub cell_build_status : HashMap<CellUid, BuildStatus>,
+  pub broken_cells : HashSet<CellUid>,
   pub reactive_cells : HashMap<CellUid, ReactiveCell>,
   pub graph : CellGraph,
 
@@ -38,18 +40,11 @@ pub struct Environment {
   builtin_dummy_expr : Expr,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum UpdateLevel {
-  NoUpdate = 0,
-  Observer = 1,
-  Evaluate = 2,
-  Compile = 3,
-}
-
-impl UpdateLevel {
-  pub fn precedence(self, other : Self) -> Self {
-    if (self as i32) > other as i32 { self } else { other }
-  }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum BuildStatus {
+  Empty = 0,
+  Compiled = 1,
+  Evaluated = 2,
 }
 
 #[derive(Copy, Clone)]
@@ -57,6 +52,12 @@ pub struct CellCompile {
   pub reactive_constructor : Option<RegenValue>,
   pub allocation : RegenValue,
   pub function : Ptr<Function>,
+}
+
+#[derive(Copy, Clone, PartialEq)]
+pub struct CellSrc {
+  pub value_expr : Expr,
+  pub is_reactive: bool,
 }
 
 #[derive(Copy, Clone)]
@@ -138,6 +139,10 @@ impl CellUid {
   pub fn id(self, env : Env) -> CellIdentifier {
     env.cell_ids[&self]
   }
+
+  pub fn loc(self, env : Env) -> SrcLocation {
+    env.cell_src[&self].value_expr.loc()
+  }
 }
 
 use CellIdentifier::*;
@@ -181,9 +186,10 @@ pub fn get_cell_value(env : Env, uid : CellUid) -> Option<CellValue> {
 }
 
 pub fn unload_cell(mut env : Env, uid : CellUid) {
-  env.cell_exprs.remove(&uid);
-  env.graph.unload_cell(uid);
+  env.cell_src.remove(&uid);
+  env.cell_build_status.remove(&uid);
   env.broken_cells.remove(&uid);
+  env.graph.unload_cell(uid);
   unload_cell_compile(env, uid);
 }
 
@@ -206,14 +212,14 @@ pub fn unload_cell_value(mut env : Env, uid : CellUid) {
 pub fn define_global(mut env : Env, s : &str, v : u64, t : TypeHandle) {
   let name = to_symbol(env.st, s);
   let uid = CellIdentifier::def(new_namespace(&[]), name).uid(env);
-  if env.cell_exprs.contains_key(&uid) {
+  if env.cell_src.contains_key(&uid) {
     panic!("def {} already defined", name);
   }
   let layout = std::alloc::Layout::from_size_align(t.size_of as usize, 8).unwrap();
   let ptr = unsafe { std::alloc::alloc(layout) as *mut () };
-  let e = env.builtin_dummy_expr;
+  let value_expr = env.builtin_dummy_expr;
   let cv = CellValue{ t, ptr, initialised: true };
-  env.cell_exprs.insert(uid, e);
+  env.cell_src.insert(uid, CellSrc { value_expr, is_reactive: false });
   env.cell_values.insert(uid, cv);
   unsafe {
     *(ptr as *mut u64) = v;
@@ -239,10 +245,12 @@ pub fn new_env(st : SymbolTable) -> Env {
     cell_uids:  HashMap::new(),
     cell_ids:  HashMap::new(),
     active_cells: HashSet::new(),
-    cell_exprs: HashMap::new(),
+    update_lists: HashMap::new(),
+    cell_src: HashMap::new(),
     cell_compiles: HashMap::new(),
     cell_values: HashMap::new(),
-    broken_cells : HashMap::new(),
+    cell_build_status: HashMap::new(),
+    broken_cells: HashSet::new(),
     reactive_cells: HashMap::new(),
     graph: Default::default(),
     timers: HashMap::new(),
