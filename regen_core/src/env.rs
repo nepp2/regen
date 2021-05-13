@@ -22,11 +22,13 @@ pub struct Environment {
   cell_ids : HashMap<CellUid, CellIdentifier>,
 
   pub active_cells : HashSet<CellUid>,
+  pub update_lists : HashMap<CellUid, Vec<CellUid>>,
 
   pub cell_exprs : HashMap<CellUid, Expr>,
   pub cell_compiles : HashMap<CellUid, CellCompile>,
   pub cell_values : HashMap<CellUid, CellValue>,
-  pub broken_cells : HashMap<CellUid, UpdateLevel>,
+  pub cell_build_status : HashMap<CellUid, BuildStatus>,
+  pub broken_cells : HashSet<CellUid>,
   pub reactive_cells : HashMap<CellUid, ReactiveCell>,
   pub graph : CellGraph,
 
@@ -38,18 +40,11 @@ pub struct Environment {
   builtin_dummy_expr : Expr,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum UpdateLevel {
-  NoUpdate = 0,
-  Observer = 1,
-  Evaluate = 2,
-  Compile = 3,
-}
-
-impl UpdateLevel {
-  pub fn precedence(self, other : Self) -> Self {
-    if (self as i32) > other as i32 { self } else { other }
-  }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum BuildStatus {
+  Empty = 0,
+  Compiled = 1,
+  Evaluated = 2,
 }
 
 #[derive(Copy, Clone)]
@@ -182,8 +177,9 @@ pub fn get_cell_value(env : Env, uid : CellUid) -> Option<CellValue> {
 
 pub fn unload_cell(mut env : Env, uid : CellUid) {
   env.cell_exprs.remove(&uid);
-  env.graph.unload_cell(uid);
+  env.cell_build_status.remove(&uid);
   env.broken_cells.remove(&uid);
+  env.graph.unload_cell(uid);
   unload_cell_compile(env, uid);
 }
 
@@ -239,10 +235,12 @@ pub fn new_env(st : SymbolTable) -> Env {
     cell_uids:  HashMap::new(),
     cell_ids:  HashMap::new(),
     active_cells: HashSet::new(),
+    update_lists: HashMap::new(),
     cell_exprs: HashMap::new(),
     cell_compiles: HashMap::new(),
     cell_values: HashMap::new(),
-    broken_cells : HashMap::new(),
+    cell_build_status: HashMap::new(),
+    broken_cells: HashSet::new(),
     reactive_cells: HashMap::new(),
     graph: Default::default(),
     timers: HashMap::new(),

@@ -1,11 +1,12 @@
 # TODO
 
+* [ ] optimise reactive events
+  * [x] get the topological ordering
+  * [ ] turn active cells list into a HotloadState field
 * [ ] swap to traditional syntax
   * [ ] function definition
   * [ ] struct definition
-* [ ] improve event timer control
-* [ ] optimise reactive events
-* if there are no embeds, record the update sequence
+* [ ] improve scrub control
 * [ ] fix observe keyword
   * uid references should not be treated as values
   * possible solution:

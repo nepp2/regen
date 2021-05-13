@@ -1,5 +1,5 @@
 
-use crate::{compile::{self, Function}, dependencies::{self, CellDependencies}, env::{self, CellCompile, CellIdentifier, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue, UpdateLevel}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, ffi_libs::RegenString, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types::{self, TypeHandle}};
+use crate::{compile::{self, Function}, dependencies::{self, CellDependencies}, env::{self, BuildStatus, CellCompile, CellIdentifier, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, ffi_libs::RegenString, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types::{self, TypeHandle}};
 
 use std::collections::{HashMap, HashSet};
 
@@ -27,8 +27,24 @@ impl <'l> CompileContext<'l> {
 }
 
 enum HotloadError {
-  Visible(Error, UpdateLevel),
+  Visible(Error, BuildStatus),
   Silent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
+enum ChangeType {
+  Unchanged = 0,
+  Value = 1,
+  Address = 2,
+  Deleted = 3,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum FlushLevel {
+  Compile = 0,
+  Evaluate = 1,
+  Observer = 2,
+  NoFlush = 3,
 }
 
 fn get_cell_value(
@@ -60,7 +76,7 @@ fn is_cell_visible(
   }
   // Accept defs that aren't part of the active module
   if env.cell_exprs.contains_key(&uid) {
-    if !is_cell_active(env, uid) {
+    if !is_cell_active(hs, uid) {
       return true;
     }
   }
@@ -125,7 +141,7 @@ fn compile_cell(
     match compile::compile_expr_to_function(&ctx, value_expr) {
       Ok(f) => perm(f),
       Err(e) => {
-        return Err(HotloadError::Visible(e, UpdateLevel::Compile));
+        return Err(HotloadError::Visible(e, BuildStatus::Empty));
       }
     }
   };
@@ -136,7 +152,7 @@ fn compile_cell(
         get_reactive_inner_type(env, expr_type)
         .ok_or_else(|| {
           let e = error(value_expr, "expected reactive constructor");
-          HotloadError::Visible(e, UpdateLevel::Compile)
+          HotloadError::Visible(e, BuildStatus::Empty)
         })?;
       let (ptr, flag) = get_cell_allocation(prev_cc, inner);
       let cc = CellCompile {
@@ -160,7 +176,7 @@ fn compile_cell(
   Ok(flag)
 }
 
-fn try_eval<L>(loc : L, level : UpdateLevel, f : Ptr<Function>, args : &[u64], return_ptr : Option<*mut ()>)
+fn try_eval<L>(loc : L, f : Ptr<Function>, args : &[u64], return_ptr : Option<*mut ()>)
   -> Result<(), HotloadError>
     where L : Into<SrcLocation>
 {
@@ -172,7 +188,7 @@ fn try_eval<L>(loc : L, level : UpdateLevel, f : Ptr<Function>, args : &[u64], r
     );
   }).map_err(|_| {
     let e = error(loc, "regen eval panic!");
-    HotloadError::Visible(e, level)
+    HotloadError::Visible(e, BuildStatus::Compiled)
   })?;
   Ok(())
 }
@@ -187,17 +203,13 @@ fn evaluate_cell(
   let cc = env.cell_compiles.get(&uid).unwrap();
   let cv = {
     if let Some(rc) = cc.reactive_constructor {
-      try_eval(
-        value_expr, UpdateLevel::Evaluate,
-        cc.function, &[], Some(rc.ptr))?;
+      try_eval(value_expr, cc.function, &[], Some(rc.ptr))?;
       register_reactive_cell(env, uid, value_expr, rc, cc.allocation)
-        .map_err(|e| HotloadError::Visible(e, UpdateLevel::Evaluate))?
+        .map_err(|e| HotloadError::Visible(e, BuildStatus::Compiled))?
     }
     else {
       let v = cc.allocation;
-      try_eval(
-        value_expr, UpdateLevel::Evaluate,
-        cc.function, &[], Some(v.ptr))?;
+      try_eval(value_expr, cc.function, &[], Some(v.ptr))?;
       CellValue{ t: v.t, ptr: v.ptr, initialised: true }
     }
   };
@@ -349,8 +361,8 @@ fn update_observer<L>(mut env : Env, hs : &mut HotloadState, uid : CellUid, loc 
   };
   // only update if either this cell or the input cell changed in this pass
   let requires_update =
-    get_change(env, hs, rc.input) != Unchanged
-    || get_change(env, hs, uid) != Unchanged;
+    get_change(hs, rc.input) != Unchanged
+    || get_change(hs, uid) != Unchanged;
   if !requires_update {
     return Ok(Unchanged);
   }
@@ -368,8 +380,7 @@ fn update_observer<L>(mut env : Env, hs : &mut HotloadState, uid : CellUid, loc 
   if returns_bool {
     let mut value_changed = true;
     try_eval(
-      loc, UpdateLevel::Observer,
-      rc.update_handler,
+      loc, rc.update_handler,
       &[state_val.ptr as u64, input_val.ptr as u64],
       Some((&mut value_changed) as *mut bool as *mut ()))?;
     if value_changed {
@@ -382,8 +393,7 @@ fn update_observer<L>(mut env : Env, hs : &mut HotloadState, uid : CellUid, loc 
   }
   else {
     try_eval(
-      loc, UpdateLevel::Observer,
-      rc.update_handler,
+      loc, rc.update_handler,
       &[state_val.ptr as u64, input_val.ptr as u64],
       None)?;
       get_cell_value_mut(&mut env, uid).initialised = true;
@@ -391,77 +401,36 @@ fn update_observer<L>(mut env : Env, hs : &mut HotloadState, uid : CellUid, loc 
   }
 }
 
-fn hotload_cell_value(
-  mut env : Env,
-  hs : &mut HotloadState,
-  uid : CellUid,
-  value_expr : Expr,
-  deps : &CellDependencies,
-  reactive_cell : bool,
-)
+fn check_for_input_changes(env : Env, hs : &mut HotloadState, uid : CellUid)
+  -> FlushLevel
 {
-  let r = try_hotload_cell_value(env, hs, uid, value_expr, deps, reactive_cell);
-  if let Err(he) = r {
-    if let HotloadError::Visible(e, ut) = he {
-      env.broken_cells.insert(uid, ut);
-      println!("{}", e.display());
-    }
-  }
-}
-
-fn get_input_update_level(env : Env, hs : &mut HotloadState, uid : CellUid)
-  -> Option<UpdateLevel>
-{
-  let mut update = UpdateLevel::NoUpdate;
+  let mut agg_level = FlushLevel::NoFlush;
   if let Some(inputs) = env.graph.inputs(uid) {
     for (&input_uid, &input_type) in inputs {
-      let input_change = get_change(env, hs, input_uid);
-      let r = required_output_update(input_change, input_type)?;
-      update = update.precedence(r);
+      let input_change = get_change(hs, input_uid);
+      let input_level = check_input(input_change, input_type);
+      agg_level = std::cmp::min(agg_level, input_level);
     }
   }
-  Some(update)
+  agg_level
 }
 
-fn get_required_update(
-  mut env : Env,
-  hs : &mut HotloadState,
-  uid : CellUid,
-  value_expr : Expr,
-  deps : &CellDependencies,
-) -> UpdateLevel
+fn check_input(input_change : ChangeType, input_type : DependencyType)
+  -> FlushLevel
 {
-  use UpdateLevel::*;
-  // Update the value expression
-  if update_value_expression(env, uid, value_expr, deps) {
-    env.broken_cells.remove(&uid);
-    return Compile;
-  }
-  // Check the cell's inputs
-  let input_change_level = {
-    let r = get_input_update_level(env, hs, uid);
-    if let Some(update_level) = r {
-      // Check whether the broken flag can be removed
-      if let Some(&broken_level) = env.broken_cells.get(&uid) {
-        if update_level as u32 >= broken_level as u32 {
-          env.broken_cells.remove(&uid);
-        }
+  let v = match input_change {
+    ChangeType::Unchanged => FlushLevel::NoFlush,
+    ChangeType::Value => {
+      match input_type {
+        DependencyType::Observer => FlushLevel::Observer,
+        DependencyType::Value => FlushLevel::Evaluate,
+        DependencyType::Code => FlushLevel::Compile,
       }
-      update_level
     }
-    else {
-      Compile
-    }
+    ChangeType::Address => FlushLevel::Compile,
+    ChangeType::Deleted => FlushLevel::Compile,
   };
-  // Check if the cell hasn't been compiled
-  if !env.cell_compiles.contains_key(&uid) {
-    return Compile;
-  }
-  // Check if the cell has been evaluated
-  if !env.cell_values.contains_key(&uid) {
-    return input_change_level.precedence(UpdateLevel::Evaluate);
-  }
-  input_change_level
+  v
 }
 
 fn apply_update(
@@ -470,42 +439,31 @@ fn apply_update(
   uid : CellUid,
   value_expr : Expr,
   reactive_cell : bool,
-  update : UpdateLevel,
+  flush_level : FlushLevel,
 ) -> Result<ChangeType, HotloadError>
 {
-  use UpdateLevel::*;
-  match update {
-    NoUpdate => Ok(ChangeType::Unchanged),
-    Compile => {
-      let mut change =
-        compile_cell(env, hs, uid, value_expr, reactive_cell)?;
-      change.accumulate(
-        evaluate_cell(env, uid, value_expr)?);
-      change.accumulate(
-        update_observer(env, hs, uid, value_expr)?);
-      Ok(change)
-    }
-    Evaluate => {
-      let mut change =
-        evaluate_cell(env, uid, value_expr)?;
-      change.accumulate(
-        update_observer(env, hs, uid, value_expr)?);
-      Ok(change)
-    },
-    Observer => {
-      let change = update_observer(env, hs, uid, value_expr)?;
-      Ok(change)
-    },
+  use FlushLevel::*;
+  let mut agg_change = ChangeType::Unchanged;
+  if flush_level <= Compile {
+    let c = compile_cell(env, hs, uid, value_expr, reactive_cell)?;
+    agg_change = std::cmp::max(agg_change, c);
   }
+  if flush_level <= Evaluate {
+    let c = evaluate_cell(env, uid, value_expr)?;
+    agg_change = std::cmp::max(agg_change, c);
+  }
+  if flush_level <= Observer {
+    let c = update_observer(env, hs, uid, value_expr)?;
+    agg_change = std::cmp::max(agg_change, c);
+  }
+  Ok(agg_change)
 }
 
-fn try_hotload_cell_value(
+fn visit_cell(
   env : Env,
   hs : &mut HotloadState,
   uid : CellUid,
   value_expr : Expr,
-  deps : &CellDependencies,
-  reactive_cell : bool,
 ) -> Result<(), HotloadError>
 {
   // Check if this cell has already been visited
@@ -515,7 +473,7 @@ fn try_hotload_cell_value(
       DefCell(_, _) => {
         if env.cell_exprs[&uid] != value_expr {
           let e = error(value_expr, format!("def {} defined twice!", id));
-          return Err(HotloadError::Visible(e, UpdateLevel::NoUpdate));
+          return Err(HotloadError::Visible(e, BuildStatus::Empty));
         }
         else {
           return Ok(());
@@ -530,16 +488,86 @@ fn try_hotload_cell_value(
     }
   }
   hs.visited_cells.insert(uid);
-  // Update the value expression
-  let update_level = get_required_update(env, hs, uid, value_expr, deps);
-  // Check if the cell is broken
-  if let Some(&broken_level) = env.broken_cells.get(&uid) {
-    if (update_level as u32) <= (broken_level as u32) {
-      return Err(HotloadError::Silent);
+  Ok(())
+}
+
+fn hotload_cell_value(
+  mut env : Env,
+  hs : &mut HotloadState,
+  uid : CellUid,
+  value_expr : Expr,
+  deps : &CellDependencies,
+  reactive_cell : bool,
+)
+{
+  let r = try_hotload_cell_value(env, hs, uid, value_expr, deps, reactive_cell);
+  if let Err(he) = r {
+    if let HotloadError::Visible(e, build_status) = he {
+      env.broken_cells.insert(uid);
+      env.cell_build_status.insert(uid, build_status);
+      println!("{}", e.display());
     }
   }
-  let change = apply_update(env, hs, uid, value_expr, reactive_cell, update_level)?;
+}
+
+fn try_hotload_cell_value(
+  env : Env,
+  hs : &mut HotloadState,
+  uid : CellUid,
+  value_expr : Expr,
+  deps : &CellDependencies,
+  reactive_cell : bool,
+) -> Result<(), HotloadError>
+{
+  visit_cell(env, hs, uid, value_expr)?;
+
+  // Update the value expression
+  let expr_flush = {
+    if update_value_expression(env, uid, value_expr, deps) {
+      FlushLevel::Compile
+    }
+    else { FlushLevel::NoFlush }
+  };
+
+  hotload_input_changes(env, hs, uid, value_expr, reactive_cell, expr_flush)
+}
+
+fn hotload_input_changes(
+  mut env : Env,
+  hs : &mut HotloadState,
+  uid : CellUid,
+  value_expr : Expr,
+  reactive_cell : bool,
+  forced_flush : FlushLevel,
+) -> Result<(), HotloadError>
+{
+  // Check the cell's dependencies for changes
+  let input_flush = check_for_input_changes(env, hs, uid);
+
+  let change_flush = std::cmp::min(forced_flush, input_flush);
+
+  if change_flush != FlushLevel::NoFlush {
+    env.broken_cells.remove(&uid);
+  }
+
+  // Don't update unless the build level can support the flush level
+  let incompleteness_flush = {
+    if env.broken_cells.contains(&uid) {
+      FlushLevel::NoFlush
+    }
+    else {
+      let status = env.cell_build_status.get(&uid).cloned().unwrap_or(BuildStatus::Empty);
+      match status {
+        BuildStatus::Empty => FlushLevel::Compile,
+        BuildStatus::Compiled => FlushLevel::Evaluate,
+        BuildStatus::Evaluated => FlushLevel::Evaluate,
+      }
+    }
+  };
+  let flush_level = std::cmp::min(change_flush, incompleteness_flush);
+  let change = apply_update(env, hs, uid, value_expr, reactive_cell, flush_level)?;
   hs.cell_changes.insert(uid, change);
+  env.cell_build_status.insert(uid, BuildStatus::Evaluated);
   Ok(())
 }
 
@@ -661,6 +689,7 @@ fn hotload_cells(
 struct HotloadState {
   cell_changes : HashMap<CellUid, ChangeType>,
   visited_cells : HashSet<CellUid>,
+  active_cells : HashSet<CellUid>,
 }
 
 impl HotloadState {
@@ -668,69 +697,43 @@ impl HotloadState {
     Self {
       cell_changes: HashMap::new(),
       visited_cells: HashSet::new(),
+      active_cells: HashSet::new(),
     }
   }
 }
 
-fn is_cell_active(env : Env, uid : CellUid) -> bool {
-  env.active_cells.contains(&uid)
+fn is_cell_active(hs : &HotloadState, uid : CellUid) -> bool {
+  hs.active_cells.contains(&uid)
 }
 
-fn get_change(env : Env, hs : &HotloadState, uid : CellUid) -> ChangeType {
+fn get_change(hs : &HotloadState, uid : CellUid) -> ChangeType {
   if let Some(c) = hs.cell_changes.get(&uid).cloned() {
     return c;
   }
-  // Accept defs that aren't part of the active module
-  if env.cell_exprs.contains_key(&uid) {
-    if !is_cell_active(env, uid) {
-      return ChangeType::Unchanged;
-    }
+  if is_cell_active(hs, uid) {
+    return ChangeType::Deleted;
   }
-  ChangeType::Deleted
+  return ChangeType::Unchanged;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum ChangeType {
-  Unchanged = 0,
-  Value = 1,
-  Address = 2,
-  Deleted = 3,
-}
+fn root_diff_update(mut env : Env, mut hs : HotloadState, module_expr : Expr) {
+  // Clearing all update lists is expensive, particularly if it's triggered
+  // regularly by a timer. Would be more efficient to clear specific lists when
+  // they are affected. But how?
+  // A list is affected when a cell in it changes, or a new cell depends on something
+  // in it. This reverses the dependency graph.
+  let TODO = ();
+  env.update_lists.clear();
+  
+  std::mem::swap(&mut env.active_cells, &mut hs.active_cells);
 
-impl ChangeType {
-  fn accumulate(&mut self, other : Self) {
-    if (*self as i32) < other as i32 {
-      *self = other;
-    }
-  }
-}
-
-fn required_output_update(input_change : ChangeType, input_type : DependencyType)
-  -> Option<UpdateLevel>
-{
-  let v = match input_change {
-    ChangeType::Unchanged => UpdateLevel::NoUpdate,
-    ChangeType::Value => {
-      match input_type {
-        DependencyType::Observer => UpdateLevel::Observer,
-        DependencyType::Value => UpdateLevel::Evaluate,
-        DependencyType::Code => UpdateLevel::Compile,
-      }
-    }
-    ChangeType::Address => UpdateLevel::Compile,
-    ChangeType::Deleted => return None,
-  };
-  Some(v)
-}
-
-fn update_module(mut env : Env, mut hs : HotloadState, module_expr : Expr) {
   // Find new and unchanged cells
   hotload_cell(env, &mut hs, env::new_namespace(&[]), module_expr);
 
+  std::mem::swap(&mut env.active_cells, &mut hs.visited_cells);
+
   // unload any cells that were deleted
-  let mut cells = hs.visited_cells;
-  std::mem::swap(&mut env.active_cells, &mut cells);
-  for uid in cells.drain() {
+  for uid in hs.active_cells.drain() {
     if !env.active_cells.contains(&uid) {
       env::unload_cell(env, uid);
     }
@@ -760,24 +763,20 @@ pub fn hotload_module(mut env : Env, module_name : &str, code : &str) {
     if let Ok(n) = r { n } else { return }
   };
   let hs = HotloadState::new();
-  env.broken_cells.clear();
-  update_module(env, hs, module_expr);
+  let TODO = (); // this was to force all errors to repeat when the file is edited
+  // env.broken_cells.clear();
+  root_diff_update(env, hs, module_expr);
   env.root_expr = Some(module_expr);
 }
 
-/// Recalculate cell values in response to an updated cell
-fn cells_updated(env : Env, cells : &[CellUid]) {
+/// Called by the event loop when a file watcher pulses
+pub fn update_watcher_cells(env : Env, cells : &[CellUid]) {
   let mut hs = HotloadState::new();
   for &uid in cells {
     hs.cell_changes.insert(uid, ChangeType::Value);
     hs.visited_cells.insert(uid);
   }
-  update_module(env, hs, env.root_expr.unwrap());
-}
-
-/// Called by the event loop when a file watcher pulses
-pub fn update_watcher_cells(env : Env, cells : &[CellUid]) {
-  cells_updated(env, cells);
+  root_diff_update(env, hs, env.root_expr.unwrap());
 }
 
 /// Called by the event loop when a timer pulses
@@ -787,5 +786,72 @@ pub fn update_timer_cell(mut env : Env, uid : CellUid, millisecond : i64) {
     *(c.ptr as *mut i64) = millisecond;
   }
   c.initialised = true;
-  cells_updated(env, &[uid]);
+  // Update affected cells
+  let mut hs = HotloadState::new();
+  hs.cell_changes.insert(uid, ChangeType::Value);
+  hs.visited_cells.insert(uid);
+  // Try and get an update list
+  if !env.update_lists.contains_key(&uid) {
+    if let Some(l) = topological_update_list(env, &[uid]) {
+      // env.update_lists.insert(uid, l);
+    }
+  }
+  match env.update_lists.get(&uid) {
+    Some(update_list) => {
+      for &cell in update_list {
+        hs.active_cells.insert(cell);
+      }
+      for &cell in update_list {
+        let e = env.cell_exprs[&cell];
+        //try_hotload_cell_value(env, &mut hs, cell, e, )
+      }
+    }
+    None => {
+      root_diff_update(env, hs, env.root_expr.unwrap());
+    }
+  }
+}
+
+#[derive(Copy, Clone)]
+struct VertFlag {
+  complete : bool,
+  active : bool,
+}
+
+fn topological_update_list(env : Env, roots : &[CellUid])
+  -> Option<Vec<CellUid>>
+{
+  fn visit(
+    ordering : &mut Vec<CellUid>,
+    flags : &mut HashMap<CellUid, VertFlag>,
+    env : Env,
+    uid : CellUid
+  ) -> Option<()>
+  {
+    if let CellIdentifier::EmbedCell(_) = uid.id(env) {
+      // Can't use a baked-in update list if updateding an embed cell
+      return None;
+    }
+    let flag = flags.entry(uid).or_insert(VertFlag{ active: false, complete: false});
+    if flag.complete { return Some(()) }
+    if flag.active { 
+      panic!("cyclic dependency detected at {}!", uid.id(env));
+    };
+    flag.active = true;
+    if let Some(o) = env.graph.outputs(uid) {
+      for &output_uid in o.keys() {
+        visit(ordering, flags, env, output_uid)?;
+      }
+    }
+    flags.insert(uid, VertFlag{ active: false, complete: true });
+    ordering.push(uid);
+    Some(())
+  }
+
+  let mut ordering = vec![];
+  let mut flags = HashMap::new();
+  for &uid in roots {
+    visit(&mut ordering, &mut flags, env, uid)?;
+  }
+  Some(ordering)
 }
