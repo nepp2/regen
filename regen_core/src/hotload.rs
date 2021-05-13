@@ -1,5 +1,5 @@
 
-use crate::{compile::{self, Function}, dependencies::{self, CellDependencies}, env::{self, BuildStatus, CellCompile, CellIdentifier, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, ffi_libs::RegenString, interpret, parse::{self, Expr, ExprShape, ExprTag, SrcLocation}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types::{self, TypeHandle}};
+use crate::{compile::{self, Function}, dependencies::{self, CellDependencies}, env::{self, BuildStatus, CellCompile, CellIdentifier, CellSrc, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, ffi_libs::RegenString, interpret, parse::{self, Expr, ExprShape, ExprTag}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types::{self, TypeHandle}};
 
 use std::collections::{HashMap, HashSet};
 
@@ -75,7 +75,7 @@ fn is_cell_visible(
     return true;
   }
   // Accept defs that aren't part of the active module
-  if env.cell_exprs.contains_key(&uid) {
+  if env.cell_src.contains_key(&uid) {
     if !is_cell_active(hs, uid) {
       return true;
     }
@@ -112,8 +112,7 @@ fn compile_cell(
   mut env : Env,
   hs : &HotloadState,
   uid : CellUid,
-  value_expr : Expr,
-  reactive : bool,
+  src : CellSrc,
 ) -> Result<ChangeType, HotloadError>
 {
   let prev_cc = env.cell_compiles.get(&uid).cloned();
@@ -138,7 +137,7 @@ fn compile_cell(
   // compile the expression
   let ctx = CompileContext::new(env, &dep_values);
   let function = {
-    match compile::compile_expr_to_function(&ctx, value_expr) {
+    match compile::compile_expr_to_function(&ctx, src.value_expr) {
       Ok(f) => perm(f),
       Err(e) => {
         return Err(HotloadError::Visible(e, BuildStatus::Empty));
@@ -147,11 +146,11 @@ fn compile_cell(
   };
   let expr_type = types::type_as_function(&function.t).unwrap().returns;
   let (flag, cc) = {
-    if reactive {
+    if src.is_reactive {
       let inner =
         get_reactive_inner_type(env, expr_type)
         .ok_or_else(|| {
-          let e = error(value_expr, "expected reactive constructor");
+          let e = error(src.value_expr, "expected reactive constructor");
           HotloadError::Visible(e, BuildStatus::Empty)
         })?;
       let (ptr, flag) = get_cell_allocation(prev_cc, inner);
@@ -176,9 +175,8 @@ fn compile_cell(
   Ok(flag)
 }
 
-fn try_eval<L>(loc : L, f : Ptr<Function>, args : &[u64], return_ptr : Option<*mut ()>)
+fn try_eval(env : Env, uid : CellUid, f : Ptr<Function>, args : &[u64], return_ptr : Option<*mut ()>)
   -> Result<(), HotloadError>
-    where L : Into<SrcLocation>
 {
   std::panic::catch_unwind(|| {
     interpret::interpret_function(
@@ -187,7 +185,7 @@ fn try_eval<L>(loc : L, f : Ptr<Function>, args : &[u64], return_ptr : Option<*m
       return_ptr
     );
   }).map_err(|_| {
-    let e = error(loc, "regen eval panic!");
+    let e = error(uid.loc(env), "regen eval panic!");
     HotloadError::Visible(e, BuildStatus::Compiled)
   })?;
   Ok(())
@@ -196,20 +194,19 @@ fn try_eval<L>(loc : L, f : Ptr<Function>, args : &[u64], return_ptr : Option<*m
 fn evaluate_cell(
   mut env : Env,
   uid : CellUid,
-  value_expr : Expr,
 ) -> Result<ChangeType, HotloadError>
 {
   env::unload_cell_value(env, uid);
   let cc = env.cell_compiles.get(&uid).unwrap();
   let cv = {
     if let Some(rc) = cc.reactive_constructor {
-      try_eval(value_expr, cc.function, &[], Some(rc.ptr))?;
-      register_reactive_cell(env, uid, value_expr, rc, cc.allocation)
+      try_eval(env, uid, cc.function, &[], Some(rc.ptr))?;
+      register_reactive_cell(env, uid, rc, cc.allocation)
         .map_err(|e| HotloadError::Visible(e, BuildStatus::Compiled))?
     }
     else {
       let v = cc.allocation;
-      try_eval(value_expr, cc.function, &[], Some(v.ptr))?;
+      try_eval(env, uid, cc.function, &[], Some(v.ptr))?;
       CellValue{ t: v.t, ptr: v.ptr, initialised: true }
     }
   };
@@ -220,16 +217,15 @@ fn evaluate_cell(
 fn register_reactive_cell(
   mut env : Env,
   uid : CellUid,
-  value_expr : Expr,
   constructor_val : RegenValue,
   val : RegenValue,
 ) -> Result<CellValue, Error>
 {
-  let constructor = to_reactive_constructor(env, value_expr, constructor_val)?;
+  let constructor = to_reactive_constructor(env, uid, constructor_val)?;
   match constructor.variant {
     ConstructorVariant::Watcher { file_path } => {
       if val.t != env.c.string_tag {
-        return err(value_expr, "expected reactive string");
+        return err(uid.loc(env), "expected reactive string");
       }
       event_loop::register_watcher(env.event_loop, uid, file_path);
       env.watchers.insert(uid, file_path);
@@ -245,7 +241,7 @@ fn register_reactive_cell(
     }
     ConstructorVariant::Timer { millisecond_interval } => {
       if val.t != env.c.i64_tag {
-        return err(value_expr, "expected reactive i64");
+        return err(uid.loc(env), "expected reactive i64");
       }
       let id = event_loop::register_timer(env.event_loop, uid, millisecond_interval);
       let now : i64 = event_loop::current_millisecond(env.event_loop);
@@ -289,7 +285,7 @@ fn get_reactive_inner_type(env : Env, t : TypeHandle) -> Option<TypeHandle> {
   None
 }
 
-fn to_reactive_constructor(env : Env, value_expr : Expr, constructor_val : RegenValue)
+fn to_reactive_constructor(env : Env, uid : CellUid, constructor_val : RegenValue)
   -> Result<Ptr<ReactiveConstructor>, Error>
 {
   if let Some(t) = get_reactive_inner_type(env, constructor_val.t) {
@@ -299,27 +295,27 @@ fn to_reactive_constructor(env : Env, value_expr : Expr, constructor_val : Regen
     if c.value_type == t {
       return Ok(c);
     }
-    return err(value_expr.loc(), format!("expected {}, found {}", c.value_type, t));
+    return err(uid.loc(env), format!("expected {}, found {}", c.value_type, t));
   }
-  err(value_expr.loc(), format!("expected reactive constructor, found {}", constructor_val.t))
+  err(uid.loc(env), format!("expected reactive constructor, found {}", constructor_val.t))
 }
 
 /// returns true if expression changed
-fn update_value_expression(
+fn update_cell_source(
   mut env : Env,
   uid : CellUid,
-  value_expr : Expr,
+  new_src : CellSrc,
   deps : &CellDependencies,
 ) -> bool
 {
-  if let Some(&prev_expr) = env.cell_exprs.get(&uid) {
-    if prev_expr == value_expr {
+  if let Some(&prev_src) = env.cell_src.get(&uid) {
+    if prev_src == new_src {
       // Always update the value expr, to keep valid source locations
-      env.cell_exprs.insert(uid, value_expr);
+      env.cell_src.insert(uid, new_src);
       return false;
     }
   }
-  env.cell_exprs.insert(uid, value_expr);
+  env.cell_src.insert(uid, new_src);
   // update dependencies
   let mut graph_deps = HashMap::new();
   for &dep_id in &deps.ids {
@@ -345,9 +341,8 @@ fn get_cell_value_mut (env : &mut Env, uid : CellUid) -> &mut CellValue {
   env.cell_values.get_mut(&uid).unwrap()
 }
 
-fn update_observer<L>(mut env : Env, hs : &mut HotloadState, uid : CellUid, loc : L)
+fn update_observer(mut env : Env, hs : &mut HotloadState, uid : CellUid)
   -> Result<ChangeType, HotloadError>
-    where L : Into<SrcLocation>
 {
   use ChangeType::*;
   // check if there is an observer
@@ -380,7 +375,7 @@ fn update_observer<L>(mut env : Env, hs : &mut HotloadState, uid : CellUid, loc 
   if returns_bool {
     let mut value_changed = true;
     try_eval(
-      loc, rc.update_handler,
+      env, uid, rc.update_handler,
       &[state_val.ptr as u64, input_val.ptr as u64],
       Some((&mut value_changed) as *mut bool as *mut ()))?;
     if value_changed {
@@ -393,7 +388,7 @@ fn update_observer<L>(mut env : Env, hs : &mut HotloadState, uid : CellUid, loc 
   }
   else {
     try_eval(
-      loc, rc.update_handler,
+      env, uid, rc.update_handler,
       &[state_val.ptr as u64, input_val.ptr as u64],
       None)?;
       get_cell_value_mut(&mut env, uid).initialised = true;
@@ -404,15 +399,15 @@ fn update_observer<L>(mut env : Env, hs : &mut HotloadState, uid : CellUid, loc 
 fn check_for_input_changes(env : Env, hs : &mut HotloadState, uid : CellUid)
   -> FlushLevel
 {
-  let mut agg_level = FlushLevel::NoFlush;
+  let mut aggregate_flush = FlushLevel::NoFlush;
   if let Some(inputs) = env.graph.inputs(uid) {
     for (&input_uid, &input_type) in inputs {
       let input_change = get_change(hs, input_uid);
-      let input_level = check_input(input_change, input_type);
-      agg_level = std::cmp::min(agg_level, input_level);
+      let input_flush = check_input(input_change, input_type);
+      aggregate_flush = std::cmp::min(aggregate_flush, input_flush);
     }
   }
-  agg_level
+  aggregate_flush
 }
 
 fn check_input(input_change : ChangeType, input_type : DependencyType)
@@ -437,58 +432,56 @@ fn apply_update(
   env : Env,
   hs : &mut HotloadState,
   uid : CellUid,
-  value_expr : Expr,
-  reactive_cell : bool,
+  src : CellSrc,
   flush_level : FlushLevel,
 ) -> Result<ChangeType, HotloadError>
 {
   use FlushLevel::*;
   let mut agg_change = ChangeType::Unchanged;
   if flush_level <= Compile {
-    let c = compile_cell(env, hs, uid, value_expr, reactive_cell)?;
+    let c = compile_cell(env, hs, uid, src)?;
     agg_change = std::cmp::max(agg_change, c);
   }
   if flush_level <= Evaluate {
-    let c = evaluate_cell(env, uid, value_expr)?;
+    let c = evaluate_cell(env, uid)?;
     agg_change = std::cmp::max(agg_change, c);
   }
   if flush_level <= Observer {
-    let c = update_observer(env, hs, uid, value_expr)?;
+    let c = update_observer(env, hs, uid)?;
     agg_change = std::cmp::max(agg_change, c);
   }
   Ok(agg_change)
 }
 
-fn visit_cell(
+fn visited_check(
   env : Env,
   hs : &mut HotloadState,
   uid : CellUid,
-  value_expr : Expr,
-) -> Result<(), HotloadError>
+  src : CellSrc,
+) -> Result<bool, HotloadError>
 {
   // Check if this cell has already been visited
   if hs.visited_cells.contains(&uid) {
     let id = uid.id(env);
     match id {
       DefCell(_, _) => {
-        if env.cell_exprs[&uid] != value_expr {
-          let e = error(value_expr, format!("def {} defined twice!", id));
+        if env.cell_src[&uid] != src {
+          let e = error(src.value_expr, format!("def {} defined twice!", id));
           return Err(HotloadError::Visible(e, BuildStatus::Empty));
         }
         else {
-          return Ok(());
+          return Ok(true);
         }
       }
       ExprCell(_) => {
-        return Ok(());
+        return Ok(true);
       }
       EmbedCell(_) => {
-        return Ok(());
+        return Ok(true);
       }
     }
   }
-  hs.visited_cells.insert(uid);
-  Ok(())
+  Ok(false)
 }
 
 fn hotload_cell_value(
@@ -497,10 +490,11 @@ fn hotload_cell_value(
   uid : CellUid,
   value_expr : Expr,
   deps : &CellDependencies,
-  reactive_cell : bool,
+  is_reactive : bool,
 )
 {
-  let r = try_hotload_cell_value(env, hs, uid, value_expr, deps, reactive_cell);
+  let src = CellSrc { value_expr, is_reactive };
+  let r = try_hotload_cell_value(env, hs, uid, src, deps);
   if let Err(he) = r {
     if let HotloadError::Visible(e, build_status) = he {
       env.broken_cells.insert(uid);
@@ -514,39 +508,74 @@ fn try_hotload_cell_value(
   env : Env,
   hs : &mut HotloadState,
   uid : CellUid,
-  value_expr : Expr,
+  src : CellSrc,
   deps : &CellDependencies,
-  reactive_cell : bool,
 ) -> Result<(), HotloadError>
 {
-  visit_cell(env, hs, uid, value_expr)?;
+  if visited_check(env, hs, uid, src)? {
+    return Ok(())
+  }
+  else {
+    hs.visited_cells.insert(uid);
+  }
 
   // Update the value expression
   let expr_flush = {
-    if update_value_expression(env, uid, value_expr, deps) {
+    if update_cell_source(env, uid, src, deps) {
       FlushLevel::Compile
     }
     else { FlushLevel::NoFlush }
   };
 
-  hotload_input_changes(env, hs, uid, value_expr, reactive_cell, expr_flush)
+  hotload_input_changes(env, hs, uid, src, expr_flush)
+}
+
+fn try_hotload_from_existing_expr(
+  env : Env,
+  hs : &mut HotloadState,
+  uid : CellUid,
+) -> Result<(), HotloadError>
+{
+  let src = env.cell_src[&uid];
+  if visited_check(env, hs, uid, src)? {
+    return Ok(())
+  }
+  else {
+    hs.visited_cells.insert(uid);
+  }
+  hotload_input_changes(env, hs, uid, src, FlushLevel::NoFlush)
+}
+
+fn hotload_from_existing_expr(
+  mut env : Env,
+  hs : &mut HotloadState,
+  uid : CellUid,
+)
+{
+  let r = try_hotload_from_existing_expr(env, hs, uid);
+  if let Err(he) = r {
+    if let HotloadError::Visible(e, build_status) = he {
+      env.broken_cells.insert(uid);
+      env.cell_build_status.insert(uid, build_status);
+      println!("{}", e.display());
+    }
+  }
 }
 
 fn hotload_input_changes(
   mut env : Env,
   hs : &mut HotloadState,
   uid : CellUid,
-  value_expr : Expr,
-  reactive_cell : bool,
+  src : CellSrc,
   forced_flush : FlushLevel,
 ) -> Result<(), HotloadError>
 {
   // Check the cell's dependencies for changes
   let input_flush = check_for_input_changes(env, hs, uid);
-
+  
   let change_flush = std::cmp::min(forced_flush, input_flush);
 
-  if change_flush != FlushLevel::NoFlush {
+  if change_flush < FlushLevel::NoFlush {
     env.broken_cells.remove(&uid);
   }
 
@@ -560,14 +589,16 @@ fn hotload_input_changes(
       match status {
         BuildStatus::Empty => FlushLevel::Compile,
         BuildStatus::Compiled => FlushLevel::Evaluate,
-        BuildStatus::Evaluated => FlushLevel::Evaluate,
+        BuildStatus::Evaluated => FlushLevel::NoFlush,
       }
     }
   };
   let flush_level = std::cmp::min(change_flush, incompleteness_flush);
-  let change = apply_update(env, hs, uid, value_expr, reactive_cell, flush_level)?;
-  hs.cell_changes.insert(uid, change);
-  env.cell_build_status.insert(uid, BuildStatus::Evaluated);
+  if flush_level < FlushLevel::NoFlush {
+    let change = apply_update(env, hs, uid, src, flush_level)?;
+    env.cell_build_status.insert(uid, BuildStatus::Evaluated);
+    hs.cell_changes.insert(uid, change);
+  }
   Ok(())
 }
 
@@ -660,8 +691,8 @@ fn hotload_cell(
     ExprShape::List(ExprTag::Reactive, &[name, value_expr]) => {
       hotload_def(env, hs, namespace, name.as_symbol(), value_expr, true);
     }
-    ExprShape::List(ExprTag::Cells, cell_exprs) => {
-      hotload_cells(env, hs, namespace, cell_exprs);
+    ExprShape::List(ExprTag::Cells, cell_src) => {
+      hotload_cells(env, hs, namespace, cell_src);
     }
     _ => {
       // hotload nested cells
@@ -678,10 +709,10 @@ fn hotload_cells(
   env : Env,
   hs : &mut HotloadState,
   namespace : Namespace,
-  cell_exprs : &[Expr],
+  cell_src : &[Expr],
 )
 {
-  for &e in cell_exprs {
+  for &e in cell_src {
     hotload_cell(env, hs, namespace, e)
   }
 }
@@ -707,13 +738,15 @@ fn is_cell_active(hs : &HotloadState, uid : CellUid) -> bool {
 }
 
 fn get_change(hs : &HotloadState, uid : CellUid) -> ChangeType {
-  if let Some(c) = hs.cell_changes.get(&uid).cloned() {
-    return c;
+  if hs.visited_cells.contains(&uid) {
+    hs.cell_changes.get(&uid).cloned().unwrap_or(ChangeType::Unchanged)
   }
-  if is_cell_active(hs, uid) {
-    return ChangeType::Deleted;
+  else if is_cell_active(hs, uid) {
+    ChangeType::Deleted
   }
-  return ChangeType::Unchanged;
+  else {
+    ChangeType::Unchanged
+  }
 }
 
 fn root_diff_update(mut env : Env, mut hs : HotloadState, module_expr : Expr) {
@@ -763,8 +796,8 @@ pub fn hotload_module(mut env : Env, module_name : &str, code : &str) {
     if let Ok(n) = r { n } else { return }
   };
   let hs = HotloadState::new();
-  let TODO = (); // this was to force all errors to repeat when the file is edited
-  // env.broken_cells.clear();
+  // this was to force all errors to repeat when a file is edited
+  env.broken_cells.clear();
   root_diff_update(env, hs, module_expr);
   env.root_expr = Some(module_expr);
 }
@@ -793,7 +826,7 @@ pub fn update_timer_cell(mut env : Env, uid : CellUid, millisecond : i64) {
   // Try and get an update list
   if !env.update_lists.contains_key(&uid) {
     if let Some(l) = topological_update_list(env, &[uid]) {
-      // env.update_lists.insert(uid, l);
+      env.update_lists.insert(uid, l);
     }
   }
   match env.update_lists.get(&uid) {
@@ -801,9 +834,8 @@ pub fn update_timer_cell(mut env : Env, uid : CellUid, millisecond : i64) {
       for &cell in update_list {
         hs.active_cells.insert(cell);
       }
-      for &cell in update_list {
-        let e = env.cell_exprs[&cell];
-        //try_hotload_cell_value(env, &mut hs, cell, e, )
+      for &cell in update_list.iter() {
+        hotload_from_existing_expr(env, &mut hs, cell);
       }
     }
     None => {
@@ -853,5 +885,6 @@ fn topological_update_list(env : Env, roots : &[CellUid])
   for &uid in roots {
     visit(&mut ordering, &mut flags, env, uid)?;
   }
+  ordering.reverse();
   Some(ordering)
 }
