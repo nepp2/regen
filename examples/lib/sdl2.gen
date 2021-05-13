@@ -1,4 +1,6 @@
 
+// --------------- SDL Constants ------------------
+
 def SDL_INIT_VIDEO = 32 as u32;
 def SDL_WINDOWPOS_UNDEFINED = 536805376 as i32;
 def SDL_WINDOW_SHOWN = 4 as u32;
@@ -7,95 +9,22 @@ def SDL_RENDERER_ACCELERATED = 2 as u32;
 
 def SDL_DEFAULT_RENDER_INDEX = -1 as i32;
 
-def sdl2 = load_library(sym SDL2);
+def sdl2 = load_library("libs/SDL2");
 
 def sdl_init =
-  load_library_symbol(sdl2, sym SDL_Init)
+  load_library_symbol(sdl2, "SDL_Init")
     as cfun(flags : u32) => i32;
 
-def SdlWindowHandle = u64;
-def SdlRendererHandle = u64;
+// --------------- SDL Types ------------------
 
-// Event type codes
-def SDL_QUIT = 256 as u32;
-def SDL_WINDOWEVENT = 512 as u32;
-def SDL_KEYDOWN = 768 as u32;
-def SDL_KEYUP = 769 as u32;
-def SDL_TEXTEDITING = 770 as u32;
-def SDL_TEXTINPUT = 771 as u32;
-def SDL_MOUSEDOWN = 1025 as u32;
-def SDL_MOUSEUP = 1026 as u32;
-def SDL_MOUSEMOTION = 1024 as u32;
+def SdlWindowHandle = named_type(sym SdlWindowHandle, ptr void);
+def SdlRendererHandle = named_type(sym SdlRendererHandle, ptr void);
+def SdlSurfaceHandle = named_type(sym SdlSurfaceHandle, ptr void);
+def SdlTextureHandle = named_type(sym SdlTextureHandle, ptr void);
 
-def SdlEvent = struct {
-  event_type : u32,
-  timestamp : u32,
-  content : sized_array(u64, 20),
-};
-
-def sdl_create_window =
-  load_library_symbol(sdl2, sym SDL_CreateWindow)
-    as cfun(
-      title : (ptr u8), x : i32, y : i32,
-      w : i32, h : i32, flags : u32
-    ) => SdlWindowHandle;
-
-def sdl_destroy_window =
-  load_library_symbol(sdl2, sym SDL_DestroyWindow)
-    as cfun(win : SdlWindowHandle) => void;
-
-def sdl_get_window_id =
-  load_library_symbol(sdl2, sym SDL_GetWindowID)
-    as cfun (win : SdlWindowHandle) => u32;
-
-def sdl_set_window_position =
-  load_library_symbol(sdl2, sym SDL_SetWindowPosition)
-    as cfun(window : SdlWindowHandle, x : i32, y : i32) => void;
-
-def sdl_raise_window =
-  load_library_symbol(sdl2, sym SDL_RaiseWindow)
-    as cfun(window : SdlWindowHandle) => void;
-
-def sdl_poll_event =
-  load_library_symbol(sdl2, sym SDL_PollEvent)
-    as cfun(event : ptr SdlEvent) => i32;
-
-def sdl_create_renderer =
-  load_library_symbol(sdl2, sym SDL_CreateRenderer)
-    as cfun(
-      window : SdlWindowHandle,
-      driver_index : i32,
-      flags : u32,
-    ) => SdlRendererHandle;
-
-def sdl_clear =
-  load_library_symbol(sdl2, sym SDL_RenderClear)
-    as cfun(r : SdlRendererHandle) => i32;
-
-def sdl_set_draw_color =
-  load_library_symbol(sdl2, sym SDL_SetRenderDrawColor)
-    as cfun(
-      renderer : SdlRendererHandle,
-      r : u8, g : u8, b : u8, a : u8
-    ) => i32;
-
-def sdl_present =
-  load_library_symbol(sdl2, sym SDL_RenderPresent)
-    as cfun(r : SdlRendererHandle) => void;
-
-def sdl_rect = struct {
+def SdlRect = struct {
   x : i32, y : i32, w : i32, h : i32
 };
-
-def sdl_draw_rect =
-  load_library_symbol(sdl2, sym SDL_RenderDrawRect)
-    as cfun(renderer : SdlRendererHandle, rect : ptr sdl_rect) => void;
-
-def sdl_fill_rect =
-  load_library_symbol(sdl2, sym SDL_RenderFillRect)
-    as cfun(renderer : SdlRendererHandle, rect : ptr sdl_rect) => void;
-
-// specialised event structs
 
 // https://wiki.libsdl.org/SDL_Keysym
 def SdlKeysym = struct {
@@ -140,6 +69,97 @@ def SdlMouseMotionEvent = struct {
   yrel : i32,
 }
 
+// Event type codes
+def SDL_QUIT = 256 as u32;
+def SDL_WINDOWEVENT = 512 as u32;
+def SDL_KEYDOWN = 768 as u32;
+def SDL_KEYUP = 769 as u32;
+def SDL_TEXTEDITING = 770 as u32;
+def SDL_TEXTINPUT = 771 as u32;
+def SDL_MOUSEDOWN = 1025 as u32;
+def SDL_MOUSEUP = 1026 as u32;
+def SDL_MOUSEMOTION = 1024 as u32;
+
+def SdlEvent = struct {
+  event_type : u32,
+  timestamp : u32,
+  content : sized_array(u64, 20),
+};
+
+def sdl_create_window =
+  load_library_symbol(sdl2, "SDL_CreateWindow")
+    as cfun(
+      title : (ptr u8), x : i32, y : i32,
+      w : i32, h : i32, flags : u32
+    ) => SdlWindowHandle;
+
+def sdl_destroy_window =
+  load_library_symbol(sdl2, "SDL_DestroyWindow")
+    as cfun(win : SdlWindowHandle) => void;
+
+def sdl_get_window_id =
+  load_library_symbol(sdl2, "SDL_GetWindowID")
+    as cfun (win : SdlWindowHandle) => u32;
+
+def sdl_set_window_position =
+  load_library_symbol(sdl2, "SDL_SetWindowPosition")
+    as cfun(window : SdlWindowHandle, x : i32, y : i32) => void;
+
+def sdl_raise_window =
+  load_library_symbol(sdl2, "SDL_RaiseWindow")
+    as cfun(window : SdlWindowHandle) => void;
+
+def sdl_poll_event =
+  load_library_symbol(sdl2, "SDL_PollEvent")
+    as cfun(event : ptr SdlEvent) => i32;
+
+def sdl_create_renderer =
+  load_library_symbol(sdl2, "SDL_CreateRenderer")
+    as cfun(
+      window : SdlWindowHandle,
+      driver_index : i32,
+      flags : u32,
+    ) => SdlRendererHandle;
+
+def sdl_clear =
+  load_library_symbol(sdl2, "SDL_RenderClear")
+    as cfun(r : SdlRendererHandle) => i32;
+
+def sdl_set_draw_color =
+  load_library_symbol(sdl2, "SDL_SetRenderDrawColor")
+    as cfun(
+      renderer : SdlRendererHandle,
+      r : u8, g : u8, b : u8, a : u8
+    ) => i32;
+
+def sdl_present =
+  load_library_symbol(sdl2, "SDL_RenderPresent")
+    as cfun(r : SdlRendererHandle) => void;
+
+def sdl_draw_rect =
+  load_library_symbol(sdl2, "SDL_RenderDrawRect")
+    as cfun(renderer : SdlRendererHandle, rect : ptr SdlRect) => void;
+
+def sdl_fill_rect =
+  load_library_symbol(sdl2, "SDL_RenderFillRect")
+    as cfun(renderer : SdlRendererHandle, rect : ptr SdlRect) => void;
+
+def sdl_render_copy =
+  load_library_symbol(sdl2, "SDL_RenderCopy")
+    as cfun(
+      r : SdlRendererHandle,
+      tex : SdlTextureHandle,
+      src : ptr SdlRect,
+      dest : ptr SdlRect
+    ) => void;
+
+def sdl_create_texture_from_surface =
+  load_library_symbol(sdl2, "SDL_CreateTextureFromSurface")
+    as cfun(
+      r : SdlRendererHandle,
+      surface : SdlSurfaceHandle,
+    ) => SdlTextureHandle;
+
 // convenience functions for event handling
 
 def to_mouse_button_event = fun(e : ptr SdlEvent) {
@@ -157,3 +177,26 @@ def to_keyboard_event = fun(e : ptr SdlEvent) {
 def to_window_event = fun(e : ptr SdlEvent) {
   (ref e.content) as (ptr SdlWindowEvent)
 };
+
+// ------------------ SDL2 Image -------------------
+
+
+def IMG_INIT_JPG = 1 as u32;
+def IMG_INIT_PNG = 2 as u32;
+def IMG_INIT_TIF = 4 as u32;
+def IMG_INIT_WEBP = 8 as u32;
+
+load_library("libs/libpng16-16");
+load_library("libs/libjpeg-9");
+load_library("libs/libtiff-5");
+load_library("libs/libwebp-7");
+load_library("libs/zlib1");
+def sdl2_image = load_library("libs/SDL2_image");
+
+def sdl_img_init =
+  load_library_symbol(sdl2_image, "IMG_Init")
+    as cfun(flags : u32) => i32;
+
+def sdl_img_load =
+  load_library_symbol(sdl2_image, "IMG_Load")
+    as cfun(path : ptr u8) => SdlSurfaceHandle;

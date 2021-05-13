@@ -1,5 +1,7 @@
 
-use crate::{parse::{self, Expr, ExprShape}, perm_alloc, symbols};
+use std::vec;
+
+use crate::{parse::{self, Expr, ExprShape}, perm_alloc, symbols::{self, to_symbol}};
 use parse::{ExprContent, ExprData, ExprMetadata, ExprTag, SrcLocation};
 use perm_alloc::{perm, perm_slice_from_vec};
 use symbols::{SymbolTable};
@@ -55,6 +57,19 @@ impl ExprBuilder {
     e
   }
 
+  fn array_expr(&self, type_name : &str, list : Vec<Expr>) -> Expr {
+    let sym = to_symbol(self.st, type_name);
+    let tag = self.expr(ExprTag::Name, ExprContent::Sym(sym));
+    let const_tag = self.list_expr(ExprTag::ConstExpr, vec![tag]);
+    let elements = self.list_expr(ExprTag::Syntax, list);
+    self.list_expr(ExprTag::ArrayInit, vec![const_tag, elements])
+  }
+
+
+  fn list_expr(&self, tag : ExprTag, list : Vec<Expr>) -> Expr {
+    self.expr(tag, ExprContent::List(perm_slice_from_vec(list)))
+  }
+
   fn expr(&self, tag : ExprTag, content : ExprContent) -> Expr {
     perm(ExprData {
       tag,
@@ -68,14 +83,8 @@ impl ExprBuilder {
 }
 
 pub fn struct_type_macro(nb : &ExprBuilder, names : Vec<Expr>, types : Vec<Expr>) -> Expr {
-  let names = {
-    let c = ExprContent::List(perm_slice_from_vec(names));
-    nb.expr(ExprTag::ArrayInit, c)
-  };
-  let types = {
-    let c = ExprContent::List(perm_slice_from_vec(types));
-    nb.expr(ExprTag::ArrayInit, c)
-  };
+  let names = nb.array_expr("symbol", names);
+  let types = nb.array_expr("type", types);
   let tstr = nb.parse("
     {
       let names = $names;
@@ -91,10 +100,7 @@ pub fn struct_type_macro(nb : &ExprBuilder, names : Vec<Expr>, types : Vec<Expr>
 }
 
 pub fn fn_type_macro(nb : &ExprBuilder, arg_types : Vec<Expr>, ret : Expr, is_cfun : bool) -> Expr {
-  let array = {
-    let c = ExprContent::List(perm_slice_from_vec(arg_types));
-    nb.expr(ExprTag::ArrayInit, c)
-  };
+  let array = nb.array_expr("type", arg_types);
   let fn_type_call = nb.parse("
     {
       let args = $array;
@@ -126,10 +132,7 @@ pub fn fn_type_macro(nb : &ExprBuilder, arg_types : Vec<Expr>, ret : Expr, is_cf
 }
 
 pub fn template_macro(nb : &ExprBuilder, e : Expr, args : Vec<Expr>) -> Expr {
-  let array = {
-    let c = ExprContent::List(perm_slice_from_vec(args));
-    nb.expr(ExprTag::ArrayInit, c)
-  };
+  let array = nb.array_expr("expr", args);
   let template_call = nb.parse("
     {
       let args = $array;

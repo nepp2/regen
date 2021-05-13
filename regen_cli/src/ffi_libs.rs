@@ -1,5 +1,5 @@
 
-use regen_core::{env::{Env, define_global}, ffi_libs::RegenString, hotload, parse::{self, Expr}, symbols::{Symbol, to_symbol}, types, types::c_function_type};
+use regen_core::{env::{Env, define_global}, ffi_libs::RegenString, hotload, parse::{self, Expr}, perm_alloc::{Ptr, perm}, symbols::{Symbol, to_symbol}, types, types::c_function_type};
 use std::fs;
 use std::path::Path;
 use std::ffi::CString;
@@ -25,12 +25,8 @@ pub extern "C" fn load_expr(env : Env, file_name : &RegenString) -> Expr {
   parse::parse_module(env.st, module_name, &code).unwrap()
 }
 
-pub extern "C" fn load_library(path : Symbol) -> *const Library {
-  load_library_str(path.as_str())
-}
-
-fn load_library_str(path : &str) -> *const Library {
-  let path = Path::new(path);
+pub extern "C" fn ffi_load_library(path : &RegenString) -> *const Library {
+  let path = Path::new(path.as_str());
   let r = Library::new(path);
   if r.is_err() {
     println!("Failed to load library {}", path.display());
@@ -40,8 +36,8 @@ fn load_library_str(path : &str) -> *const Library {
   Box::into_raw(Box::new(lib))
 }
 
-pub extern "C" fn load_library_symbol(lib : &Library, symbol : Symbol) -> *const () {
-  let s = CString::new(symbol.as_str()).unwrap();
+pub extern "C" fn ffi_load_library_symbol(lib : &Library, symbol_name : &RegenString) -> *const () {
+  let s = CString::new(symbol_name.as_str()).unwrap();
   unsafe {
     let symbol: Option<LibSymbol<*const ()>> =
       lib.get(s.as_bytes_with_nul()).ok();
@@ -55,17 +51,19 @@ fn preload_file(env : Env, path : &str) {
 }
 
 pub fn bind_libs(env : Env) {
-  let symbol_tag = env.c.symbol_tag;
   let void = env.c.void_tag;
-  let void_ptr = types::pointer_type(void);
   let string_ptr = types::pointer_type(env.c.string_tag);
   let expr_tag = env.c.expr_tag;
+  let void_ptr = types::pointer_type(void);
+  let library_tag =
+    types::named_type(to_symbol(env.st, "Library"), void_ptr);
   define_global(env, "load_expr", load_expr as u64,
     c_function_type(&[void_ptr, string_ptr], expr_tag));
-  define_global(env, "load_library", load_library as u64,
-    c_function_type(&[symbol_tag], void_ptr));
-  define_global(env, "load_library_symbol", load_library_symbol as u64,
-    c_function_type(&[void_ptr, symbol_tag], void_ptr));
+  define_global(env, "Library", Ptr::to_u64(library_tag), env.c.type_tag);
+  define_global(env, "ffi_load_library", ffi_load_library as u64,
+    c_function_type(&[string_ptr], library_tag));
+  define_global(env, "ffi_load_library_symbol", ffi_load_library_symbol as u64,
+    c_function_type(&[library_tag, string_ptr], void_ptr));
 
   preload_file(env, "examples/lib/prelude.gen");
 }

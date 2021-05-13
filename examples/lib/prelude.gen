@@ -40,3 +40,11 @@ def import = fun(path : string) {
     embed load_module($symbol_expr);
   })
 }
+
+def load_library = fun(path : string) {
+  ffi_load_library(ref path)
+}
+
+def load_library_symbol = fun(lib : Library, path : string) {
+  ffi_load_library_symbol(lib, ref path)
+}

@@ -174,15 +174,15 @@ def render_game = fun(r : SdlRendererHandle, state : ptr Game) {
   sdl_set_draw_color(r, 255 as u8, 0 as u8, 0 as u8, 255 as u8);
 
   // Paddle p1
-  let rect = init sdl_rect(state.p1.pos.x as i32, state.p1.pos.y as i32, 10 as i32, state.p1.height as i32);
+  let rect = init SdlRect(state.p1.pos.x as i32, state.p1.pos.y as i32, 10 as i32, state.p1.height as i32);
   sdl_fill_rect(r, ref rect);
 
   // Paddle p2
-  let rect = init sdl_rect(state.p2.pos.x as i32, state.p2.pos.y as i32, 10 as i32, state.p2.height as i32);
+  let rect = init SdlRect(state.p2.pos.x as i32, state.p2.pos.y as i32, 10 as i32, state.p2.height as i32);
   sdl_fill_rect(r, ref rect);
 
   // Ball
-  let rect = init sdl_rect(state.b.pos.x as i32, state.b.pos.y as i32, ball_size as i32, ball_size as i32);
+  let rect = init SdlRect(state.b.pos.x as i32, state.b.pos.y as i32, ball_size as i32, ball_size as i32);
   sdl_fill_rect(r, ref rect);
 
   sdl_present(r);
@@ -203,7 +203,7 @@ def buffered_game_update = fun(g : ptr BufferedGame, buffer : ptr GameEventBuffe
   }
 }
 
-reactive input_tick = create_timer(1);
+reactive input_tick = create_timer(2);
 
 reactive sdl_input = stream(observe input_tick, poll_game_input);
 
@@ -250,4 +250,20 @@ reactive game_state = {
 
 def renderer = create_renderer(window);
 
-render_game(renderer, ref game_state.state)
+sdl_img_init(IMG_INIT_PNG);
+
+def path = "C:\Users\Andy\Pictures\monstar.png";
+
+def image = sdl_img_load(path.data);
+
+def tex = sdl_create_texture_from_surface(renderer, image);
+
+print tex as u64;
+
+{
+  render_game(renderer, ref game_state.state);
+
+  sdl_render_copy(renderer, tex, 0 as ptr SdlRect, 0 as ptr SdlRect);
+
+  sdl_present(renderer);
+}

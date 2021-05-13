@@ -43,19 +43,42 @@ def scrub_update = fun(scrub : ptr Scrub, ge : ptr GameEvent) {
   false
 }
 
+def new_rect = fun(x : i64, y : i64, w : i64, h : i64) {
+  init SdlRect(x as i32, y as i32, w as i32, h as i32)
+}
+
+def set_color = fun(rend: SdlRendererHandle, r : i64, g : i64, b : i64) {
+  sdl_set_draw_color(rend, r as u8, g as u8, b as u8, 255 as u8);
+}
+
 def render_scrub = fun (scrub : ptr Scrub) {
   let r = scrub.view.renderer;
   // render
-  sdl_set_draw_color(r, 0 as u8, 0 as u8, 0 as u8, 0 as u8);
+  set_color(r, 0, 0, 0);
   sdl_clear(r);
 
-  sdl_set_draw_color(r, 255 as u8, 0 as u8, 0 as u8, 255 as u8);
+  let button_size = scrub.view.height;
 
-  let w = (scrub.view.width / 100) * scrub.val;
+  let play_pause_rect = new_rect(0, 0, button_size, button_size);
+  let record_rect = new_rect(button_size, 0, button_size, button_size);
+  let stop_rect = new_rect(button_size * 2, 0, button_size, button_size);
 
-  let rect = init sdl_rect(0 as i32, 0 as i32, w as i32, scrub.view.height as i32);
+  let slider_offset = button_size * 3;
+  let slider_length = scrub.view.width - slider_offset;
+  let slider_pos = ((slider_length as i64) / 100) * scrub.val;
 
-  sdl_fill_rect(r, ref rect);
+  let slider_rect = new_rect(slider_offset, 0, slider_pos, scrub.view.height);
+
+  set_color(r, 0, 255, 0);
+  sdl_fill_rect(r, ref play_pause_rect);
+  set_color(r, 255, 255, 0);
+  sdl_fill_rect(r, ref record_rect);
+  set_color(r, 0, 0, 255);
+  sdl_fill_rect(r, ref stop_rect);
+
+  set_color(r, 255, 0, 0);
+  sdl_fill_rect(r, ref slider_rect);
+
   sdl_present(r);
 };
 

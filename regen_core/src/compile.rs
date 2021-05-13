@@ -560,11 +560,21 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
       ()
     }
     // array
-    List(ArrayInit, elements) => {
-      let first_el = compile_expr_to_var(b, elements[0])?;
-      let element_type = first_el.t;
-      let mut element_values = vec![first_el.id];
-      for &el in &elements[1..] {
+    List(ArrayInit, &[type_expr, elements]) => {
+      let mut element_values = vec![];
+      let mut el_iter = elements.children().iter().cloned();
+      let element_type = {
+        if type_expr.tag == Omitted {
+          let first_el = el_iter.next().unwrap();
+          let v = compile_expr_to_var(b, first_el)?;
+          element_values.push(v.id);
+          v.t
+        }
+        else {
+          const_expr_to_type(b, type_expr)?
+        }
+      };
+      for el in el_iter {
         let v = compile_expr_to_var(b, el)?;
         if v.t != element_type {
           return err(el,
@@ -573,7 +583,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
         }
         element_values.push(v.id);
       }
-      let t = types::array_type(element_type, elements.len() as i64);
+      let t = types::array_type(element_type, element_values.len() as i64);
       let ie = InstrExpr::Array(perm_slice_from_vec(element_values));
       return Ok(Some(push_expr(b, e, ie, t).to_ref()))
     }

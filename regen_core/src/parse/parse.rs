@@ -663,11 +663,20 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       ps.pop_type(TokenType::Symbol)?;
       let paren_precedence = infix_precedence(ps, "(");
       let type_name = parse_const_expr(ps, paren_precedence)?;
-      let mut es = vec![type_name];
-      ps.expect("(")?;
-      parse_comma_expr_list(ps, &mut es)?;
-      ps.expect(")")?;
-      ps.list_expr(StructInit, es, start)
+      if ps.accept("[") {
+        let mut es = vec![];
+        parse_comma_expr_list(ps, &mut es)?;
+        ps.expect("]")?;
+        let elements = ps.list_expr(Syntax, es, start);
+        ps.list_expr(ArrayInit, vec![type_name, elements], start)
+      }
+      else {
+        ps.expect("(")?;
+        let mut es = vec![type_name];
+        parse_comma_expr_list(ps, &mut es)?;
+        ps.expect(")")?;
+        ps.list_expr(StructInit, es, start)
+      }
     }
     "print" => {
       ps.pop_type(TokenType::Symbol)?;
@@ -853,8 +862,10 @@ fn parse_expression_term(ps : &mut ParseState) -> Result<Expr, Error> {
         ps.pop_type(Symbol)?;
         match paren.as_str() {
           "[" => {
-            let e = parse_list(ps, vec![], ",", ArrayInit)?;
+            let tag = ps.omitted_expr();
+            let elements = parse_list(ps, vec![], ",", Syntax)?;
             ps.expect(close_paren)?;
+            let e = ps.list_expr(ArrayInit, vec![tag, elements], start);
             Ok(e)
           }
           "{" => {
