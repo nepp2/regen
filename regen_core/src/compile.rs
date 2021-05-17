@@ -445,15 +445,16 @@ fn assert_type<L : Into<SrcLocation>>(loc : L, t : TypeHandle, expected : TypeHa
   Ok(())
 }
 
-fn compile_cast(b : &mut Builder, v : Var, t : TypeHandle)
+fn compile_cast<L>(b : &mut Builder, loc : L, v : Var, t : TypeHandle)
   -> Result<Var, Error>
+    where L : Into<SrcLocation>
 {
   fn ptr_or_prim(t : TypeHandle) -> bool {
     t.kind == Kind::Pointer || t.kind == Kind::Primitive
   }
   if t.size_of != v.t.size_of {
     if !(ptr_or_prim(t) && ptr_or_prim(v.t)) {
-      return err(v.loc, format!("cannot cast from {} to {}", v.t, t));
+      return err(loc, format!("cannot cast from {} to {}", v.t, t));
     }
   }
   Ok(push_expr(b, v.loc, InstrExpr::Cast(v.id), t))
@@ -515,7 +516,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
     Literal(Val::Bool(v)) => {
       let lit_expr = InstrExpr::LiteralI64(if v { 1 } else { 0 });
       let v = push_expr(b, e, lit_expr, b.c.u64_tag);
-      return Ok(Some(compile_cast(b, v, b.c.bool_tag)?.to_ref()));
+      return Ok(Some(compile_cast(b, e, v, b.c.bool_tag)?.to_ref()));
     }
     // local or global reference
     Sym(sym) => {
@@ -595,7 +596,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
         .ok_or_else(|| error(array, "expected array"))?;
       let array_ptr = r.get_address(b);
       let element_ptr_type = types::pointer_type(info.inner);
-      let ptr = compile_cast(b, array_ptr, element_ptr_type)?;
+      let ptr = compile_cast(b, array, array_ptr, element_ptr_type)?;
       let len = compile_array_len(b, array)?;
       let ie = InstrExpr::Init(perm_slice(&[ptr.id, len.id]));
       let t = types::slice_type(&b.c, b.st, info.inner);
@@ -616,7 +617,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
       };
       let array_ptr = v.get_address(b);
       let element_ptr_type = types::pointer_type(info.inner);
-      let ptr = compile_cast(b, array_ptr, element_ptr_type)?;
+      let ptr = compile_cast(b, array, array_ptr, element_ptr_type)?;
       let offset = compile_expr_to_var(b, index)?.id;
       let ie = InstrExpr::PtrOffset { ptr: ptr.id, offset };
       let ptr = push_expr(b, e, ie, ptr.t);
@@ -799,7 +800,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
     List(Cast, &[value, to_type]) => {
       let t = const_expr_to_type(b, to_type)?;
       let v = compile_expr_to_var(b, value)?;
-      return Ok(Some(compile_cast(b, v, t)?.to_ref()));
+      return Ok(Some(compile_cast(b, e, v, t)?.to_ref()));
     }
     // observe
     List(Observe, &[e]) => {
@@ -989,13 +990,13 @@ fn compile_container(
   }
   // Cast args
   let void_ptr_tag = types::pointer_type(b.c.void_tag);
-  let signal_arg = compile_cast(b, signal, b.c.signal_tag)?;
+  let signal_arg = compile_cast(b, e, signal, b.c.signal_tag)?;
   let type_arg = compile_type_literal(b, value.t, value.loc);
   let value_arg = {
     let v = value.to_ref().get_address(b);
-    compile_cast(b, v, void_ptr_tag)?
+    compile_cast(b, e, v, void_ptr_tag)?
   };
-  let function_arg = compile_cast(b, function, void_ptr_tag)?;
+  let function_arg = compile_cast(b, e, function, void_ptr_tag)?;
   let ret = compile_function_call(
     b, e,
     container_function,
@@ -1003,7 +1004,7 @@ fn compile_container(
     vec![signal_arg.id, type_arg.id, value_arg.id, function_arg.id],
   )?;
   let constructor_type = types::poly_type(b.c.reactive_constructor_tag, value.t);
-  compile_cast(b, ret, constructor_type)
+  compile_cast(b, e, ret, constructor_type)
 }
 
 fn compile_stream(
@@ -1038,9 +1039,9 @@ fn compile_stream(
   }
   // Cast args
   let void_ptr_tag = types::pointer_type(b.c.void_tag);
-  let signal_arg = compile_cast(b, signal, b.c.signal_tag)?;
+  let signal_arg = compile_cast(b, e, signal, b.c.signal_tag)?;
   let type_arg = compile_type_literal(b, state_type, function_expr);
-  let function_arg = compile_cast(b, function, void_ptr_tag)?;
+  let function_arg = compile_cast(b, e, function, void_ptr_tag)?;
   let ret = compile_function_call(
     b, e,
     stream_function,
@@ -1048,7 +1049,7 @@ fn compile_stream(
     vec![signal_arg.id, type_arg.id, function_arg.id],
   )?;
   let constructor_type = types::poly_type(b.c.reactive_constructor_tag, state_type);
-  compile_cast(b, ret, constructor_type)
+  compile_cast(b, e, ret, constructor_type)
 }
 
 fn binary_op_type(c : &CoreTypes, op : Operator, a : TypeHandle, b : TypeHandle) -> Option<TypeHandle> {
@@ -1067,6 +1068,11 @@ fn binary_op_type(c : &CoreTypes, op : Operator, a : TypeHandle, b : TypeHandle)
       }
       LT | GT | LTE | GTE => {
         if types::is_number(a) {
+          return Some(c.bool_tag);
+        }
+      }
+      And | Or => {
+        if types::is_bool(a) {
           return Some(c.bool_tag);
         }
       }

@@ -1,28 +1,8 @@
 
-embed import("examples/lib/sdl2.gen");
-embed import("examples/lib/game.gen");
 embed import("examples/lib/list.gen");
+embed import("examples/lib/sdl2.gen");
+embed import("examples/lib/window.gen");
 embed import("examples/scrub/scrub.gen");
-
-embed define_list_type(#GameEventList, #GameEvent);
-
-def GameEventBuffer = struct {
-  list : GameEventList,
-  capacity : i64,
-}
-
-def create_game_event_buffer = fun(capacity : i64) {
-  let list = GameEventList::new();
-  init GameEventBuffer(list, capacity)
-}
-
-def buffer_update = fun(buffer : ptr GameEventBuffer, e : ptr GameEvent) {
-  if buffer.list.length < buffer.capacity {
-    GameEventList::add(buffer.list, *e);
-    true
-  }
-  else { false }
-}
 
 def width = 800;
 def height = 600;
@@ -31,7 +11,7 @@ def paddle_height = 50;
 def paddle_speed = 10;
 def ball_size = 10;
 
-def window = create_game_window("Pong", width, height);
+def window = create_window("Pong", width, height);
 def window_id = sdl_get_window_id(window);
 
 def Vec2 = struct { x : i64, y : i64 };
@@ -45,33 +25,33 @@ def Paddle = struct {
   vel : i64
 };
 
-def Game = struct {
+def Pong = struct {
   p1 : Paddle,
   p2 : Paddle,
   b : Ball,
 };
 
-def BufferedGame = struct {
+def BufferedPong = struct {
   event_count : i64,
-  initial_state : Game,
-  state : Game,
+  initial_state : Pong,
+  state : Pong,
 };
 
-def initial_game_state = {
+def initial_pong_state = {
   let ypos = (height - paddle_height) / 2;
   let b = init Ball(
     init Vec2((width - ball_size) / 2, (height - ball_size) / 2),
     init Vec2(5, 5),
   );
-  init Game(
+  init Pong(
     init Paddle(init Vec2(50, ypos), 5, paddle_height, 0),
     init Paddle(init Vec2(740, ypos), 5, paddle_height, 0),
     b,
   )
 };
 
-def new_buffered_game = fun(g : Game) {
-  init BufferedGame(0, g, g);
+def new_buffered_pong = fun(g : Pong) {
+  init BufferedPong(0, g, g);
 };
 
 def ARROW_RIGHT = 79 as u32;
@@ -79,7 +59,7 @@ def ARROW_LEFT = 80 as u32;
 def ARROW_DOWN = 81 as u32;
 def ARROW_UP = 82 as u32;
 
-def game_update = fun(state : ptr Game, e : ptr GameEvent) {
+def pong_update = fun(state : ptr Pong, e : ptr Event) {
   // handle input events
   if e.tag == sdl_event_tag {
     let event_type = e.input.event_type;
@@ -166,7 +146,7 @@ def game_update = fun(state : ptr Game, e : ptr GameEvent) {
   }
 };
 
-def render_game = fun(r : SdlRendererHandle, state : ptr Game) {
+def render_game = fun(r : SdlRendererHandle, state : ptr Pong) {
   // render
   sdl_set_draw_color(r, 0 as u8, 0 as u8, 0 as u8, 0 as u8);
   sdl_clear(r);
@@ -190,66 +170,85 @@ def render_game = fun(r : SdlRendererHandle, state : ptr Game) {
 
 def min = fun(a : i64, b : i64) { if a < b { a } else { b } }
 
-def buffered_game_update = fun(g : ptr BufferedGame, buffer : ptr GameEventBuffer) {
-  let len = min(buffer.list.length, buffer.capacity);
+def buffered_pong_update = fun(g : ptr BufferedPong, buffer : ptr EventList) {
+  let len = buffer.length;
   if g.event_count > len {
     g.event_count = 0;
     g.state = g.initial_state;
   }
   for i in g.event_count to len {
-    let e = GameEventList::get_ptr(buffer.list, i);
+    let e = EventList::get_ptr(*buffer, i);
     g.event_count = g.event_count + 1;
-    game_update(ref g.state, e);
+    pong_update(ref g.state, e);
   }
 }
 
-reactive input_tick = create_timer(2);
+reactive input_tick = create_timer(10);
 
-reactive sdl_input = stream(observe input_tick, poll_game_input);
+reactive input_events = container(
+  observe input_tick,
+  EventList::new(),
+  fun(es : ptr EventList, tick : ptr i64) {
+    flush_and_poll_input(*es, *tick)
+  }
+);
 
 def scrub_view = create_scrub_view("Events", 400, 50);
 
 reactive scrub = container(
-  observe sdl_input,
+  observe input_events,
   create_scrub(scrub_view),
-  scrub_update,
+  scrub_handle_events,
 );
 
 render_scrub(ref scrub);
 
 reactive frame_tick = create_timer(1000/30);
 
-def frame_event = init GameEvent(tick_event_tag, zero_init SdlEvent, frame_tick);
-
-def event = {
-  if sdl_input.tick > frame_event.tick {
-    sdl_input
+reactive frame_events = container(
+  observe frame_tick,
+  EventList::new(),
+  fun(es : ptr EventList, tick : ptr i64) {
+    EventList::clear(*es);
+    let e = init Event(tick_event_tag, zero_init SdlEvent, *tick);
+    EventList::add(*es, e);
   }
-  else {
-    frame_event
-  }
-}
-
-def buffer_size = 1050;
-
-reactive buffered_events = container(
-  observe event,
-  create_game_event_buffer(buffer_size),
-  buffer_update
 );
 
-def tweaked_buffer = init GameEventBuffer(
-  buffered_events.list,
-  (buffer_size * scrub.slider_val) / 100,
+def event_sources = [input_events, frame_events];
+
+reactive new_pong_events = container(
+  observe event_sources,
+  new_merge(),
+  fun(buf : ptr MergeBuffer, sources : ptr sized_array(EventList, 2)) {
+    merge_update(buf, (*sources)[0], (*sources)[1])
+  }
 );
 
-reactive game_state = {
-  let g = new_buffered_game(initial_game_state);
-  container(observe tweaked_buffer, g, buffered_game_update)
+reactive pong_events = container(
+  observe new_pong_events,
+  EventList::new(),
+  fun(buffer : ptr EventList, es : ptr MergeBuffer) {
+    let start_len = buffer.length;
+    EventList::append(*buffer, es.list);
+    let changed = buffer.length > start_len;
+    changed
+  }
+);
+
+// def buffer_size = 1050;
+// def tweaked_buffer = init EventBuffer(
+//   buffered_events.list,
+//   (buffer_size * scrub.slider_val) / 100,
+// );
+
+reactive pong = {
+  let g = new_buffered_pong(initial_pong_state);
+  container(observe pong_events, g, buffered_pong_update)
 }
 
 def renderer = create_renderer(window);
 
-render_game(renderer, ref game_state.state);
+render_game(renderer, ref pong.state);
 
 sdl_img_init(IMG_INIT_PNG);

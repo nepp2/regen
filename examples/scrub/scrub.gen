@@ -65,9 +65,12 @@ def handle_click = fun(scrub : ptr Scrub, x : i64, y : i64) {
   }
 }
 
-def scrub_update = fun(scrub : ptr Scrub, ge : ptr GameEvent) {
+def scrub_handle_event = fun(scrub : ptr Scrub, event : Event) {
+  if event.tag != sdl_event_tag {
+    return false;
+  }
   // handle time events
-  let e = ref ge.input;
+  let e = ref event.input;
   if e.event_type == SDL_MOUSEDOWN {
     let me = to_mouse_button_event(e);
     if me.window_id == scrub.view.window_id {
@@ -92,6 +95,16 @@ def scrub_update = fun(scrub : ptr Scrub, ge : ptr GameEvent) {
     }
   }
   false
+}
+
+def scrub_handle_events = fun(scrub : ptr Scrub, es : ptr EventList) {
+  let changes = false;
+  for i in 0 to es.length {
+    let e = EventList::get(*es, i);
+    let change = scrub_handle_event(scrub, e);
+    changes = changes || change;
+  }
+  changes
 }
 
 def new_rect = fun(x : i64, y : i64, w : i64, h : i64) {
@@ -131,7 +144,7 @@ def render_scrub = fun (scrub : ptr Scrub) {
 };
 
 def create_scrub_view = fun(name : string, width : i64, height : i64) {
-  let window = create_game_window(name, width, height);
+  let window = create_window(name, width, height);
   let window_id = sdl_get_window_id(window);
   let renderer =
     sdl_create_renderer(window, -1 as i32, SDL_RENDERER_ACCELERATED);

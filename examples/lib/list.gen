@@ -16,6 +16,10 @@ def define_list_type = fun(name : expr, t : expr) {
         list
       };
 
+      def clear = fun(l : ($name)::list) {
+        l.length = 0;
+      };
+
       def add = fun(l : ($name)::list, v : ($name)::T) {
         if l.length == l.capacity {
           let new_cap =
@@ -34,6 +38,13 @@ def define_list_type = fun(name : expr, t : expr) {
         }
         ptr_index(l.data, l.length) = v;
         l.length = l.length + 1;
+      };
+
+      def append = fun(l : ($name)::list, from : ($name)::list) {
+        for i in 0 to from.length {
+          let v = ptr_index(from.data, i);
+          ($name)::add(l, v);
+        }
       };
 
       def get = fun(l : ($name)::list, i : i64) {

@@ -68,7 +68,7 @@ struct Frame {
   return_addr : *mut (),
 }
 
-macro_rules! binop {
+macro_rules! binop_num {
   ($frame:ident, $var:ident, $op:ident, $a:expr, $b:expr, $t:ty) => {{
     let var = $var;
     let a : $t = $frame.get_local($a);
@@ -90,6 +90,19 @@ macro_rules! binop {
   }};
 }
 
+macro_rules! binop_bool {
+  ($frame:ident, $var:ident, $op:ident, $a:expr, $b:expr) => {{
+    let var = $var;
+    let a : bool = $frame.get_local($a);
+    let b : bool = $frame.get_local($b);
+    match $op {
+      And => { $frame.set_local(var, &(a && b)) ; return },
+      Or => { $frame.set_local(var, &(a || b)) ; return },
+      _ => (),
+    };
+  }};
+}
+
 fn execute_binary_op(
   frame : &mut Frame, var : LocalHandle, op : Operator,
   a : LocalHandle, b : LocalHandle,
@@ -99,12 +112,13 @@ fn execute_binary_op(
   use Primitive::*;
   let t = types::type_as_primitive(&a.t).unwrap();
   match t {
-    I64 => binop!(frame, var, op, a, b, i64),
-    I32 => binop!(frame, var, op, a, b, i32),
-    U64 => binop!(frame, var, op, a, b, u64),
-    U32 => binop!(frame, var, op, a, b, u32),
-    U16 => binop!(frame, var, op, a, b, u16),
-    U8 => binop!(frame, var, op, a, b, u8),
+    I64 => binop_num!(frame, var, op, a, b, i64),
+    I32 => binop_num!(frame, var, op, a, b, i32),
+    U64 => binop_num!(frame, var, op, a, b, u64),
+    U32 => binop_num!(frame, var, op, a, b, u32),
+    U16 => binop_num!(frame, var, op, a, b, u16),
+    U8 => binop_num!(frame, var, op, a, b, u8),
+    Bool => binop_bool!(frame, var, op, a, b),
     _ => (),
   }
   panic!("binary op {} not supported for operands of type {}", op, a.t)

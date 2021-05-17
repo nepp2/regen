@@ -1,6 +1,0 @@
-
-(def game (struct
-  (ticker i32)
-))
-
-(debug (. game ticker))

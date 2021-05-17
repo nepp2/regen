@@ -93,6 +93,8 @@ impl fmt::Display for Operator {
       LTE => write!(f, "<="),
       GTE => write!(f, ">="),
       Not => write!(f, "!"),
+      And => write!(f, "&&"),
+      Or => write!(f, "||"),
       BitwiseNot => write!(f, "~"),
       BitwiseAnd => write!(f, "&"),
       BitwiseOr => write!(f, "|"),

@@ -28,7 +28,7 @@ pub enum Operator {
   // comparison
   Eq, NEq, LT, GT, LTE, GTE,
   // boolean
-  Not,
+  Not, And, Or,
   // bitwise
   BitwiseNot, BitwiseAnd, BitwiseOr,
 }

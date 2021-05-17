@@ -116,6 +116,8 @@ fn str_to_operator(s : &str) -> Option<Operator> {
     "<=" => LTE,
     ">=" => GTE,
     "!" => Not,
+    "&&" => And,
+    "||" => Or,
     _ => return None,
   };
   Some(op)

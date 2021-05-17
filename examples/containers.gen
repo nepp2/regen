@@ -9,13 +9,13 @@ def Game = struct {
 def width = 800;
 def height = 600;
 
-def window = create_game_window("SDL Test", width, height);
+def window = create_window("SDL Test", width, height);
 
 reactive input_tick = create_timer(10);
 
 reactive sdl_input = stream(observe input_tick, poll_sdl_input);
 
-def game_update = fun(state : ptr Game, e : ptr GameEvent) {
+def game_update = fun(state : ptr Game, e : ptr Event) {
   // handle input events
   if e.tag == sdl_event_tag {
     if e.input.event_type == SDL_QUIT {
@@ -53,7 +53,7 @@ def render_game = fun (r : SdlRendererHandle, game_state : ptr Game) {
 
 reactive frame_tick = create_timer(1000/30);
 
-def frame_event = init GameEvent(tick_event_tag, zero_init SdlEvent, frame_tick);
+def frame_event = init Event(tick_event_tag, zero_init SdlEvent, frame_tick);
 
 def event = {
   if sdl_input.tick > frame_event.tick {
