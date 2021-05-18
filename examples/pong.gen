@@ -168,8 +168,6 @@ def render_game = fun(r : SdlRendererHandle, state : ptr Pong) {
   sdl_present(r);
 };
 
-def min = fun(a : i64, b : i64) { if a < b { a } else { b } }
-
 def buffered_pong_update = fun(g : ptr BufferedPong, buffer : ptr EventList) {
   let len = buffer.length;
   if g.event_count > len {
@@ -183,64 +181,29 @@ def buffered_pong_update = fun(g : ptr BufferedPong, buffer : ptr EventList) {
   }
 }
 
-reactive input_tick = create_timer(10);
+reactive frame_tick = create_timer(30);
 
-reactive input_events = container(
-  observe input_tick,
+reactive frame_events = container(
+  observe frame_tick,
   EventList::new(),
   fun(es : ptr EventList, tick : ptr i64) {
-    flush_and_poll_input(*es, *tick)
+    flush_and_poll_input(*es, *tick);
+    let tick_event = init Event(tick_event_tag, zero_init SdlEvent, *tick);
+    EventList::add(*es, tick_event);
   }
 );
 
 def scrub_view = create_scrub_view("Events", 400, 50);
 
 reactive scrub = container(
-  observe input_events,
+  observe frame_events,
   create_scrub(scrub_view),
   scrub_handle_events,
 );
 
 render_scrub(ref scrub);
 
-reactive frame_tick = create_timer(1000/30);
-
-reactive frame_events = container(
-  observe frame_tick,
-  EventList::new(),
-  fun(es : ptr EventList, tick : ptr i64) {
-    EventList::clear(*es);
-    let e = init Event(tick_event_tag, zero_init SdlEvent, *tick);
-    EventList::add(*es, e);
-  }
-);
-
-def event_sources = [input_events, frame_events];
-
-reactive new_pong_events = container(
-  observe event_sources,
-  new_merge(),
-  fun(buf : ptr MergeBuffer, sources : ptr sized_array(EventList, 2)) {
-    merge_update(buf, (*sources)[0], (*sources)[1])
-  }
-);
-
-reactive pong_events = container(
-  observe new_pong_events,
-  EventList::new(),
-  fun(buffer : ptr EventList, es : ptr MergeBuffer) {
-    let start_len = buffer.length;
-    EventList::append(*buffer, es.list);
-    let changed = buffer.length > start_len;
-    changed
-  }
-);
-
-// def buffer_size = 1050;
-// def tweaked_buffer = init EventBuffer(
-//   buffered_events.list,
-//   (buffer_size * scrub.slider_val) / 100,
-// );
+def pong_events = scrub_events_slice(ref scrub);
 
 reactive pong = {
   let g = new_buffered_pong(initial_pong_state);

@@ -48,3 +48,7 @@ def load_library = fun(path : string) {
 def load_library_symbol = fun(lib : Library, path : string) {
   ffi_load_library_symbol(lib, ref path)
 }
+
+def min = fun(a : i64, b : i64) { if a < b { a } else { b } }
+
+def max = fun(a : i64, b : i64) { if a > b { a } else { b } }

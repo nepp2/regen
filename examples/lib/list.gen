@@ -16,6 +16,12 @@ def define_list_type = fun(name : expr, t : expr) {
         list
       };
 
+      def slice = fun(l : ($name)::list, length : i64) {
+        let list = malloc(type_sizeof(($name)::inner)) as ptr ($name)::inner;
+        *list = init ($name)::inner(l.data, length, l.capacity);
+        list
+      };
+
       def clear = fun(l : ($name)::list) {
         l.length = 0;
       };

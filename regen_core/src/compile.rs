@@ -386,7 +386,9 @@ fn compile_if_else(
   let else_result = compile_expr(b, else_expr)?;
   if let Some(l) = result_var {
     let v = else_result
-      .ok_or_else(|| error(else_expr, "expected block expression"))?
+      .ok_or_else(||
+        error(else_expr, format!("expected else value of type '{}', found void", l.t))
+      )?
       .to_var(b);
     compile_assignment(b, else_expr, l, v)?;
   }
@@ -837,6 +839,9 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
         arg_values.push(compile_expr_to_var(b, arg)?.id);
       }
       let v = compile_function_call(b, e, function_expr, arg_exprs, arg_values)?.to_ref();
+      if v.t == b.c.void_tag {
+        return Ok(None);
+      }
       return Ok(Some(v));
     }
     // literal node

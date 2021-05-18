@@ -1,9 +1,10 @@
 
 sdl_img_init(IMG_INIT_PNG);
 
-def play_image = sdl_img_load("examples/scrub/play.png".data);
+def record_image = sdl_img_load("examples/scrub/record.png".data);
 def pause_image = sdl_img_load("examples/scrub/pause.png".data);
 def stop_image = sdl_img_load("examples/scrub/stop.png".data);
+def onion_image = sdl_img_load("examples/scrub/onion.png".data);
 
 def ScrubView = struct {
   width : i64,
@@ -11,20 +12,25 @@ def ScrubView = struct {
   window : SdlWindowHandle,
   window_id : u32,
   renderer : SdlRendererHandle,
-  play_texture : SdlTextureHandle,
+  record_texture : SdlTextureHandle,
   pause_texture : SdlTextureHandle,
   stop_texture : SdlTextureHandle,
-  play_pause_rect : SdlRect,
+  onion_texture : SdlTextureHandle,
+  record_rect : SdlRect,
   stop_rect : SdlRect,
-  slider_rect : SdlRect,
+  onion_rect : SdlRect,
+  bar_rect : SdlRect,
   button_size : i64,
 }
 
 def Scrub = struct {
   view : ScrubView,
-  slider_val : i64,
+  cursor_val : i64,
   mouse_down : bool,
-  playing : bool,
+  recording : bool,
+  onion_skin : bool,
+  events : EventList,
+  events_max : i64,
 }
 
 def rect_contains = fun(r : SdlRect, x : i64, y : i64) {
@@ -45,23 +51,46 @@ def rect_contains = fun(r : SdlRect, x : i64, y : i64) {
 }
 
 def update_slider = fun(scrub : ptr Scrub, x : i64, y : i64) {
-  let sr = scrub.view.slider_rect;
+  let sr = scrub.view.bar_rect;
   if rect_contains(sr, x, y) {
     let pos = x - (sr.x as i64);
-    scrub.slider_val = (pos * 100) / (sr.w as i64);
+    scrub.cursor_val = (pos * 100) / (sr.w as i64);
+    scrub.recording = false;
   }
 }
 
-def handle_click = fun(scrub : ptr Scrub, x : i64, y : i64) {
+def scrub_events_slice = fun(scrub : ptr Scrub) {
+  let cursor_index = (scrub.events_max * scrub.cursor_val) / 100;
+  cursor_index = min(scrub.events.length, cursor_index);
+  EventList::slice(scrub.events, cursor_index)
+}
+
+def scrub_handle_click = fun(scrub : ptr Scrub, x : i64, y : i64) {
   scrub.mouse_down = true;
   update_slider(scrub, x, y);
 
   let v = ref scrub.view;
-  if rect_contains(v.play_pause_rect, x, y) {
-    scrub.playing = !scrub.playing;
+  if rect_contains(v.record_rect, x, y) {
+    if scrub.recording {
+      scrub.recording = false;
+    }
+    else {
+      scrub.recording = true;
+      let events = scrub_events_slice(scrub);
+      scrub.events = events;
+      scrub.cursor_val = 100;
+      scrub.onion_skin = false;
+    }
   }
   if rect_contains(v.stop_rect, x, y) {
-    scrub.playing = false;
+    scrub.recording = false;
+    scrub.onion_skin = false;
+    EventList::clear(scrub.events);
+  }
+  if rect_contains(v.onion_rect, x, y) {
+    if !scrub.recording && scrub.events.length > 0 {
+      scrub.onion_skin = !scrub.onion_skin;
+    }
   }
 }
 
@@ -74,7 +103,7 @@ def scrub_handle_event = fun(scrub : ptr Scrub, event : Event) {
   if e.event_type == SDL_MOUSEDOWN {
     let me = to_mouse_button_event(e);
     if me.window_id == scrub.view.window_id {
-      handle_click(scrub, me.x as i64, me.y as i64);
+      scrub_handle_click(scrub, me.x as i64, me.y as i64);
       return true;
     }
   }
@@ -101,6 +130,13 @@ def scrub_handle_events = fun(scrub : ptr Scrub, es : ptr EventList) {
   let changes = false;
   for i in 0 to es.length {
     let e = EventList::get(*es, i);
+    if scrub.recording {
+      EventList::add(scrub.events, e);
+      while scrub.events_max < scrub.events.length {
+        scrub.events_max = (scrub.events_max * 180) / 100;
+      }
+      changes = true;
+    }
     let change = scrub_handle_event(scrub, e);
     changes = changes || change;
   }
@@ -122,22 +158,49 @@ def render_scrub = fun (scrub : ptr Scrub) {
   set_color(r, 200, 200, 200);
   sdl_clear(r);
 
-  if scrub.playing {
+  // draw the record button
+  if scrub.recording {
     set_color(r, 0, 255, 0);
-    sdl_fill_rect(r, ref v.play_pause_rect);
-    sdl_render_copy(r, v.pause_texture, 0 as ptr SdlRect, ref v.play_pause_rect);
+    sdl_fill_rect(r, ref v.record_rect);
+    sdl_render_copy(r, v.pause_texture, 0 as ptr SdlRect, ref v.record_rect);
   }
   else {
-    sdl_render_copy(r, v.play_texture, 0 as ptr SdlRect, ref v.play_pause_rect);
+    sdl_render_copy(r, v.record_texture, 0 as ptr SdlRect, ref v.record_rect);
   }
-
+  // draw the stop button
+  if scrub.events.length == 0 {
+    set_color(r, 100, 100, 100);
+    sdl_fill_rect(r, ref v.stop_rect);
+  }
   sdl_render_copy(r, v.stop_texture, 0 as ptr SdlRect, ref v.stop_rect);
 
-  let sr = v.slider_rect;
-  let bar_len = ((sr.w as i64) * scrub.slider_val) / 100;
-  let bar_rect = init SdlRect(sr.x, sr.y, bar_len as i32, sr.h);
+  // draw onion button
+  if scrub.events.length == 0 {
+    set_color(r, 100, 100, 100);
+    sdl_fill_rect(r, ref v.onion_rect);
+  }
+  else if scrub.onion_skin {
+      set_color(r, 0, 255, 0);
+      sdl_fill_rect(r, ref v.onion_rect);
+  }
+  sdl_render_copy(r, v.onion_texture, 0 as ptr SdlRect, ref v.onion_rect);
+
+  // draw the bar
+  set_color(r, 50, 0, 50);
+  sdl_fill_rect(r, ref v.bar_rect);
+  let bar = v.bar_rect;
+  let bar_size = ((bar.w as i64) * scrub.events.length) / scrub.events_max;
+  let bar_rect = init SdlRect(bar.x, bar.y, bar_size as i32, bar.h);
   set_color(r, 0, 0, 255);
   sdl_fill_rect(r, ref bar_rect);
+
+  // draw the cursor
+  set_color(r, 255, 0, 255);
+
+  let cursor_pos = ((bar.w as i64) * scrub.cursor_val) / 100;
+  cursor_pos = (bar.x as i64) + min(cursor_pos, bar_size);
+  let cursor_rect = init SdlRect(cursor_pos as i32, bar.y, 5 as i32, bar.h);
+  sdl_fill_rect(r, ref cursor_rect);
 
 
   sdl_present(r);
@@ -148,24 +211,27 @@ def create_scrub_view = fun(name : string, width : i64, height : i64) {
   let window_id = sdl_get_window_id(window);
   let renderer =
     sdl_create_renderer(window, -1 as i32, SDL_RENDERER_ACCELERATED);
-  let play_texture = sdl_create_texture_from_surface(renderer, play_image);
+  let record_texture = sdl_create_texture_from_surface(renderer, record_image);
   let pause_texture = sdl_create_texture_from_surface(renderer, pause_image);
   let stop_texture = sdl_create_texture_from_surface(renderer, stop_image);
+  let onion_texture = sdl_create_texture_from_surface(renderer, onion_image);
 
   let button_size = height;
-  let play_pause_rect = new_rect(0, 0, button_size, button_size);
+  let record_rect = new_rect(0, 0, button_size, button_size);
   let stop_rect = new_rect(button_size, 0, button_size, button_size);
-  let slider_offset = button_size * 2;
+  let onion_rect = new_rect(button_size * 2, 0, button_size, button_size);
+  let slider_offset = button_size * 3;
   let slider_length = width - slider_offset;
-  let slider_rect = new_rect(slider_offset, 0, slider_length, height);
+  let bar_rect = new_rect(slider_offset, 0, slider_length, height);
   init ScrubView(
     width, height, window, window_id, renderer,
-    play_texture, pause_texture, stop_texture,
-    play_pause_rect, stop_rect, slider_rect, button_size,
+    record_texture, pause_texture, stop_texture, onion_texture,
+    record_rect, stop_rect, onion_rect, bar_rect, button_size,
   )
 }
 
 
 def create_scrub = fun(view : ScrubView) {
-  init Scrub(view, 100, false, false)
+  let events = EventList::new();
+  init Scrub(view, 100, false, false, false, events, 100)
 }
