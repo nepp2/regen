@@ -146,11 +146,7 @@ def pong_update = fun(state : ptr Pong, e : ptr Event) {
   }
 };
 
-def render_game = fun(r : SdlRendererHandle, state : ptr Pong) {
-  // render
-  sdl_set_draw_color(r, 0 as u8, 0 as u8, 0 as u8, 0 as u8);
-  sdl_clear(r);
-
+def render_pong = fun(r : SdlRendererHandle, state : ptr Pong) {
   sdl_set_draw_color(r, 255 as u8, 0 as u8, 0 as u8, 255 as u8);
 
   // Paddle p1
@@ -164,8 +160,6 @@ def render_game = fun(r : SdlRendererHandle, state : ptr Pong) {
   // Ball
   let rect = init SdlRect(state.b.pos.x as i32, state.b.pos.y as i32, ball_size as i32, ball_size as i32);
   sdl_fill_rect(r, ref rect);
-
-  sdl_present(r);
 };
 
 def buffered_pong_update = fun(g : ptr BufferedPong, buffer : ptr EventList) {
@@ -210,8 +204,50 @@ reactive pong = {
   container(observe pong_events, g, buffered_pong_update)
 }
 
+embed define_list_type(#PongList, #Pong);
+
+reactive pong_states = container(
+  observe scrub,
+  PongList::new(),
+  fun(ps : ptr PongList, scrub : ptr Scrub) {
+    let ps = *ps;
+    PongList::clear(ps);
+    if scrub.onion_skin {
+      let p = initial_pong_state;
+      PongList::add(ps, p);
+      for i in 0 to scrub.events.length {
+        let e = EventList::get_ptr(scrub.events, i);
+        pong_update(ref p, e);
+        if e.tag == tick_event_tag {
+          PongList::add(ps, p);
+        }
+      }
+      ps
+    }
+  }
+);
+
 def renderer = create_renderer(window);
 
-render_game(renderer, ref pong.state);
+{
+  // clear screen
+  sdl_set_draw_color(renderer, 0 as u8, 0 as u8, 0 as u8, 0 as u8);
+  sdl_clear(renderer);
+
+  // draw ghosts
+  if scrub.onion_skin {
+    sdl_set_draw_color(renderer, 255 as u8, 0 as u8, 0 as u8, 50 as u8);
+    for i in 0 to pong_states.length {
+      let p = PongList::get_ptr(pong_states, i);
+      let pos = ref p.b.pos;
+      let rect = init SdlRect(pos.x as i32, pos.y as i32, ball_size as i32, ball_size as i32);
+      sdl_fill_rect(renderer, ref rect);
+    }
+  }
+
+  // draw game
+  render_pong(renderer, ref pong.state);
+  sdl_present(renderer);
+}
 
 sdl_img_init(IMG_INIT_PNG);

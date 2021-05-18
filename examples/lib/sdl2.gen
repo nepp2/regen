@@ -121,6 +121,13 @@ def sdl_create_renderer =
       flags : u32,
     ) => SdlRendererHandle;
 
+def sdl_set_blend_mode =
+  load_library_symbol(sdl2, "SDL_SetRenderDrawBlendMode")
+    as cfun(
+      renderer : SdlRendererHandle,
+      blend_mode_flag : u32,
+    ) => i32;
+
 def sdl_clear =
   load_library_symbol(sdl2, "SDL_RenderClear")
     as cfun(r : SdlRendererHandle) => i32;

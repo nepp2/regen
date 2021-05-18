@@ -202,7 +202,6 @@ def render_scrub = fun (scrub : ptr Scrub) {
   let cursor_rect = init SdlRect(cursor_pos as i32, bar.y, 5 as i32, bar.h);
   sdl_fill_rect(r, ref cursor_rect);
 
-
   sdl_present(r);
 };
 

@@ -7,7 +7,9 @@ def create_window = fun(title : string, width : i64, height : i64) {
 };
 
 def create_renderer = fun(window : SdlWindowHandle) {
-  sdl_create_renderer(window, -1 as i32, SDL_RENDERER_ACCELERATED)
+  let r = sdl_create_renderer(window, -1 as i32, SDL_RENDERER_ACCELERATED);
+  sdl_set_blend_mode(r, 1 as u32);
+  r
 }
 
 def tick_event_tag = 1;
