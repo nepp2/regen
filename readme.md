@@ -8,13 +8,13 @@ It is intended to support a notebook UI in which definitions form a dataflow gra
 
 # Project structure
 
-## regen_core
+## compiler
 
 This directory contains the regen compiler and runtime
 
 ## regen_cli
 
-A CLI interface is implemented in this directory. It is separated so that `regen_core` does not depend on filesystem functions, and can eventually support wasm target.
+A CLI interface is implemented in this directory. It is separated so that `compiler` does not depend on filesystem functions, and can eventually support wasm target.
 
 ## examples
 

@@ -1,7 +1,7 @@
 [workspace]
 
 members = [
-  "regen_core",
-  "regen_cli",
-  "regen_wasm",
+  "compiler",
+  "cli",
+  "wasm",
 ]

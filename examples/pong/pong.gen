@@ -1,15 +1,15 @@
 
-embed import("examples/lib/list.gen");
-embed import("examples/lib/sdl2.gen");
-embed import("examples/lib/window.gen");
-embed import("examples/scrub/scrub.gen");
+embed import("regen_libs/list.gen");
+embed import("regen_libs/sdl2.gen");
+embed import("regen_libs/window.gen");
+embed import("examples/time_control/slider.gen");
 
 def width = 800;
 def height = 600;
 
 def paddle_height = 50;
 def paddle_speed = 10;
-def ball_speed_x = 10;
+def ball_speed_x = 5;
 def ball_speed_y = 5;
 def ball_size = 10;
 
@@ -189,17 +189,17 @@ reactive frame_events = container(
   }
 );
 
-def scrub_view = create_scrub_view("Events", 400, 50);
+def slider_view = create_slider_view("Events", 400, 50);
 
-reactive scrub = container(
+reactive slider = container(
   observe frame_events,
-  create_scrub(scrub_view),
-  scrub_handle_events,
+  create_slider(slider_view),
+  slider_handle_events,
 );
 
-render_scrub(ref scrub);
+render_slider(ref slider);
 
-def pong_events = scrub_events_slice(ref scrub);
+def pong_events = slider_events_slice(ref slider);
 
 reactive pong = {
   let g = new_buffered_pong(initial_pong_state);
@@ -209,16 +209,16 @@ reactive pong = {
 embed define_list_type(#PongList, #Pong);
 
 reactive pong_states = container(
-  observe scrub,
+  observe slider,
   PongList::new(),
-  fun(ps : ptr PongList, scrub : ptr Scrub) {
+  fun(ps : ptr PongList, slider : ptr Slider) {
     let ps = *ps;
     PongList::clear(ps);
-    if scrub.onion_skin {
+    if slider.onion_skin {
       let p = initial_pong_state;
       PongList::add(ps, p);
-      for i in 0 to scrub.events.length {
-        let e = EventList::get_ptr(scrub.events, i);
+      for i in 0 to slider.events.length {
+        let e = EventList::get_ptr(slider.events, i);
         pong_update(ref p, e);
         if e.tag == tick_event_tag {
           PongList::add(ps, p);
@@ -237,7 +237,7 @@ def renderer = create_renderer(window);
   sdl_clear(renderer);
 
   // draw ghosts
-  if scrub.onion_skin {
+  if slider.onion_skin {
     sdl_set_draw_color(renderer, 255 as u8, 0 as u8, 0 as u8, 50 as u8);
     for i in 0 to pong_states.length {
       let p = PongList::get_ptr(pong_states, i);

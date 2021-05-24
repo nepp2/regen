@@ -4,10 +4,7 @@ mod watcher;
 mod ffi_libs;
 mod hotload_watcher;
 
-#[cfg(test)]
-mod test;
-
-use regen_core::{new_env, hotload};
+use compiler::{new_env, hotload};
 use std::fs;
 
 pub fn run_file(path : &str) {

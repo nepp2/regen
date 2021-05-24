@@ -3,7 +3,7 @@ use std::{hash::Hash};
 use std::time::{Duration, Instant};
 use std::collections::HashMap;
 
-use crate::{compile::Function, env::{CellIdentifier, CellUid, Env}, ffi_libs::RegenString, hotload, perm_alloc::{Ptr, perm}, types::TypeHandle};
+use crate::{codegen::Function, env::{CellIdentifier, CellUid, Env}, ffi_libs::RegenString, hotload, perm_alloc::{Ptr, perm}, types::TypeHandle};
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct TimerId(pub u64);

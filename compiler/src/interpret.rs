@@ -7,7 +7,7 @@ use crate::{
   bytecode::{
     Instr, InstrExpr, Operator, LocalHandle,
   },
-  compile::Function,
+  codegen::Function,
   debug,
   env::Env,
   ffi_ccall,

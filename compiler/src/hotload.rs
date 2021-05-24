@@ -1,5 +1,8 @@
+/// This module is responsible for performing live updates to the running program,
+/// taking dependencies into account. Updates happen in response to file changes,
+/// and in response to a core event loop.
 
-use crate::{compile::{self, Function}, dependencies::{self, CellDependencies}, env::{self, BuildStatus, CellCompile, CellIdentifier, CellSrc, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, ffi_libs::RegenString, interpret, parse::{self, Expr, ExprShape, ExprTag}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types::{self, TypeHandle}};
+use crate::{codegen::{self, Function}, dependencies::{self, CellDependencies}, env::{self, BuildStatus, CellCompile, CellIdentifier, CellSrc, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, ffi_libs::RegenString, interpret, parse::{self, Expr, ExprShape, ExprTag}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types::{self, TypeHandle}};
 
 use std::collections::{HashMap, HashSet};
 
@@ -137,7 +140,7 @@ fn compile_cell(
   // compile the expression
   let ctx = CompileContext::new(env, &dep_values);
   let function = {
-    match compile::compile_expr_to_function(&ctx, src.value_expr) {
+    match codegen::compile_expr_to_function(&ctx, src.value_expr) {
       Ok(f) => perm(f),
       Err(e) => {
         return Err(HotloadError::Visible(e, BuildStatus::Empty));

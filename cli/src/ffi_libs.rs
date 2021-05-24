@@ -1,5 +1,5 @@
 
-use regen_core::{env::{Env, define_global}, ffi_libs::RegenString, hotload, parse::{self, Expr}, perm_alloc::{Ptr, perm}, symbols::{Symbol, to_symbol}, types, types::c_function_type};
+use compiler::{env::{Env, define_global}, ffi_libs::RegenString, hotload, parse::{self, Expr}, perm_alloc::{Ptr, perm}, symbols::{Symbol, to_symbol}, types, types::c_function_type};
 use std::fs;
 use std::path::Path;
 use std::ffi::CString;
@@ -14,7 +14,7 @@ fn load_code(file_name : &str) -> String {
   let path = format!("{}/{}", LIB_PATH, file_name);
   match fs::read_to_string(&path) {
     Ok(s) => s,
-    Err(e) => panic!("{}", e),
+    Err(e) => panic!("{}: {}", path, e),
   }
 }
 
@@ -65,5 +65,5 @@ pub fn bind_libs(env : Env) {
   define_global(env, "ffi_load_library_symbol", ffi_load_library_symbol as u64,
     c_function_type(&[library_tag, string_ptr], void_ptr));
 
-  preload_file(env, "examples/lib/prelude.gen");
+  preload_file(env, "regen_libs/prelude.gen");
 }

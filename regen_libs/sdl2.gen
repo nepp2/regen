@@ -9,7 +9,7 @@ def SDL_RENDERER_ACCELERATED = 2 as u32;
 
 def SDL_DEFAULT_RENDER_INDEX = -1 as i32;
 
-def sdl2 = load_library("libs/SDL2");
+def sdl2 = load_library("shared_libs/SDL2");
 
 def sdl_init =
   load_library_symbol(sdl2, "SDL_Init")
@@ -193,12 +193,12 @@ def IMG_INIT_PNG = 2 as u32;
 def IMG_INIT_TIF = 4 as u32;
 def IMG_INIT_WEBP = 8 as u32;
 
-load_library("libs/libpng16-16");
-load_library("libs/libjpeg-9");
-load_library("libs/libtiff-5");
-load_library("libs/libwebp-7");
-load_library("libs/zlib1");
-def sdl2_image = load_library("libs/SDL2_image");
+load_library("shared_libs/libpng16-16");
+load_library("shared_libs/libjpeg-9");
+load_library("shared_libs/libtiff-5");
+load_library("shared_libs/libwebp-7");
+load_library("shared_libs/zlib1");
+def sdl2_image = load_library("shared_libs/SDL2_image");
 
 def sdl_img_init =
   load_library_symbol(sdl2_image, "IMG_Init")

@@ -4,7 +4,7 @@ pub mod parse;
 pub mod env;
 mod bytecode;
 mod dependencies;
-mod compile;
+mod codegen;
 pub mod interpret;
 mod ffi_ccall;
 pub mod ffi_libs;

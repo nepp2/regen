@@ -8,4 +8,4 @@ print 6000;
 embed import("examples/lib/sdl2.gen");
 embed import("examples/lib/game.gen");
 embed import("examples/lib/list.gen");
-embed import("examples/scrub.gen");
+embed import("examples/scrub/scrub.gen");

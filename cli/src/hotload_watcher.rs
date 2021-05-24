@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use crate::ffi_libs;
 
-use regen_core::{
+use compiler::{
   new_env,
   env::Env,
   hotload,
