@@ -5,5 +5,5 @@ authors = ["Andy M <0andrewmartin0@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-rusty-fork = "0.2.1"
+rusty-fork = "0.3.0"
 compiler = { path = "../compiler" }

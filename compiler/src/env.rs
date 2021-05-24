@@ -36,7 +36,7 @@ pub struct Environment {
   pub timers : HashMap<CellUid, TimerId>,
   pub event_loop : Ptr<EventLoop>,
   pub st : SymbolTable,
-  pub c : CoreTypes,
+  pub c : Ptr<CoreTypes>,
   builtin_dummy_expr : Expr,
 }
 
@@ -226,7 +226,7 @@ pub fn define_global(mut env : Env, s : &str, v : u64, t : TypeHandle) {
   }
 }
 
-pub fn new_env(st : SymbolTable) -> Env {
+pub fn new_env(st : SymbolTable, c: Ptr<CoreTypes>) -> Env {
   let builtin_dummy_expr = {
     let module = perm(CodeModule {
       code: "".into(),
@@ -257,7 +257,7 @@ pub fn new_env(st : SymbolTable) -> Env {
     watchers: HashMap::new(),
     event_loop: event_loop::create_event_loop(),
     st,
-    c: core_types(st),
+    c,
     builtin_dummy_expr,
   });
   load_ffi_libs(env);

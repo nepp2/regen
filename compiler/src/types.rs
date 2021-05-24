@@ -336,6 +336,12 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
   }
 }
 
+impl fmt::Debug for TypeInfo {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "{}", self)
+  }
+}
+
 impl fmt::Display for TypeInfo {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self.kind {

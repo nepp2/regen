@@ -15,5 +15,7 @@ pub mod hotload;
 mod error;
 
 pub fn new_env() -> env::Env {
-  env::new_env(symbols::symbol_table())
+  let st = symbols::symbol_table();
+  let c = perm_alloc::perm(types::core_types(st));
+  env::new_env(st, c)
 }

@@ -2,6 +2,7 @@
 
 members = [
   "compiler",
+  "tests",
   "cli",
   "wasm",
 ]
