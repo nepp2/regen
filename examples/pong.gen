@@ -9,6 +9,8 @@ def height = 600;
 
 def paddle_height = 50;
 def paddle_speed = 10;
+def ball_speed_x = 10;
+def ball_speed_y = 5;
 def ball_size = 10;
 
 def window = create_window("Pong", width, height);
@@ -41,7 +43,7 @@ def initial_pong_state = {
   let ypos = (height - paddle_height) / 2;
   let b = init Ball(
     init Vec2((width - ball_size) / 2, (height - ball_size) / 2),
-    init Vec2(5, 5),
+    init Vec2(ball_speed_x, ball_speed_y),
   );
   init Pong(
     init Paddle(init Vec2(50, ypos), 5, paddle_height, 0),

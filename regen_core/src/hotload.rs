@@ -341,7 +341,7 @@ fn get_cell_value_mut (env : &mut Env, uid : CellUid) -> &mut CellValue {
   env.cell_values.get_mut(&uid).unwrap()
 }
 
-fn update_observer(mut env : Env, hs : &mut HotloadState, uid : CellUid)
+fn update_observer(mut env : Env, hs : &mut HotloadState, uid : CellUid, flush_level : FlushLevel)
   -> Result<ChangeType, HotloadError>
 {
   use ChangeType::*;
@@ -356,8 +356,8 @@ fn update_observer(mut env : Env, hs : &mut HotloadState, uid : CellUid)
   };
   // only update if either this cell or the input cell changed in this pass
   let requires_update =
-    get_change(hs, rc.input) != Unchanged
-    || get_change(hs, uid) != Unchanged;
+    flush_level < FlushLevel::Observer
+    || get_change(hs, rc.input) != Unchanged;
   if !requires_update {
     return Ok(Unchanged);
   }
@@ -447,7 +447,7 @@ fn apply_update(
     agg_change = std::cmp::max(agg_change, c);
   }
   if flush_level <= Observer {
-    let c = update_observer(env, hs, uid)?;
+    let c = update_observer(env, hs, uid, flush_level)?;
     agg_change = std::cmp::max(agg_change, c);
   }
   Ok(agg_change)
