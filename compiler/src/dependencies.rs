@@ -1,4 +1,4 @@
-use crate::{env::{CellIdentifier}, parse::{self, Expr, ExprTag, ExprShape}, perm_alloc::{perm_slice_from_vec, perm_slice}, symbols::{to_symbol, Symbol, SymbolTable}};
+use crate::{env::{CellIdentifier}, parse::{self, Expr, ExprTag, ExprShape}, regen_alloc::{alloc_slice}, symbols::{to_symbol, Symbol, SymbolTable}};
 
 pub struct CellDependencies {
   pub inner_cells : Vec<Expr>,
@@ -82,7 +82,7 @@ pub fn get_cell_dependencies(st : SymbolTable, expr : Expr) -> CellDependencies 
         // dependencies are detected before the compiler
         // macro inserts this symbol
         let sym = to_symbol(st, "create_container");
-        let id = CellIdentifier::DefCell(perm_slice(&[]), sym);
+        let id = CellIdentifier::DefCell(alloc_slice([]), sym);
         deps.ids.push(id);
         for &c in exprs {
           find_nested_cells(st, locals, deps, c);
@@ -93,7 +93,7 @@ pub fn get_cell_dependencies(st : SymbolTable, expr : Expr) -> CellDependencies 
         // dependencies are detected before the compiler
         // macro inserts this symbol
         let sym = to_symbol(st, "create_stream");
-        let id = CellIdentifier::DefCell(perm_slice(&[]), sym);
+        let id = CellIdentifier::DefCell(alloc_slice([]), sym);
         deps.ids.push(id);
         for &c in exprs {
           find_nested_cells(st, locals, deps, c);
@@ -123,7 +123,7 @@ pub fn expr_to_id(e : Expr) -> Option<CellIdentifier> {
     use ExprShape::*;
     match e.shape() {
       Sym(name) => {
-        Some(CellIdentifier::def(perm_slice_from_vec(names), name))
+        Some(CellIdentifier::def(alloc_slice(names), name))
       }
       List(ExprTag::Namespace, &[name, tail]) => {
         names.push(name.as_symbol());

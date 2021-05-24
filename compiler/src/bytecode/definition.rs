@@ -1,10 +1,10 @@
 /// Bytecode data structure is defined here
 
-use crate::{symbols, types, perm_alloc, parse};
+use crate::{symbols, types, regen_alloc, parse};
 use symbols::Symbol;
 use parse::{SrcLocation};
 use types::TypeHandle;
-use perm_alloc::{SlicePtr, Ptr};
+use regen_alloc::{SlicePtr, Ptr};
 
 /// Identifies a storage location that is local to a stack frame
 #[derive(Copy, Clone)]

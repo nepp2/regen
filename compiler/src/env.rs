@@ -1,4 +1,4 @@
-use crate::{codegen::Function, event_loop::{self, EventLoop, TimerId}, ffi_libs::*, parse::{self, CodeModule, Expr, ExprContent, ExprTag, SrcLocation, Val}, perm_alloc::{Ptr, SlicePtr, perm, perm_slice}, symbols::{Symbol, SymbolTable, to_symbol}, types::{TypeHandle, CoreTypes, core_types }};
+use crate::{codegen::Function, event_loop::{self, EventLoop, TimerId}, ffi_libs::*, parse::{self, CodeModule, Expr, ExprContent, ExprTag, SrcLocation, Val}, regen_alloc::{Ptr, SlicePtr, alloc, alloc_slice}, symbols::{Symbol, SymbolTable, to_symbol}, types::{TypeHandle, CoreTypes, core_types }};
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -155,7 +155,7 @@ pub struct CellValue {
 }
 
 pub fn new_namespace(names : &[Symbol]) -> Namespace {
-  perm_slice(names)
+  alloc_slice(names)
 }
 
 impl CellIdentifier {
@@ -228,7 +228,7 @@ pub fn define_global(mut env : Env, s : &str, v : u64, t : TypeHandle) {
 
 pub fn new_env(st : SymbolTable, c: Ptr<CoreTypes>) -> Env {
   let builtin_dummy_expr = {
-    let module = perm(CodeModule {
+    let module = alloc(CodeModule {
       code: "".into(),
       name: to_symbol(st, "__internal"),
     });
@@ -239,7 +239,7 @@ pub fn new_env(st : SymbolTable, c: Ptr<CoreTypes>) -> Env {
     )
   };
 
-  let env = perm(Environment {
+  let env = alloc(Environment {
     root_expr: None,
     uid_counter: 0,
     cell_uids:  HashMap::new(),

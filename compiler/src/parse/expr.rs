@@ -1,5 +1,5 @@
 use std::hash::{Hash, Hasher};
-use crate::{bytecode::Operator, ffi_libs::RegenString, perm_alloc::{Ptr, SlicePtr, perm, perm_slice_from_vec}, symbols::Symbol};
+use crate::{bytecode::Operator, ffi_libs::RegenString, regen_alloc::{Ptr, SlicePtr, alloc, alloc_slice}, symbols::Symbol};
 
 #[derive(Clone)]
 pub struct CodeModule {
@@ -31,7 +31,7 @@ pub type Expr = Ptr<ExprData>;
 pub fn expr(tag : ExprTag, content : ExprContent, loc : SrcLocation) -> Expr {
   let metadata = ExprMetadata { loc, ignore_symbol : false };
   let ed = ExprData { tag, content, metadata };
-  perm(ed)
+  alloc(ed)
 }
 
 /// Metadata is not taken into account during expr comparisons (Hash, PartialEq, etc)
@@ -163,7 +163,7 @@ impl ExprData {
         for e in es {
           children.push(e.deep_clone());
         }
-        List(perm_slice_from_vec(children))
+        List(alloc_slice(children))
       }
       Sym(s) => Sym(s),
       Value(v) => Value(v),
@@ -173,7 +173,7 @@ impl ExprData {
       content,
       metadata: self.metadata,
     };
-    perm(ed)
+    alloc(ed)
   }
 }
 

@@ -1,5 +1,5 @@
 
-use crate::{bytecode::Operator, ffi_libs, perm_alloc::{Ptr, perm, perm_slice, perm_slice_from_vec}, symbols::{Symbol, SymbolTable, to_symbol}};
+use crate::{bytecode::Operator, ffi_libs, regen_alloc::{Ptr, alloc, alloc_slice}, symbols::{Symbol, SymbolTable, to_symbol}};
 use super::{expr::*, lexer::{Token, TokenType, lex}, templates};
 use templates::{ExprBuilder, template_macro};
 use crate::error::{Error, err, error};
@@ -9,13 +9,13 @@ use std::str::FromStr;
 use ExprTag::*;
 
 pub fn parse_module(st : SymbolTable, module_name : Symbol, code : &str) -> Result<Expr, Error> {
-  let module = perm(CodeModule { name: module_name, code: code.into() });
+  let module = alloc(CodeModule { name: module_name, code: code.into() });
   let tokens = lex(&module)?;
   parse_top_level(module, tokens, st)
 }
 
 pub fn parse_expression(st : SymbolTable, module_name : Symbol, code : &str) -> Result<Expr, Error> {
-  let module = perm(CodeModule { name: module_name, code: code.into() });
+  let module = alloc(CodeModule { name: module_name, code: code.into() });
   let tokens = lex(&module)?;
   let e = parse_top_level(module, tokens, st)?;
   if let &[e] = e.children() {
@@ -257,13 +257,13 @@ impl <'l> ParseState<'l> {
   fn omitted_expr(&mut self) -> Expr {
     let pos = self.next_token_pos();
     let loc = SrcLocation { start: pos, end: pos, module: self.code_module };
-    let content = ExprContent::List(perm_slice(&[]));
+    let content = ExprContent::List(alloc_slice([]));
     expr(Omitted, content, loc)
   }
 
   fn list_expr(&mut self, tag : ExprTag, list : Vec<Expr>, start : usize) -> Expr {
     let loc = self.loc(start);
-    let content = ExprContent::List(perm_slice_from_vec(list));
+    let content = ExprContent::List(alloc_slice(list));
     expr(tag, content, loc)
   }
 
@@ -918,7 +918,7 @@ fn parse_expression_term(ps : &mut ParseState) -> Result<Expr, Error> {
       let s = {
         let t = ps.pop_type(StringLiteral)?;
         let s = ffi_libs::from_string(t.to_string());
-        perm(s)
+        alloc(s)
       };
       Ok(ps.literal_expr(Val::String(s), start))
     }
@@ -972,7 +972,7 @@ fn to_template_expr(st : SymbolTable, quoted : Expr) -> Expr {
     template_macro(&nb, quoted, template_args)
   }
   else {
-    let content = ExprContent::List(perm_slice(&[quoted]));
+    let content = ExprContent::List(alloc_slice([quoted]));
     expr(Quote, content, quoted.loc())
   }
 }

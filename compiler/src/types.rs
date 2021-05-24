@@ -1,10 +1,10 @@
 /// Defines the an extensible TypeInfo data structure to be used by the
 /// compiler & interpreter.
 
-use crate::{symbols, perm_alloc};
+use crate::{symbols, regen_alloc};
 
 use symbols::{Symbol, SymbolTable, to_symbol};
-use perm_alloc::{Ptr, SlicePtr, perm, perm_slice, perm_slice_from_vec};
+use regen_alloc::{Ptr, SlicePtr, alloc, alloc_slice};
 use std::fmt;
 
 pub type TypeHandle = Ptr<TypeInfo>;
@@ -200,7 +200,7 @@ fn round_up_power_of_2(v : u64) -> u64 {
 }
 
 fn new_type(kind : Kind, size_of : u64, info : u64) -> TypeHandle {
-  perm(TypeInfo { size_of, kind, info: info })
+  alloc(TypeInfo { size_of, kind, info: info })
 }
 
 pub fn calculate_packed_field_offsets(field_types : &[TypeHandle]) -> (Vec<u64>, u64) {
@@ -222,7 +222,7 @@ pub fn struct_type(field_names : SlicePtr<Symbol>, field_types : SlicePtr<TypeHa
     Box::into_raw(Box::new(
       StructInfo {
         field_names, field_types,
-        field_offsets: perm_slice_from_vec(offsets),
+        field_offsets: alloc_slice(offsets),
       }
     ))
     as u64;
@@ -231,8 +231,8 @@ pub fn struct_type(field_names : SlicePtr<Symbol>, field_types : SlicePtr<TypeHa
 
 pub fn slice_type(c : &CoreTypes, st : SymbolTable, element_type : TypeHandle) -> TypeHandle {
   struct_type(
-    perm_slice(&[to_symbol(st, "data"), to_symbol(st, "len")]),
-    perm_slice(&[pointer_type(element_type), c.u64_tag]),
+    alloc_slice([to_symbol(st, "data"), to_symbol(st, "len")]),
+    alloc_slice([pointer_type(element_type), c.u64_tag]),
   )
 }
 
@@ -258,7 +258,7 @@ pub fn poly_type(t : TypeHandle, param : TypeHandle) -> TypeHandle {
 fn function_type_inner(args : &[TypeHandle], returns : TypeHandle, c_function : bool) -> TypeHandle {
   let info =
     Box::into_raw(Box::new(
-      FunctionInfo { args: perm_slice(args), returns, c_function }))
+      FunctionInfo { args: alloc_slice(args), returns, c_function }))
     as u64;
   new_type(Kind::Function, 8, info)
 }
@@ -287,8 +287,8 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
 
   let expr_tag = named_type(to_symbol(st, "expr"), u64_tag);
   let expr_slice_tag = struct_type(
-    perm_slice(&[data_sym, len_sym]),
-    perm_slice(&[pointer_type(expr_tag), u64_tag]),
+    alloc_slice([data_sym, len_sym]),
+    alloc_slice([pointer_type(expr_tag), u64_tag]),
   );
 
   let type_tag = new_type(Kind::Type, 8, 0);
@@ -298,8 +298,8 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
   let reactive_constructor_tag = named_type(to_symbol(st, "reactive_constructor"), u64_tag);
 
   let string_tag = struct_type(
-    perm_slice(&[data_sym, len_sym]),
-    perm_slice(&[pointer_type(u8_tag), u64_tag]),
+    alloc_slice([data_sym, len_sym]),
+    alloc_slice([pointer_type(u8_tag), u64_tag]),
   );
 
   let mut array_types = vec![];

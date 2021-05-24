@@ -1,5 +1,5 @@
 
-use compiler::{env::{Env, define_global}, ffi_libs::RegenString, hotload, parse::{self, Expr}, perm_alloc::{Ptr, perm}, symbols::{Symbol, to_symbol}, types, types::c_function_type};
+use compiler::{env::{Env, define_global}, ffi_libs::RegenString, hotload, parse::{self, Expr}, regen_alloc::{Ptr, alloc}, symbols::{Symbol, to_symbol}, types, types::c_function_type};
 use std::fs;
 use std::path::Path;
 use std::ffi::CString;

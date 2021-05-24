@@ -2,7 +2,7 @@
 /// taking dependencies into account. Updates happen in response to file changes,
 /// and in response to a core event loop.
 
-use crate::{codegen::{self, Function}, dependencies::{self, CellDependencies}, env::{self, BuildStatus, CellCompile, CellIdentifier, CellSrc, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, ffi_libs::RegenString, interpret, parse::{self, Expr, ExprShape, ExprTag}, perm_alloc::{Ptr, perm, perm_slice_from_vec}, symbols::{Symbol, to_symbol}, types::{self, TypeHandle}};
+use crate::{codegen::{self, Function}, dependencies::{self, CellDependencies}, env::{self, BuildStatus, CellCompile, CellIdentifier, CellSrc, CellUid, CellValue, DependencyType, Env, Namespace, ReactiveCell, RegenValue}, error::{Error, err, error}, event_loop::{self, ConstructorVariant}, ffi_libs::RegenString, interpret, parse::{self, Expr, ExprShape, ExprTag}, regen_alloc::{Ptr, alloc, alloc_slice}, symbols::{Symbol, to_symbol}, types::{self, TypeHandle}};
 
 use std::collections::{HashMap, HashSet};
 
@@ -141,7 +141,7 @@ fn compile_cell(
   let ctx = CompileContext::new(env, &dep_values);
   let function = {
     match codegen::compile_expr_to_function(&ctx, src.value_expr) {
-      Ok(f) => perm(f),
+      Ok(f) => alloc(f),
       Err(e) => {
         return Err(HotloadError::Visible(e, BuildStatus::Empty));
       }
@@ -609,14 +609,14 @@ pub fn create_nested_namespace(n : Namespace, name : Symbol) -> Namespace {
   let mut names = Vec::with_capacity(n.len() + 1);
   names.extend_from_slice(n.as_slice());
   names.push(name);
-  perm_slice_from_vec(names)
+  alloc_slice(names)
 }
 
 pub fn append_namespace(a : Namespace, b : Namespace) -> Namespace {
   let mut names = Vec::with_capacity(a.len() + b.len());
   names.extend_from_slice(a.as_slice());
   names.extend_from_slice(b.as_slice());
-  perm_slice_from_vec(names)
+  alloc_slice(names)
 }
 
 fn hotload_embedded(

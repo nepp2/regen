@@ -1,7 +1,7 @@
 
 use std::fmt::Debug;
 
-use compiler::{self, env::{self, CellIdentifier, CellValue, Env}, ffi_libs::RegenString, hotload, perm_alloc::{Ptr, perm}, symbols::{SymbolTable, symbol_table, to_symbol}, types::{self, CoreTypes, TypeHandle, core_types}};
+use compiler::{self, env::{self, CellIdentifier, CellValue, Env}, ffi_libs::RegenString, hotload, regen_alloc::{Ptr, alloc}, symbols::{SymbolTable, symbol_table, to_symbol}, types::{self, CoreTypes, TypeHandle, core_types}};
 use rusty_fork::rusty_fork_test;
 
 #[derive(Clone, Copy)]
@@ -62,7 +62,7 @@ fn assert_def_val<T : PartialEq + Debug>(env : Env, defname : &str, t : TypeHand
 
 fn test_env() -> TestEnv {
   let st = symbol_table();
-  let c = perm(core_types(st));
+  let c = alloc(core_types(st));
   TestEnv { st, c }
 }
 

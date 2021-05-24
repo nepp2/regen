@@ -1,7 +1,7 @@
 
 use std::{fmt};
 
-use crate::{error::{Error, error}, perm_alloc::Ptr};
+use crate::{error::{Error, error}, regen_alloc::Ptr};
 use super::expr::{CodeModule, SrcLocation};
 
 const SYNTAX : &'static [&'static str] =

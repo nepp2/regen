@@ -1,4 +1,4 @@
-pub mod perm_alloc;
+pub mod regen_alloc;
 pub mod symbols;
 pub mod parse;
 pub mod env;
@@ -16,6 +16,6 @@ mod error;
 
 pub fn new_env() -> env::Env {
   let st = symbols::symbol_table();
-  let c = perm_alloc::perm(types::core_types(st));
+  let c = regen_alloc::alloc(types::core_types(st));
   env::new_env(st, c)
 }

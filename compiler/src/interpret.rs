@@ -12,7 +12,7 @@ use crate::{
   env::Env,
   ffi_ccall,
   parse::Expr,
-  perm_alloc::SlicePtr,
+  regen_alloc::SlicePtr,
   types::{self, TypeHandle, Primitive}
 };
 

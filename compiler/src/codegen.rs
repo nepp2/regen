@@ -1,7 +1,7 @@
 
 /// Compiles core language into bytecode
 
-use crate::{bytecode, dependencies, env::{CellIdentifier, CellValue}, error::{Error, err, error}, hotload::CompileContext, parse, perm_alloc, symbols::{self, SymbolTable}, types};
+use crate::{bytecode, dependencies, env::{CellIdentifier, CellValue}, error::{Error, err, error}, hotload::CompileContext, parse, regen_alloc, symbols::{self, SymbolTable}, types};
 
 use bytecode::{
   SequenceHandle, SequenceInfo, InstrExpr, FunctionBytecode,
@@ -10,7 +10,7 @@ use bytecode::{
 
 use types::{TypeHandle, CoreTypes, Kind};
 
-use perm_alloc::{Ptr, perm_slice_from_vec, perm_slice, perm};
+use regen_alloc::{Ptr, alloc_slice, alloc};
 
 use symbols::Symbol;
 use parse::{SrcLocation, templates::{self, ExprBuilder}};
@@ -207,7 +207,7 @@ fn new_local(b : &mut Builder, name : Option<Symbol>, t : TypeHandle, mutable : 
     t,
     mutable,
   };
-  let lh = perm(info);
+  let lh = alloc(info);
   b.bc.locals.push(lh);
   lh
 }
@@ -256,7 +256,7 @@ fn create_sequence(b : &mut Builder, name : &str) -> SequenceHandle {
     i += 1;
     name_candidate = symbols::to_symbol(b.st, &format!("{}_{}", name, i));
   }
-  let seq = perm(SequenceInfo {
+  let seq = alloc(SequenceInfo {
     index: b.bc.sequence_info.len(),
     name: name_candidate,
     start_instruction: 0, num_instructions: 0,
@@ -587,7 +587,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
         element_values.push(v.id);
       }
       let t = types::array_type(element_type, element_values.len() as i64);
-      let ie = InstrExpr::Array(perm_slice_from_vec(element_values));
+      let ie = InstrExpr::Array(alloc_slice(element_values));
       return Ok(Some(push_expr(b, e, ie, t).to_ref()))
     }
     // array length
@@ -600,7 +600,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
       let element_ptr_type = types::pointer_type(info.inner);
       let ptr = compile_cast(b, array, array_ptr, element_ptr_type)?;
       let len = compile_array_len(b, array)?;
-      let ie = InstrExpr::Init(perm_slice(&[ptr.id, len.id]));
+      let ie = InstrExpr::Init(alloc_slice([ptr.id, len.id]));
       let t = types::slice_type(&b.c, b.st, info.inner);
       return Ok(Some(push_expr(b, e, ie, t).to_ref()))
     }
@@ -664,7 +664,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
         }
         field_values.push(v.id);
       }
-      let ie = InstrExpr::Init(perm_slice_from_vec(field_values));
+      let ie = InstrExpr::Init(alloc_slice(field_values));
       return Ok(Some(push_expr(b, e, ie, t).to_ref()));
     }
     // field deref
@@ -809,7 +809,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
       let id = expr_to_id(e)?;      
       let cell = get_cell_value(b, e, id)?;
       let signal_type = types::poly_type(b.c.signal_tag, cell.t);
-      let uid_ptr = Ptr::to_ptr(perm(id)) as *const ();
+      let uid_ptr = Ptr::to_ptr(alloc(id)) as *const ();
       let ie = InstrExpr::StaticValue(signal_type, uid_ptr);
       let v = push_expr(b, e, ie, signal_type);
       return Ok(Some(v.to_ref()));
@@ -947,10 +947,10 @@ fn compile_function_call(
   }
   let ie = {
     if info.c_function {
-      InstrExpr::InvokeC(f.id, perm_slice_from_vec(arg_values))
+      InstrExpr::InvokeC(f.id, alloc_slice(arg_values))
     }
     else {
-      InstrExpr::Invoke(f.id, perm_slice_from_vec(arg_values))
+      InstrExpr::Invoke(f.id, alloc_slice(arg_values))
     }
   };
   return Ok(push_expr(b, e, ie, info.returns));

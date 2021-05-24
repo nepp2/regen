@@ -1,10 +1,10 @@
 use core::panic;
 use std::hash::{Hash, Hasher};
 
-use crate::{env, event_loop::ffi::*, parse::templates::template, parse::{self, Expr, ExprContent, ExprTag, Val}, perm_alloc::{self, perm}, symbols::{Symbol, to_symbol}, types, types::{TypeHandle, c_function_type}};
+use crate::{env, event_loop::ffi::*, parse::templates::template, parse::{self, Expr, ExprContent, ExprTag, Val}, regen_alloc::{self, alloc}, symbols::{Symbol, to_symbol}, types, types::{TypeHandle, c_function_type}};
 
 use env::{Env, define_global};
-use perm_alloc::{Ptr, SlicePtr, perm_slice_from_vec, perm_slice};
+use regen_alloc::{Ptr, SlicePtr, alloc_slice};
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -96,7 +96,7 @@ pub extern "C" fn struct_type(
 ) -> TypeHandle{
   let field_names = unsafe { std::slice::from_raw_parts(names_ptr, num_fields as usize) };
   let field_types = unsafe { std::slice::from_raw_parts(types_ptr, num_fields as usize) };
-  types::struct_type(perm_slice(field_names), perm_slice(field_types))
+  types::struct_type(alloc_slice(field_names), alloc_slice(field_types))
 }
 
 pub extern "C" fn expr_display(expr : Expr) {
@@ -109,7 +109,7 @@ pub extern "C" fn calculate_packed_field_offsets(
 ) -> u64
 {
   let (offsets, size_of) = types::calculate_packed_field_offsets(field_types.as_slice());
-  *field_offsets = perm_slice_from_vec(offsets);
+  *field_offsets = alloc_slice(offsets);
   size_of
 }
 
@@ -124,7 +124,7 @@ pub extern "C" fn new_symbol_expr(env : Env, s : Ptr<RegenString>, e : Expr) -> 
 }
 
 pub extern "C" fn new_string_expr(_env : Env, s : Ptr<RegenString>, e : Expr) -> Expr {
-  let s = perm(*s);
+  let s = alloc(*s);
   parse::expr(ExprTag::LiteralVal, ExprContent::Value(Val::String(s)), e.loc())
 }
 

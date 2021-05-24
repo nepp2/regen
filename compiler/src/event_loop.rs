@@ -3,7 +3,7 @@ use std::{hash::Hash};
 use std::time::{Duration, Instant};
 use std::collections::HashMap;
 
-use crate::{codegen::Function, env::{CellIdentifier, CellUid, Env}, ffi_libs::RegenString, hotload, perm_alloc::{Ptr, perm}, types::TypeHandle};
+use crate::{codegen::Function, env::{CellIdentifier, CellUid, Env}, ffi_libs::RegenString, hotload, regen_alloc::{Ptr, alloc}, types::TypeHandle};
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct TimerId(pub u64);
@@ -51,7 +51,7 @@ pub struct Timer {
 }
 
 pub fn create_event_loop() -> Ptr<EventLoop> {
-  perm(EventLoop {
+  alloc(EventLoop {
     start_time: Instant::now(),
     id_counter: 0,
     timers: HashMap::new(),
@@ -156,7 +156,7 @@ pub mod ffi {
     millisecond_interval : i64,
   ) -> Ptr<ReactiveConstructor>
   {
-    perm(ReactiveConstructor {
+    alloc(ReactiveConstructor {
       value_type: env.c.i64_tag,
       variant : ConstructorVariant::Timer { millisecond_interval }
     })
@@ -167,7 +167,7 @@ pub mod ffi {
     file_path : Ptr<RegenString>,
   ) -> Ptr<ReactiveConstructor>
   {
-    perm(ReactiveConstructor {
+    alloc(ReactiveConstructor {
       value_type: env.c.string_tag,
       variant : ConstructorVariant::Watcher { file_path: *file_path }
     })
@@ -180,7 +180,7 @@ pub mod ffi {
     poll_function : Ptr<Function>,
   ) -> Ptr<ReactiveConstructor>
   {
-    perm(ReactiveConstructor {
+    alloc(ReactiveConstructor {
       value_type,
       variant: ConstructorVariant::Poll {
         input,
@@ -196,7 +196,7 @@ pub mod ffi {
     poll_function : Ptr<Function>,
   ) -> Ptr<ReactiveConstructor>
   {
-    perm(ReactiveConstructor {
+    alloc(ReactiveConstructor {
       value_type,
       variant: ConstructorVariant::Poll {
         input,

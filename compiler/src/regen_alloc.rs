@@ -1,15 +1,11 @@
-/// Some allocation facilities to simplify borrow checking by relying
-/// on the fact that these allocations will live until the process
-/// terminates.
-/// In future this may be adapted into a region-allocation system, in which
-/// regions can be dropped. This will be unsafe from Rust's perspective, but
-/// will instead reflect the semantics of the Regen language.
-
 use std::{fmt, ops::Range};
 use std::ops::{Deref, DerefMut, Index, RangeFrom};
 use core::hash::{Hash, Hasher};
 use std::borrow;
 
+/// An allocation with a lifetime managed by Regen instead of by the Rust compiler.
+/// From Rust's perspective it looks like a permanent allocation which might be
+/// mutated, and so it is not safe.
 #[derive(Clone)]
 #[repr(C)]
 pub struct Ptr<T> {
@@ -42,6 +38,7 @@ impl <T> Ptr<T> {
 
 impl <T : Clone> Copy for Ptr<T> { }
 
+/// A pointer to a Regen slice (See the documentation for Ptr)
 #[derive(Clone)]
 #[repr(C)]
 pub struct SlicePtr<T> {
@@ -51,21 +48,14 @@ pub struct SlicePtr<T> {
 
 impl <T : Clone> Copy for SlicePtr<T> { }
 
-pub fn perm<T>(t : T) -> Ptr<T> {
+pub fn alloc<T>(t : T) -> Ptr<T> {
   Ptr { p : Box::into_raw(Box::new(t)) }
 }
 
-pub fn perm_slice<T : Clone>(vs : &[T]) -> SlicePtr<T> {
-  if vs.len() == 0 {
-    SlicePtr { p: 0 as *const T, len: 0 }
-  }
-  else {
-    let v : Vec<_> = vs.iter().cloned().collect();
-    perm_slice_from_vec(v)
-  }
-}
-
-pub fn perm_slice_from_vec<T : Clone>(vs : Vec<T>) -> SlicePtr<T> {
+pub fn alloc_slice<T, C>(values : C) -> SlicePtr<T>
+  where C : Into<Vec<T>>
+{
+  let vs : Vec<T> = values.into();
   let p = SlicePtr { p : vs.as_ptr(), len: vs.len() };
   std::mem::forget(vs);
   p
@@ -121,7 +111,6 @@ impl<T> AsRef<T> for Ptr<T> {
     &**self
   }
 }
-
 
 impl <T: 'static> SlicePtr<T> {
   pub fn as_slice(&self) -> &'static [T] {

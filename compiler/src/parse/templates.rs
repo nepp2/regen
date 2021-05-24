@@ -1,9 +1,9 @@
 
 use std::vec;
 
-use crate::{parse::{self, Expr, ExprShape}, perm_alloc, symbols::{self, to_symbol}};
+use crate::{parse::{self, Expr, ExprShape}, regen_alloc, symbols::{self, to_symbol}};
 use parse::{ExprContent, ExprData, ExprMetadata, ExprTag, SrcLocation};
-use perm_alloc::{perm, perm_slice_from_vec};
+use regen_alloc::{alloc, alloc_slice};
 use symbols::{SymbolTable};
 
 pub fn template(e : Expr, args : &[Expr]) -> Expr {
@@ -25,10 +25,10 @@ pub fn template(e : Expr, args : &[Expr]) -> Expr {
         }
         let ed = ExprData {
           tag: e.tag,
-          content: ExprContent::List(perm_slice_from_vec(children)),
+          content: ExprContent::List(alloc_slice(children)),
           metadata: e.metadata,
         };
-        perm(ed)
+        alloc(ed)
       },
     }
   }
@@ -67,11 +67,11 @@ impl ExprBuilder {
 
 
   fn list_expr(&self, tag : ExprTag, list : Vec<Expr>) -> Expr {
-    self.expr(tag, ExprContent::List(perm_slice_from_vec(list)))
+    self.expr(tag, ExprContent::List(alloc_slice(list)))
   }
 
   fn expr(&self, tag : ExprTag, content : ExprContent) -> Expr {
-    perm(ExprData {
+    alloc(ExprData {
       tag,
       content,
       metadata: ExprMetadata {

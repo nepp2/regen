@@ -24,6 +24,12 @@ This directory contains regen code samples. They are currently just snippets use
 
 Wasm support is not yet implemented. This directory just contains a basic attempt to test Rust's wasm support.
 
+# Compatibility
+
+This prototype is currently only compatible with Windows. This is just because the C FFI is very basic, and currently makes Windows-specific assumptions.
+
 # Note on safety
 
 This is not an idiomatic Rust codebase. Usually unsafe code is hidden behind safe APIs that have been carefully scrutinised and tested. However, this is a research project undergoing constant iteration on features which require unsafe code, so some of the unsafe code won't be tidied up until it has stabilised.
+
+The root issue is that the Regen memory model is more permissive than the Rust memory model, so the compiler can't efficiently interpret/manipulate Regen data structures without unsafe code. However, this unsafe code could still be cleaned up and centralised.
