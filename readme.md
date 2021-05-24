@@ -12,7 +12,7 @@ It is intended to support a notebook UI in which definitions form a dataflow gra
 
 This directory contains the regen compiler and runtime
 
-## regen_cli
+## cli
 
 A CLI interface is implemented in this directory. It is separated so that `compiler` does not depend on filesystem functions, and can eventually support wasm target.
 
@@ -20,7 +20,15 @@ A CLI interface is implemented in this directory. It is separated so that `compi
 
 This directory contains regen code samples. They are currently just snippets used during development to test out features and ideas in the language, rather than real examples.
 
-## regen_wasm
+## regen_libs
+
+This directory contains a few core Regen libraries
+
+## shared_libs
+
+This directory contains a few shared libraries used by Regen sample code (currently just Windows DLLs).
+
+## wasm
 
 Wasm support is not yet implemented. This directory just contains a basic attempt to test Rust's wasm support.
 
