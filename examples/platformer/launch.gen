@@ -1,0 +1,86 @@
+
+def width = 800;
+def height = 600;
+
+def window = create_window("JumpMan", width, height);
+def window_id = sdl_get_window_id(window);
+
+def BufferedGame = struct {
+  event_count : i64,
+  initial_state : Game,
+  state : Game,
+};
+
+def initial_game_state = {
+  init Game()
+};
+
+def new_buffered_game = fun(g : Game) {
+  init BufferedGame(0, g, g);
+};
+
+def buffered_game_update = fun(g : ptr BufferedGame, buffer : ptr EventList) {
+  let len = buffer.length;
+  if g.event_count > len {
+    g.event_count = 0;
+    g.state = g.initial_state;
+  }
+  for i in g.event_count to len {
+    let e = EventList::get_ptr(*buffer, i);
+    g.event_count = g.event_count + 1;
+    game_update(ref g.state, e);
+  }
+}
+
+reactive frame_tick = create_timer(30);
+
+reactive frame_events = container(
+  observe frame_tick,
+  EventList::new(),
+  fun(es : ptr EventList, tick : ptr i64) {
+    flush_and_poll_input(*es, *tick);
+    let tick_event = init Event(tick_event_tag, zero_init SdlEvent, *tick);
+    EventList::add(*es, tick_event);
+  }
+);
+
+def handle_game_window_events = fun() {
+  for i in 0 to frame_events.length {
+    let e = EventList::get_ptr(frame_events, i);
+    if e.tag == sdl_event_tag {
+      let event_type = e.input.event_type;
+      if event_type == SDL_QUIT {
+        sdl_destroy_window(window);
+      }
+    }
+  }
+}
+
+def slider_view = create_slider_view("Timeline", 400, 50);
+
+reactive slider = container(
+  observe frame_events,
+  create_slider(slider_view),
+  slider_handle_events,
+);
+
+render_slider(ref slider);
+
+def game_events = slider_events_slice(ref slider);
+
+reactive game = {
+  let g = new_buffered_game(initial_game_state);
+  container(observe game_events, g, buffered_game_update)
+}
+
+def renderer = create_renderer(window);
+
+{
+  // clear screen
+  sdl_set_draw_color(renderer, 0 as u8, 0 as u8, 0 as u8, 0 as u8);
+  sdl_clear(renderer);
+
+  // draw game
+  render_game(renderer, ref game.state);
+  sdl_present(renderer);
+}

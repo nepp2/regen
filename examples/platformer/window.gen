@@ -1,0 +1,101 @@
+
+def create_window = fun(title : string, width : i64, height : i64) {
+  sdl_init(SDL_INIT_VIDEO);
+  sdl_create_window(
+    title.data, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+    width as i32, height as i32, SDL_WINDOW_SHOWN)
+};
+
+def create_renderer = fun(window : SdlWindowHandle) {
+  let r = sdl_create_renderer(window, -1 as i32, SDL_RENDERER_ACCELERATED);
+  sdl_set_blend_mode(r, 1 as u32);
+  r
+}
+
+def event_type = {
+  def tick = 1;
+  def key_down = 2;
+  def key_up = 3;
+  def mouse_up = 4;
+  def mouse_down = 5;
+  def mouse_move = 6;
+}
+
+def keycode = {
+  def arrow_right = 79 as u32;
+  def arrow_left = 80 as u32;
+  def arrow_down = 81 as u32;
+  def arrow_up = 82 as u32;
+}
+
+def MouseEvent = struct {
+  x : i64,
+  y : i64,
+};
+
+def KeyEvent = struct {
+  keycode : u32,
+};
+
+def EventUnion = {
+  let size = max_u64(
+    type_sizeof(MouseEvent),
+    type_sizeof(KeyEvent));
+  sized_array(u8, size as i64)
+}
+
+def tick_event_tag = 1;
+def sdl_event_tag = 2;
+
+// one of these pointers will be null
+def Event = struct {
+  tag : i64,
+  tick : i64,
+  type_union : EventUnion,
+};
+
+embed define_list_type(#SdlEventList, #SdlEvent);
+embed define_list_type(#EventList, #Event);
+
+def from_sdl_event = fun(se : ptr SdlEvent, event : ptr Event, window_id : u32) {
+  let event_type = se.event_type;
+  if event_type == SDL_KEYDOWN {
+    let k = to_keyboard_event(ref e.input);
+    if k.window_id == window_id {
+      
+    }
+  }
+  if event_type == SDL_KEYUP {
+    let k = to_keyboard_event(ref e.input);
+    if k.window_id == window_id {
+      if k.keysym.scancode == ARROW_DOWN {
+        // TODO
+      }
+      if k.keysym.scancode == ARROW_UP {
+        // TODO
+      }
+    }
+  }
+  false
+}
+
+def poll_sdl_events = fun(es : SdlEventList, tick : i64) {
+  let start_len = es.length;
+  let sdl_event = zero_init SdlEvent;
+  while sdl_poll_event(ref sdl_event) == (1 as i32) {
+    SdlEventList::add(es, sdl_event);
+  }
+  let changed = es.length > start_len;
+  changed
+}
+
+def flush_and_poll_input = fun(es : EventList, tick : i64) {
+  if es.length > 0 {
+    EventList::clear(es);
+    poll_input(es, tick);
+    true
+  }
+  else {
+    poll_input(es, tick)
+  }
+}

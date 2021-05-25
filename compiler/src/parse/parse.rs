@@ -219,9 +219,8 @@ impl <'l> ParseState<'l> {
       Ok(t)
     }
     else {
-      // return err(t.loc,
-      //   format!("Expected syntax '{}', found '{}'", str, t.string));
-      panic!("Expected syntax '{}', found '{}'", str, t.string)
+      return err(t.loc,
+        format!("Expected syntax '{}', found '{}'", str, t.string));
     }
   }
 

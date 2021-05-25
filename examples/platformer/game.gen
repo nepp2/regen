@@ -1,0 +1,45 @@
+
+def Vec2 = struct { x : i64, y : i64 };
+
+def Game = struct {};
+
+def game_update = fun(state : ptr Game, e : ptr Event) {
+  // // handle input events
+  // if e.tag == sdl_event_tag {
+  //   let event_type = e.input.event_type;
+  //   if event_type == SDL_KEYDOWN {
+  //     let k = to_keyboard_event(ref e.input);
+  //     if k.window_id == window_id {
+  //       if k.keysym.scancode == ARROW_DOWN {
+  //         // TODO
+  //       }
+  //       if k.keysym.scancode == ARROW_UP {
+  //         // TODO
+  //       }
+  //     }
+  //   }
+  //   if event_type == SDL_KEYUP {
+  //     let k = to_keyboard_event(ref e.input);
+  //     if k.window_id == window_id {
+  //       if k.keysym.scancode == ARROW_DOWN {
+  //         // TODO
+  //       }
+  //       if k.keysym.scancode == ARROW_UP {
+  //         // TODO
+  //       }
+  //     }
+  //   }
+  // }
+  // // handle tick events
+  // if e.tag == tick_event_tag {
+  //   // TODO
+  // }
+};
+
+def render_game = fun(r : SdlRendererHandle, state : ptr Game) {
+  sdl_set_draw_color(r, 255 as u8, 0 as u8, 0 as u8, 255 as u8);
+
+  // Paddle p1
+  let rect = init SdlRect(50 as i32, 50 as i32, 200 as i32, 200 as i32);
+  sdl_fill_rect(r, ref rect);
+};
