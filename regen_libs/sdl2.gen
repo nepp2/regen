@@ -17,38 +17,38 @@ def sdl_init =
 
 // --------------- SDL Types ------------------
 
-def SdlWindowHandle = named_type(sym SdlWindowHandle, ptr void);
-def SdlRendererHandle = named_type(sym SdlRendererHandle, ptr void);
-def SdlSurfaceHandle = named_type(sym SdlSurfaceHandle, ptr void);
-def SdlTextureHandle = named_type(sym SdlTextureHandle, ptr void);
+type SdlWindowHandle = ptr void;
+type SdlRendererHandle = ptr void;
+type SdlSurfaceHandle = ptr void;
+type SdlTextureHandle = ptr void;
 
-def SdlRect = struct {
+type SdlRect = struct {
   x : i32, y : i32, w : i32, h : i32
 };
 
 // https://wiki.libsdl.org/SDL_Keysym
-def SdlKeysym = struct {
+type SdlKeysym = struct {
   scancode : u32,
   keycode : u32,
   mod : u16,
   unused : u32,
 };
 
-def SdlWindowEvent = struct {
+type SdlWindowEvent = struct {
   window_id : u32,
   event : u8,
   data1 : i32,
   data2 : i32,
 };
 
-def SdlKeyboardEvent = struct {
+type SdlKeyboardEvent = struct {
   window_id : u32,
   state : u8,
   is_repeat : u8,
   keysym : SdlKeysym,
 };
 
-def SdlMouseButtonEvent = struct {
+type SdlMouseButtonEvent = struct {
   window_id : u32,
   which : u32,
   button : u8,
@@ -59,7 +59,7 @@ def SdlMouseButtonEvent = struct {
   y : i32,
 }
 
-def SdlMouseMotionEvent = struct {
+type SdlMouseMotionEvent = struct {
   window_id : u32,
   which : u32,
   state : u32,
@@ -80,7 +80,7 @@ def SDL_MOUSEDOWN = 1025 as u32;
 def SDL_MOUSEUP = 1026 as u32;
 def SDL_MOUSEMOTION = 1024 as u32;
 
-def SdlEvent = struct {
+type SdlEvent = struct {
   event_type : u32,
   timestamp : u32,
   content : sized_array(u64, 20),
@@ -169,19 +169,19 @@ def sdl_create_texture_from_surface =
 
 // convenience functions for event handling
 
-def to_mouse_button_event = fun(e : ptr SdlEvent) {
+fun to_mouse_button_event(e : ptr SdlEvent) {
   (ref e.content) as (ptr SdlMouseButtonEvent)
 };
 
-def to_mouse_motion_event = fun(e : ptr SdlEvent) {
+fun to_mouse_motion_event(e : ptr SdlEvent) {
   (ref e.content) as (ptr SdlMouseMotionEvent)
 };
 
-def to_keyboard_event = fun(e : ptr SdlEvent) {
+fun to_keyboard_event(e : ptr SdlEvent) {
   (ref e.content) as (ptr SdlKeyboardEvent)
 };
 
-def to_window_event = fun(e : ptr SdlEvent) {
+fun to_window_event(e : ptr SdlEvent) {
   (ref e.content) as (ptr SdlWindowEvent)
 };
 

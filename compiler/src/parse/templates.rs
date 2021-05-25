@@ -61,7 +61,7 @@ impl ExprBuilder {
     let sym = to_symbol(self.st, type_name);
     let tag = self.expr(ExprTag::Name, ExprContent::Sym(sym));
     let const_tag = self.list_expr(ExprTag::ConstExpr, vec![tag]);
-    let elements = self.list_expr(ExprTag::Syntax, list);
+    let elements = self.list_expr(ExprTag::Structural, list);
     self.list_expr(ExprTag::ArrayInit, vec![const_tag, elements])
   }
 

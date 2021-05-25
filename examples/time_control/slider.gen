@@ -6,7 +6,7 @@ def pause_image = sdl_img_load("examples/time_control/pause.png".data);
 def stop_image = sdl_img_load("examples/time_control/stop.png".data);
 def onion_image = sdl_img_load("examples/time_control/onion.png".data);
 
-def SliderView = struct {
+type SliderView = struct {
   width : i64,
   height : i64,
   window : SdlWindowHandle,
@@ -23,7 +23,7 @@ def SliderView = struct {
   button_size : i64,
 }
 
-def Slider = struct {
+type Slider = struct {
   view : SliderView,
   cursor_val : i64,
   mouse_down : bool,
@@ -33,7 +33,7 @@ def Slider = struct {
   events_max : i64,
 }
 
-def rect_contains = fun(r : SdlRect, x : i64, y : i64) {
+fun rect_contains(r : SdlRect, x : i64, y : i64) {
   let rx = r.x as i64;
   let ry = r.y as i64;
   let rw = r.w as i64;
@@ -50,7 +50,7 @@ def rect_contains = fun(r : SdlRect, x : i64, y : i64) {
   false
 }
 
-def update_slider = fun(slider : ptr Slider, x : i64, y : i64) {
+fun update_slider(slider : ptr Slider, x : i64, y : i64) {
   let sr = slider.view.bar_rect;
   if rect_contains(sr, x, y) {
     let pos = x - (sr.x as i64);
@@ -59,13 +59,13 @@ def update_slider = fun(slider : ptr Slider, x : i64, y : i64) {
   }
 }
 
-def slider_events_slice = fun(slider : ptr Slider) {
+fun slider_events_slice(slider : ptr Slider) {
   let cursor_index = (slider.events_max * slider.cursor_val) / 100;
   cursor_index = min(slider.events.length, cursor_index);
   EventList::slice(slider.events, cursor_index)
 }
 
-def slider_handle_click = fun(slider : ptr Slider, x : i64, y : i64) {
+fun slider_handle_click(slider : ptr Slider, x : i64, y : i64) {
   slider.mouse_down = true;
   update_slider(slider, x, y);
 
@@ -95,7 +95,7 @@ def slider_handle_click = fun(slider : ptr Slider, x : i64, y : i64) {
   }
 }
 
-def slider_handle_event = fun(slider : ptr Slider, event : Event) {
+fun slider_handle_event(slider : ptr Slider, event : Event) {
   if event.tag != sdl_event_tag {
     return false;
   }
@@ -127,7 +127,7 @@ def slider_handle_event = fun(slider : ptr Slider, event : Event) {
   false
 }
 
-def slider_handle_events = fun(slider : ptr Slider, es : ptr EventList) {
+fun slider_handle_events(slider : ptr Slider, es : ptr EventList) {
   let changes = false;
   for i in 0 to es.length {
     let e = EventList::get(*es, i);
@@ -144,15 +144,15 @@ def slider_handle_events = fun(slider : ptr Slider, es : ptr EventList) {
   changes
 }
 
-def new_rect = fun(x : i64, y : i64, w : i64, h : i64) {
+fun new_rect(x : i64, y : i64, w : i64, h : i64) {
   init SdlRect(x as i32, y as i32, w as i32, h as i32)
 }
 
-def set_color = fun(rend: SdlRendererHandle, r : i64, g : i64, b : i64) {
+fun set_color(rend: SdlRendererHandle, r : i64, g : i64, b : i64) {
   sdl_set_draw_color(rend, r as u8, g as u8, b as u8, 255 as u8);
 }
 
-def render_slider = fun (slider : ptr Slider) {
+fun render_slider (slider : ptr Slider) {
   let r = slider.view.renderer;
   let v = ref slider.view;
   // render
@@ -206,7 +206,7 @@ def render_slider = fun (slider : ptr Slider) {
   sdl_present(r);
 };
 
-def create_slider_view = fun(name : String, width : i64, height : i64) {
+fun create_slider_view(name : String, width : i64, height : i64) {
   let window = create_window(name, width, height);
   let window_id = sdl_get_window_id(window);
   let renderer =
@@ -231,7 +231,7 @@ def create_slider_view = fun(name : String, width : i64, height : i64) {
 }
 
 
-def create_slider = fun(view : SliderView) {
+fun create_slider(view : SliderView) {
   let events = EventList::new();
   init Slider(view, 100, false, false, false, events, 100)
 }

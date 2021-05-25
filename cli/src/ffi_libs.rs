@@ -1,5 +1,5 @@
 
-use compiler::{env::{Env, define_global}, ffi_libs::RegenString, hotload, parse::{self, Expr}, regen_alloc::{Ptr, alloc}, symbols::{Symbol, to_symbol}, types, types::c_function_type};
+use compiler::{env::{Env, define_global}, ffi_libs::RegenString, hotload, parse::{self, Expr}, regen_alloc::{Ptr}, symbols::{to_symbol}, types, types::c_function_type};
 use std::fs;
 use std::path::Path;
 use std::ffi::CString;
@@ -59,7 +59,7 @@ pub fn bind_libs(env : Env) {
     types::named_type(to_symbol(env.st, "Library"), void_ptr);
   define_global(env, "load_expr", load_expr as u64,
     c_function_type(&[void_ptr, string_ptr], expr_tag));
-  define_global(env, "Library", Ptr::to_u64(library_tag), env.c.type_tag);
+  define_global(env, "Library", Ptr::to_u64(library_tag.0), env.c.type_tag);
   define_global(env, "ffi_load_library", ffi_load_library as u64,
     c_function_type(&[string_ptr], library_tag));
   define_global(env, "ffi_load_library_symbol", ffi_load_library_symbol as u64,

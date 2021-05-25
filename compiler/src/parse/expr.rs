@@ -92,7 +92,7 @@ pub enum ExprTag {
   TemplateHole,
   Quote,
   Omitted, // was not specified
-  Syntax, // cannot be evaluated
+  Structural, // cannot be evaluated
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
@@ -134,7 +134,7 @@ impl ExprData {
   }
 
   pub fn as_syntax(&self) -> Option<&[Expr]> {
-    if self.tag == Syntax {
+    if self.tag == Structural {
       if let List(es) = self.content {
         return Some(es.as_slice());
       }

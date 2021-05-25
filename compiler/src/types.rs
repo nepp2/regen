@@ -5,9 +5,18 @@ use crate::{symbols, regen_alloc};
 
 use symbols::{Symbol, SymbolTable, to_symbol};
 use regen_alloc::{Ptr, SlicePtr, alloc, alloc_slice};
-use std::fmt;
+use std::{fmt, ops::Deref};
 
-pub type TypeHandle = Ptr<TypeInfo>;
+#[derive(Copy, Clone)]
+pub struct TypeHandle(pub Ptr<TypeInfo>);
+
+impl Deref for TypeHandle {
+  type Target = TypeInfo;
+
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
 
 #[derive(Copy, Clone, PartialEq)]
 #[repr(u64)]
@@ -43,19 +52,20 @@ pub struct TypeInfo {
   pub info : u64,
 }
 
-impl PartialEq for TypeInfo {
+impl PartialEq for TypeHandle {
   fn eq(&self, rhs : &Self) -> bool {
     (self.kind == rhs.kind) && (self.size_of == rhs.size_of) && {
       match self.kind {
         Kind::Primitive => self.info == rhs.info,
-        Kind::Named => type_as_named(self) == type_as_named(rhs),
-        Kind::Poly => type_as_poly(self) == type_as_poly(rhs),
+        Kind::Named => type_as_named(*self) == type_as_named(*rhs),
+        Kind::Poly => type_as_poly(*self) == type_as_poly(*rhs),
         Kind::Type => true,
-        Kind::Array => type_as_array(self) == type_as_array(rhs),
-        Kind::Function => type_as_function(self) == type_as_function(rhs),
-        Kind::Pointer =>
-          TypeHandle::from_u64(self.info) == TypeHandle::from_u64(rhs.info),
-        Kind::Struct => type_as_struct(self) == type_as_struct(rhs),
+        Kind::Array => type_as_array(*self) == type_as_array(*rhs),
+        Kind::Function => type_as_function(*self) == type_as_function(*rhs),
+        Kind::Pointer => unsafe {
+          TypeHandle(Ptr::from_u64(self.info)) == TypeHandle(Ptr::from_u64(rhs.info))
+        },
+        Kind::Struct => type_as_struct(*self) == type_as_struct(*rhs),
       }
     }
   }
@@ -127,7 +137,7 @@ pub struct CoreTypes {
 
 pub fn is_number(t : TypeHandle) -> bool {
   use Primitive::*;
-  if let Some(p) = type_as_primitive(&t) {
+  if let Some(p) = type_as_primitive(t) {
     match p {
       I64 | I32 | U64 | U32 | U16 | U8 => return true,
       _ => (),
@@ -137,64 +147,70 @@ pub fn is_number(t : TypeHandle) -> bool {
 }
 
 pub fn is_bool(t : TypeHandle) -> bool {
-  type_as_primitive(&t) == Some(Primitive::Bool)
+  type_as_primitive(t) == Some(Primitive::Bool)
 }
 
-pub fn type_as_primitive(t : &TypeInfo) -> Option<Primitive> {
+pub fn type_as_primitive(t : TypeHandle) -> Option<Primitive> {
   if let Kind::Primitive = t.kind {
     return Some(unsafe { std::mem::transmute(t.info) });
   }
   None
 }
 
-pub fn type_as_function(t : &TypeInfo) -> Option<&FunctionInfo> {
+pub fn type_as_function(t : TypeHandle) -> Option<Ptr<FunctionInfo>> {
+  let t = strip_alias(t);
   if let Kind::Function = t.kind {
-    return Some(unsafe { &*(t.info as *const FunctionInfo) })
+    return Some(unsafe { Ptr::from_ptr(t.info as *mut FunctionInfo) })
   }
   None
 }
 
-fn strip_names(t : &TypeInfo) -> &TypeInfo {
+pub fn strip_alias(t : TypeHandle) -> TypeHandle {
   if let Some(info) = type_as_named(t) {
-    strip_names(&info.inner)
+    strip_alias(info.inner)
   }
   else {
     t
   }
 }
 
-pub fn type_as_struct(t : &TypeInfo) -> Option<&StructInfo> {
-  let t = strip_names(t);
+pub fn type_as_struct(t : TypeHandle) -> Option<Ptr<StructInfo>> {
+  let t = strip_alias(t);
   if let Kind::Struct = t.kind {
-    return Some(unsafe { &*(t.info as *const StructInfo) })
+    return Some(unsafe { Ptr::from_ptr(t.info as *mut StructInfo) })
   }
   None
 }
 
-pub fn type_as_array(t : &TypeInfo) -> Option<&ArrayInfo> {
+pub fn type_as_array(t : TypeHandle) -> Option<Ptr<ArrayInfo>> {
+  let t = strip_alias(t);
   if let Kind::Array = t.kind {
-    return Some(unsafe { &*(t.info as *const ArrayInfo) })
+    return Some(unsafe { Ptr::from_ptr(t.info as *mut ArrayInfo) })
   }
   None
 }
 
 pub fn deref_pointer_type(t : TypeHandle) -> Option<TypeHandle> {
+  let t = strip_alias(t);
   if let Kind::Pointer = t.kind {
-    return Some(TypeHandle::from_u64(t.info))
+    unsafe {
+      return Some(TypeHandle(Ptr::from_u64(t.info)))
+    }
   }
   None
 }
 
-pub fn type_as_named(t : &TypeInfo) -> Option<&NamedInfo> {
+pub fn type_as_named(t : TypeHandle) -> Option<Ptr<NamedInfo>> {
   if let Kind::Named = t.kind {
-    return Some(unsafe { &*(t.info as *const NamedInfo) })
+    return Some(unsafe { Ptr::from_ptr(t.info as *mut NamedInfo) })
   }
   None
 }
 
-pub fn type_as_poly(t : &TypeInfo) -> Option<&PolyInfo> {
+pub fn type_as_poly(t : TypeHandle) -> Option<Ptr<PolyInfo>> {
+  let t = strip_alias(t);
   if let Kind::Poly = t.kind {
-    return Some(unsafe { &*(t.info as *const PolyInfo) })
+    return Some(unsafe { Ptr::from_ptr(t.info as *mut PolyInfo) })
   }
   None
 }
@@ -210,7 +226,7 @@ fn round_up_power_of_2(v : u64) -> u64 {
 }
 
 fn new_type(kind : Kind, size_of : u64, info : u64) -> TypeHandle {
-  alloc(TypeInfo { size_of, kind, info: info })
+  TypeHandle(alloc(TypeInfo { size_of, kind, info: info }))
 }
 
 pub fn calculate_packed_field_offsets(field_types : &[TypeHandle]) -> (Vec<u64>, u64) {
@@ -252,7 +268,7 @@ pub fn array_type(inner : TypeHandle, length : i64) -> TypeHandle {
 }
 
 pub fn pointer_type(inner : TypeHandle) -> TypeHandle {
-  new_type(Kind::Pointer, 8, Ptr::to_u64(inner))
+  new_type(Kind::Pointer, 8, Ptr::to_u64(inner.0))
 }
 
 pub fn named_type(name : Symbol, inner : TypeHandle) -> TypeHandle {
@@ -307,10 +323,13 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
   let signal_tag = named_type(to_symbol(st, "Signal"), u64_tag);
   let reactive_constructor_tag = named_type(to_symbol(st, "ReactiveConstructor"), u64_tag);
 
-  let string_tag = struct_type(
-    alloc_slice([data_sym, len_sym]),
-    alloc_slice([pointer_type(u8_tag), u64_tag]),
-  );
+  let string_tag = {
+    let t =
+      struct_type(
+        alloc_slice([data_sym, len_sym]),
+        alloc_slice([pointer_type(u8_tag), u64_tag]));
+    named_type(to_symbol(st, "String"), t)
+  };
 
   let mut array_types = vec![];
   for i in 2..20 {
@@ -346,17 +365,17 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
   }
 }
 
-impl fmt::Debug for TypeInfo {
+impl fmt::Debug for TypeHandle {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "{}", self)
   }
 }
 
-impl fmt::Display for TypeInfo {
+impl fmt::Display for TypeHandle {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self.kind {
       Kind::Primitive => {
-        let s = match type_as_primitive(self).unwrap() {
+        let s = match type_as_primitive(*self).unwrap() {
           Primitive::I64 => "i64",
           Primitive::I32 => "i32",
           Primitive::U64 => "u64",
@@ -385,7 +404,7 @@ impl fmt::Display for TypeInfo {
         write!(f, ") {})", i.returns)?;
       }
       Kind::Pointer => {
-        let t = unsafe { &*(self.info as *const TypeInfo) };
+        let t = unsafe { TypeHandle(Ptr::from_ptr(self.info as *mut TypeInfo)) };
         write!(f, "(ptr {})", t)?;
       }
       Kind::Array => {

@@ -417,7 +417,7 @@ fn compile_assignment<L : Into<SrcLocation>>(b : &mut Builder, loc : L, dest : R
 /// dereferences any pointer types encountered
 fn compile_and_fully_deref(b : &mut Builder, e : Expr) -> Result<Ref, Error> {
   let mut r = compile_expr_to_ref(b, e)?;
-  while r.t.kind == Kind::Pointer {
+  while types::deref_pointer_type(r.t).is_some() {
     let v = r.to_var(b);
     r = pointer_to_locator(v, r.mutable)?;
   }
@@ -452,8 +452,10 @@ fn compile_cast<L>(b : &mut Builder, loc : L, v : Var, t : TypeHandle)
     where L : Into<SrcLocation>
 {
   fn ptr_or_prim(t : TypeHandle) -> bool {
+    let t = types::strip_alias(t);
     t.kind == Kind::Pointer || t.kind == Kind::Primitive
   }
+
   if t.size_of != v.t.size_of {
     if !(ptr_or_prim(t) && ptr_or_prim(v.t)) {
       return err(loc, format!("cannot cast from {} to {}", v.t, t));
@@ -594,7 +596,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
     List(ArrayAsSlice, &[array]) => {
       let r = compile_expr_to_ref(b, array)?;
       let info =
-        types::type_as_array(&r.t)
+        types::type_as_array(r.t)
         .ok_or_else(|| error(array, "expected array"))?;
       let array_ptr = r.get_address(b);
       let element_ptr_type = types::pointer_type(info.inner);
@@ -611,7 +613,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
     // index
     List(Index, &[array , index]) => {
       let v = compile_expr_to_ref(b, array)?;
-      let info = if let Some(info) = types::type_as_array(&v.t) {
+      let info = if let Some(info) = types::type_as_array(v.t) {
         info
       }
       else {
@@ -643,7 +645,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
       let type_expr = es[0];
       let field_vals = &es[1..];
       let t = const_expr_to_type(b, type_expr)?;
-      let info = if let Some(i) = types::type_as_struct(&t) {
+      let info = if let Some(i) = types::type_as_struct(t) {
         i
       }
       else {
@@ -672,7 +674,7 @@ fn compile_expr(b : &mut Builder, e : Expr) -> Result<ExprResult, Error> {
       let struct_ref = compile_and_fully_deref(b, structure)?;
       let struct_addr = struct_ref.get_address(b).id;
       let info =
-        types::type_as_struct(&struct_ref.t)
+        types::type_as_struct(struct_ref.t)
         .ok_or_else(||
           error(e, format!("expected struct, found {}", struct_ref.t))
         )?;
@@ -863,7 +865,7 @@ fn expr_to_id(e : Expr) -> Result<CellIdentifier, Error> {
 fn compile_type_literal<L>(b : &mut Builder, t : TypeHandle, loc : L) -> Var
   where L : Into<SrcLocation>
 {
-  let ie = InstrExpr::LiteralI64(Ptr::to_i64(t));
+  let ie = InstrExpr::LiteralI64(Ptr::to_i64(t.0));
   return push_expr(b, loc, ie, b.c.type_tag);
 }
 
@@ -879,7 +881,7 @@ fn compile_def_reference(b : &mut Builder, e : Expr) -> Result<Ref, Error> {
 fn compile_array_len(b : &mut Builder, array : Expr) -> Result<Var, Error> {
   let r = compile_expr_to_ref(b, array)?;
   let info =
-    types::type_as_array(&r.t)
+    types::type_as_array(r.t)
     .ok_or_else(|| error(array, "expected array"))?;
   let ie = InstrExpr::LiteralI64(info.length as i64);
   Ok(push_expr(b, array, ie, b.c.i64_tag))
@@ -917,7 +919,7 @@ fn compile_function_call(
 ) -> Result<Var, Error>
 {
   let f = compile_expr_to_var(b, function_val)?;
-  let info = if let Some(i) = types::type_as_function(&f.t) {
+  let info = if let Some(i) = types::type_as_function(f.t) {
     i
   }
   else {
@@ -971,7 +973,7 @@ fn compile_container(
   let function = compile_expr_to_var(b, function_expr)?;
   // Check types
   let fun =
-    types::type_as_function(&function.t)
+    types::type_as_function(function.t)
     .ok_or_else(|| error(function_expr, "invalid function type"))?;
   let state_type =
     types::deref_pointer_type(fun.args[0])
@@ -980,7 +982,7 @@ fn compile_container(
     types::deref_pointer_type(fun.args[1])
     .ok_or_else(|| error(function_expr, "invalid function type"))?;
   let signal_param =
-    types::type_as_poly(&signal.t)
+    types::type_as_poly(signal.t)
     .ok_or_else(|| error(signal_expr, "invalid signal type"))?
     .param;
   if state_type != value.t {
@@ -1025,7 +1027,7 @@ fn compile_stream(
   let function = compile_expr_to_var(b, function_expr)?;
   // Check types
   let fun =
-    types::type_as_function(&function.t)
+    types::type_as_function(function.t)
     .ok_or_else(|| error(function_expr, "invalid function type"))?;
   let state_type =
     types::deref_pointer_type(fun.args[0])
@@ -1034,7 +1036,7 @@ fn compile_stream(
     types::deref_pointer_type(fun.args[1])
     .ok_or_else(|| error(function_expr, "invalid function type"))?;
   let signal_param =
-    types::type_as_poly(&signal.t)
+    types::type_as_poly(signal.t)
     .ok_or_else(|| error(signal_expr, "invalid signal type"))?
     .param;
   if signal_param != input_type {

@@ -16,24 +16,24 @@ def ball_size = 10;
 def window = create_window("Pong", width, height);
 def window_id = sdl_get_window_id(window);
 
-def Vec2 = struct { x : i64, y : i64 };
+type Vec2 = struct { x : i64, y : i64 };
 
-def Ball = struct { pos : Vec2, vel : Vec2 };
+type Ball = struct { pos : Vec2, vel : Vec2 };
 
-def Paddle = struct {
+type Paddle = struct {
   pos : Vec2,
   width : i64,
   height : i64,
   vel : i64
 };
 
-def Pong = struct {
+type Pong = struct {
   p1 : Paddle,
   p2 : Paddle,
   b : Ball,
 };
 
-def BufferedPong = struct {
+type BufferedPong = struct {
   event_count : i64,
   initial_state : Pong,
   state : Pong,
@@ -52,7 +52,7 @@ def initial_pong_state = {
   )
 };
 
-def new_buffered_pong = fun(g : Pong) {
+fun new_buffered_pong(g : Pong) {
   init BufferedPong(0, g, g);
 };
 
@@ -61,7 +61,7 @@ def ARROW_LEFT = 80 as u32;
 def ARROW_DOWN = 81 as u32;
 def ARROW_UP = 82 as u32;
 
-def pong_update = fun(state : ptr Pong, e : ptr Event) {
+fun pong_update(state : ptr Pong, e : ptr Event) {
   // handle input events
   if e.tag == sdl_event_tag {
     let event_type = e.input.event_type;
@@ -148,7 +148,7 @@ def pong_update = fun(state : ptr Pong, e : ptr Event) {
   }
 };
 
-def render_pong = fun(r : SdlRendererHandle, state : ptr Pong) {
+fun render_pong(r : SdlRendererHandle, state : ptr Pong) {
   sdl_set_draw_color(r, 255 as u8, 0 as u8, 0 as u8, 255 as u8);
 
   // Paddle p1
@@ -164,7 +164,7 @@ def render_pong = fun(r : SdlRendererHandle, state : ptr Pong) {
   sdl_fill_rect(r, ref rect);
 };
 
-def buffered_pong_update = fun(g : ptr BufferedPong, buffer : ptr EventList) {
+fun buffered_pong_update(g : ptr BufferedPong, buffer : ptr EventList) {
   let len = buffer.length;
   if g.event_count > len {
     g.event_count = 0;

@@ -14,7 +14,7 @@ const SYNTAX : &'static [&'static str] =
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TokenType {
-  Symbol, FloatLiteral, IntLiteral,
+  Symbol, Syntax, FloatLiteral, IntLiteral,
   StringLiteral, Whitespace, Newline, Comment
 }
 
@@ -36,7 +36,7 @@ impl <'l> fmt::Display for Token<'l> {
 impl <'l> Token<'l> {
   pub fn literal(&self) -> Option<&str> {
     match self.token_type {
-      Symbol | Whitespace | Newline | Comment => None,
+      Symbol | Syntax | Whitespace | Newline | Comment => None,
       FloatLiteral | IntLiteral | StringLiteral
         => Some(&self.string)
     }
@@ -45,7 +45,7 @@ impl <'l> Token<'l> {
   pub fn can_ignore(&self) -> bool {
     match self.token_type {
       Whitespace | Newline | Comment => true,
-      Symbol | FloatLiteral | IntLiteral | StringLiteral => false,
+      Symbol | Syntax | FloatLiteral | IntLiteral | StringLiteral => false,
     }
   }
 
@@ -262,7 +262,7 @@ impl <'l> TokenIterator<'l> {
     // TODO: this is slow
     for s in SYNTAX {
       if self.append_string(s) {
-        return Some(self.complete_token(TokenType::Symbol));
+        return Some(self.complete_token(TokenType::Syntax));
       }
     }
     return None;

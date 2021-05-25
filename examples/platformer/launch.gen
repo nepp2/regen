@@ -5,7 +5,7 @@ def height = 600;
 def window = create_window("JumpMan", width, height);
 def window_id = sdl_get_window_id(window);
 
-def BufferedGame = struct {
+type BufferedGame = struct {
   event_count : i64,
   initial_state : Game,
   state : Game,
@@ -15,11 +15,11 @@ def initial_game_state = {
   init Game()
 };
 
-def new_buffered_game = fun(g : Game) {
+fun new_buffered_game(g : Game) {
   init BufferedGame(0, g, g);
 };
 
-def buffered_game_update = fun(g : ptr BufferedGame, buffer : ptr EventList) {
+fun buffered_game_update(g : ptr BufferedGame, buffer : ptr EventList) {
   let len = buffer.length;
   if g.event_count > len {
     g.event_count = 0;
@@ -44,7 +44,7 @@ reactive frame_events = container(
   }
 );
 
-def handle_game_window_events = fun() {
+fun handle_game_window_events() {
   for i in 0 to frame_events.length {
     let e = EventList::get_ptr(frame_events, i);
     if e.tag == sdl_event_tag {

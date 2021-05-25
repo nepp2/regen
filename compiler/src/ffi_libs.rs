@@ -152,7 +152,7 @@ pub fn load_ffi_libs(e : Env) {
 
   let c = &e.c;
   for (n, t) in &c.core_types {
-    define_global(e, n, Ptr::to_u64(*t), e.c.type_tag);
+    define_global(e, n, Ptr::to_u64(t.0), e.c.type_tag);
   }
 
   let void = e.c.void_tag;

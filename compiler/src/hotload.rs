@@ -147,7 +147,7 @@ fn compile_cell(
       }
     }
   };
-  let expr_type = types::type_as_function(&function.t).unwrap().returns;
+  let expr_type = types::type_as_function(function.t).unwrap().returns;
   let (flag, cc) = {
     if src.is_reactive {
       let inner =
@@ -280,7 +280,7 @@ fn register_reactive_cell(
 }
 
 fn get_reactive_inner_type(env : Env, t : TypeHandle) -> Option<TypeHandle> {
-  if let Some(poly) = types::type_as_poly(&t) {
+  if let Some(poly) = types::type_as_poly(t) {
     if poly.t == env.c.reactive_constructor_tag {
       return Some(poly.param);
     }
@@ -372,7 +372,7 @@ fn update_observer(mut env : Env, hs : &mut HotloadState, uid : CellUid, flush_l
     else { return Ok(Unchanged); };
   let returns_bool = {
     let f = rc.update_handler;
-    let return_type = types::type_as_function(&f.t).unwrap().returns;
+    let return_type = types::type_as_function(f.t).unwrap().returns;
     return_type == env.c.bool_tag
   };
   if returns_bool {

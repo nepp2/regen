@@ -2,6 +2,6 @@
 embed import("regen_libs/list.gen");
 embed import("regen_libs/sdl2.gen");
 embed import("examples/platformer/window.gen");
-embed import("examples/time_control/slider.gen");
+// embed import("examples/time_control/slider.gen");
 embed import("examples/platformer/game.gen");
 //embed import("examples/platformer/launch.gen");

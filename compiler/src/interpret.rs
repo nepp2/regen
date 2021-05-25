@@ -29,7 +29,7 @@ pub fn interpret_function(f : *const Function, args : &[u64], return_addr : Opti
       // if the caller doesn't supply a return address,
       // make room for the return value on the stack
       let t = unsafe { (*f).t };
-      let fun = types::type_as_function(&t).unwrap();
+      let fun = types::type_as_function(t).unwrap();
       return_offset += fun.returns.size_of;
       &mut stack[0] as *mut u8 as *mut ()
     }
@@ -110,7 +110,7 @@ fn execute_binary_op(
 {
   use Operator::*;
   use Primitive::*;
-  let t = types::type_as_primitive(&a.t).unwrap();
+  let t = types::type_as_primitive(a.t).unwrap();
   match t {
     I64 => binop_num!(frame, var, op, a, b, i64),
     I32 => binop_num!(frame, var, op, a, b, i32),
@@ -141,7 +141,7 @@ fn execute_unary_op(
 {
   use Operator::*;
   use Primitive::*;
-  let t = types::type_as_primitive(&a.t).unwrap();
+  let t = types::type_as_primitive(a.t).unwrap();
   match t {
     I64 => signed_unary_op!(frame, var, op, a, i64),
     I32 => signed_unary_op!(frame, var, op, a, i32),
@@ -174,11 +174,11 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>) {
               frame.set_local(var, &v);
             }
             Array(element_vals) => {
-              let info = types::type_as_array(&var.t).expect("expected array");
+              let info = types::type_as_array(var.t).expect("expected array");
               frame.initialise_array(var, info.inner, element_vals)
             }
             Init(field_vals) => {
-              let info = types::type_as_struct(&var.t).expect("expected struct");
+              let info = types::type_as_struct(var.t).expect("expected struct");
               frame.initialise_struct(var, info.field_offsets, field_vals)
             }
             ZeroInit => {
@@ -189,7 +189,7 @@ fn interpreter_loop(shadow_stack : &mut Vec<Frame>) {
             FieldIndex { struct_addr, index } => {
               let ptr_type = struct_addr.t;
               let t = types::deref_pointer_type(ptr_type).unwrap();
-              let info = types::type_as_struct(&t).expect("expected struct");
+              let info = types::type_as_struct(t).expect("expected struct");
               let field_offset = info.field_offsets[index as usize];
               let tuple_ptr : *const u8 = frame.get_local(struct_addr);
               let field_ptr = unsafe { tuple_ptr.add(field_offset as usize) };
@@ -444,8 +444,8 @@ unsafe fn cast_and_store(src : *const (), dest : *mut (), src_type : TypeHandle,
   }
   else {
     use Primitive::*;
-    let src_prim = types::type_as_primitive(&src_type).unwrap();
-    let dest_prim = types::type_as_primitive(&dest_type).unwrap();
+    let src_prim = types::type_as_primitive(src_type).unwrap();
+    let dest_prim = types::type_as_primitive(dest_type).unwrap();
     match src_prim {
       I64 => cast_to_any!(src, i64, dest, dest_prim),
       I32 => cast_to_any!(src, i32, dest, dest_prim),

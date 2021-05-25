@@ -1,9 +1,9 @@
 
-def Vec2 = struct { x : i64, y : i64 };
+type Vec2 = struct { x : i64, y : i64 };
 
-def Game = struct {};
+type Game = struct {};
 
-def game_update = fun(state : ptr Game, e : ptr Event) {
+fun game_update(state : ptr Game, e : ptr Event) {
   // // handle input events
   // if e.tag == sdl_event_tag {
   //   let event_type = e.input.event_type;
@@ -36,7 +36,7 @@ def game_update = fun(state : ptr Game, e : ptr Event) {
   // }
 };
 
-def render_game = fun(r : SdlRendererHandle, state : ptr Game) {
+fun render_game(r : SdlRendererHandle, state : ptr Game) {
   sdl_set_draw_color(r, 255 as u8, 0 as u8, 0 as u8, 255 as u8);
 
   // Paddle p1

@@ -28,7 +28,7 @@ impl fmt::Display for DebugDisplay {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self.t.kind {
       Kind::Primitive => {
-        match types::type_as_primitive(&self.t).unwrap() {
+        match types::type_as_primitive(self.t).unwrap() {
           Primitive::I64 =>
             write!(f, "{}", unsafe { *(self.p as *const i64) }),
           Primitive::I32 =>
@@ -60,7 +60,7 @@ impl fmt::Display for DebugDisplay {
         write!(f, "array")
       }
       Kind::Named => {
-        let i = types::type_as_named(&self.t).unwrap();
+        let i = types::type_as_named(self.t).unwrap();
         if i.name.as_str() == "expr" {
           let e = unsafe { *(self.p as *const Expr) };
           write!(f, "{}", e)
@@ -74,7 +74,7 @@ impl fmt::Display for DebugDisplay {
         write!(f, "{}", v)
       }
       Kind::Poly => {
-        let i = types::type_as_poly(&self.t).unwrap();
+        let i = types::type_as_poly(self.t).unwrap();
         write!(f, "poly({}, {})", display(self.p, i.t), i.param)
       }
     }

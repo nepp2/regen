@@ -1,17 +1,17 @@
 
 def WatcherConstructor = poly_type(ReactiveConstructor, String);
 
-def create_watcher = fun(path : String) {
+fun create_watcher(path : String) {
   new_watcher_constructor(env, ref path) as WatcherConstructor;
 };
 
 def TimerConstructor = poly_type(ReactiveConstructor, i64);
 
-def create_timer = fun(millisecond_interval : i64) {
+fun create_timer(millisecond_interval : i64) {
   new_timer_constructor(env, millisecond_interval) as TimerConstructor;
 };
 
-def create_container = fun(
+fun create_container(
   input_signal : Signal,
   state_type : Type,
   initial_state : ptr void,
@@ -20,7 +20,7 @@ def create_container = fun(
   new_state_constructor(input_signal, state_type, initial_state, update_function)
 };
 
-def create_stream = fun(
+fun create_stream(
   input_signal : Signal,
   state_type : Type,
   poll_function : ptr void)
@@ -28,11 +28,11 @@ def create_stream = fun(
   new_poll_constructor(input_signal, state_type, poll_function)
 };
 
-def load_module = fun(path : String) {
+fun load_module(path : String) {
   load_expr(env, ref path)
 }
 
-def import = fun(path : String) {
+fun import(path : String) {
   let symbol_expr = new_symbol_expr(env, ref path, #import_symbol);
   let path_expr = new_string_expr(env, ref path, #import_path);
   #(def_scope {
@@ -41,26 +41,26 @@ def import = fun(path : String) {
   })
 }
 
-def load_library = fun(path : String) {
+fun load_library(path : String) {
   ffi_load_library(ref path)
 }
 
-def load_library_symbol = fun(lib : Library, path : String) {
+fun load_library_symbol(lib : Library, path : String) {
   ffi_load_library_symbol(lib, ref path)
 }
 
-def min = fun(a : i64, b : i64) {
+fun min(a : i64, b : i64) {
   if a < b { a } else { b }
 }
 
-def max = fun(a : i64, b : i64) {
+fun max(a : i64, b : i64) {
   if a > b { a } else { b }
 }
 
-def min_u64 = fun(a : u64, b : u64) {
+fun min_u64(a : u64, b : u64) {
   if a < b { a } else { b }
 }
 
-def max_u64 = fun(a : u64, b : u64) {
+fun max_u64(a : u64, b : u64) {
   if a > b { a } else { b }
 }

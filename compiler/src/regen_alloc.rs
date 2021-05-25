@@ -25,12 +25,12 @@ impl <T> Ptr<T> {
     v.p as i64
   }
 
-  pub fn from_ptr(p : *mut T) -> Self {
+  pub unsafe fn from_ptr(p : *mut T) -> Self {
     // TODO: mark as unsafe
     Ptr { p }
   }
 
-  pub fn from_u64(v : u64) -> Self {
+  pub unsafe fn from_u64(v : u64) -> Self {
     // TODO: mark as unsafe
     Ptr { p: v as *mut T }
   }
