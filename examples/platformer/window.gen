@@ -1,5 +1,5 @@
 
-def create_window = fun(title : string, width : i64, height : i64) {
+def create_window = fun(title : String, width : i64, height : i64) {
   sdl_init(SDL_INIT_VIDEO);
   sdl_create_window(
     title.data, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,

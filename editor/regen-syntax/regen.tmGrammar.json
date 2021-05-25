@@ -13,7 +13,7 @@
     "main": {
       "patterns": [
         {
-          "match": "\\b(def|fun|if|else|while|for|let|as|print|struct|init|embed|true|false|ptr|ref|quote|typeof|return|break|label|repeat|sym|fn|cfun|ptr_index|array_len|sized_array|reactive|container|stream|observe)\\b",
+          "match": "\\b(def|fun|if|else|while|for|let|as|print|struct|init|embed|true|false|ptr|ref|quote|typeof|return|break|label|repeat|sym|fn|cfun|ptr_index|array_len|sized_array|reactive|container|stream|observe|typeof|type)\\b",
           "name": "keyword.regen"
         },
         {

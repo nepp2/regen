@@ -84,7 +84,7 @@ impl ExprBuilder {
 
 pub fn struct_type_macro(nb : &ExprBuilder, names : Vec<Expr>, types : Vec<Expr>) -> Expr {
   let names = nb.array_expr("symbol", names);
-  let types = nb.array_expr("type", types);
+  let types = nb.array_expr("Type", types);
   let tstr = nb.parse("
     {
       let names = $names;
@@ -92,7 +92,7 @@ pub fn struct_type_macro(nb : &ExprBuilder, names : Vec<Expr>, types : Vec<Expr>
       struct_type(
         array_len(names),
         (ref names) as ptr_type(symbol),
-        (ref types) as ptr_type(type),
+        (ref types) as ptr_type(Type),
       )
     }
   ");
@@ -100,12 +100,12 @@ pub fn struct_type_macro(nb : &ExprBuilder, names : Vec<Expr>, types : Vec<Expr>
 }
 
 pub fn fn_type_macro(nb : &ExprBuilder, arg_types : Vec<Expr>, ret : Expr, is_cfun : bool) -> Expr {
-  let array = nb.array_expr("type", arg_types);
+  let array = nb.array_expr("Type", arg_types);
   let fn_type_call = nb.parse("
     {
       let args = $array;
       fun_type(
-        (ref args) as ptr_type(type),
+        (ref args) as ptr_type(Type),
         array_len(args),
         $ret,
         false,
@@ -116,7 +116,7 @@ pub fn fn_type_macro(nb : &ExprBuilder, arg_types : Vec<Expr>, ret : Expr, is_cf
     {
       let args = $array;
       fun_type(
-        (ref args) as ptr_type(type),
+        (ref args) as ptr_type(Type),
         array_len(args),
         $ret,
         true,
@@ -129,6 +129,11 @@ pub fn fn_type_macro(nb : &ExprBuilder, arg_types : Vec<Expr>, ret : Expr, is_cf
   else {
     template(fn_type_call, &[array, ret])
   }
+}
+
+pub fn named_type_macro(nb : &ExprBuilder, name : Expr, type_expr : Expr) -> Expr {
+  let template_call = nb.parse("named_type(sym $name, $type_expr)");
+  template(template_call, &[name, type_expr])
 }
 
 pub fn template_macro(nb : &ExprBuilder, e : Expr, args : Vec<Expr>) -> Expr {

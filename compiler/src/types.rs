@@ -154,7 +154,17 @@ pub fn type_as_function(t : &TypeInfo) -> Option<&FunctionInfo> {
   None
 }
 
+fn strip_names(t : &TypeInfo) -> &TypeInfo {
+  if let Some(info) = type_as_named(t) {
+    strip_names(&info.inner)
+  }
+  else {
+    t
+  }
+}
+
 pub fn type_as_struct(t : &TypeInfo) -> Option<&StructInfo> {
+  let t = strip_names(t);
   if let Kind::Struct = t.kind {
     return Some(unsafe { &*(t.info as *const StructInfo) })
   }
@@ -294,8 +304,8 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
   let type_tag = new_type(Kind::Type, 8, 0);
 
   let symbol_tag = named_type(to_symbol(st, "symbol"), u64_tag);
-  let signal_tag = named_type(to_symbol(st, "signal"), u64_tag);
-  let reactive_constructor_tag = named_type(to_symbol(st, "reactive_constructor"), u64_tag);
+  let signal_tag = named_type(to_symbol(st, "Signal"), u64_tag);
+  let reactive_constructor_tag = named_type(to_symbol(st, "ReactiveConstructor"), u64_tag);
 
   let string_tag = struct_type(
     alloc_slice([data_sym, len_sym]),
@@ -315,7 +325,7 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
 
     core_types:
       vec![
-        ("type", type_tag),
+        ("Type", type_tag),
         ("u64", u64_tag),
         ("u32", u32_tag),
         ("u16", u16_tag),
@@ -328,10 +338,10 @@ pub fn core_types(st : SymbolTable) -> CoreTypes {
         ("bool", bool_tag),
         ("expr", expr_tag),
         ("node_slice", expr_slice_tag),
-        ("string", string_tag),
+        ("String", string_tag),
         ("symbol", symbol_tag),
-        ("reactive_constructor", reactive_constructor_tag),
-        ("signal", signal_tag),
+        ("ReactiveConstructor", reactive_constructor_tag),
+        ("Signal", signal_tag),
       ],
   }
 }

@@ -1,19 +1,19 @@
 
-def WatcherConstructor = poly_type(reactive_constructor, string);
+def WatcherConstructor = poly_type(ReactiveConstructor, String);
 
-def create_watcher = fun(path : string) {
+def create_watcher = fun(path : String) {
   new_watcher_constructor(env, ref path) as WatcherConstructor;
 };
 
-def TimerConstructor = poly_type(reactive_constructor, i64);
+def TimerConstructor = poly_type(ReactiveConstructor, i64);
 
 def create_timer = fun(millisecond_interval : i64) {
   new_timer_constructor(env, millisecond_interval) as TimerConstructor;
 };
 
 def create_container = fun(
-  input_signal : signal,
-  state_type : type,
+  input_signal : Signal,
+  state_type : Type,
   initial_state : ptr void,
   update_function : ptr void)
 {
@@ -21,18 +21,18 @@ def create_container = fun(
 };
 
 def create_stream = fun(
-  input_signal : signal,
-  state_type : type,
+  input_signal : Signal,
+  state_type : Type,
   poll_function : ptr void)
 {
   new_poll_constructor(input_signal, state_type, poll_function)
 };
 
-def load_module = fun(path : string) {
+def load_module = fun(path : String) {
   load_expr(env, ref path)
 }
 
-def import = fun(path : string) {
+def import = fun(path : String) {
   let symbol_expr = new_symbol_expr(env, ref path, #import_symbol);
   let path_expr = new_string_expr(env, ref path, #import_path);
   #(def_scope {
@@ -41,11 +41,11 @@ def import = fun(path : string) {
   })
 }
 
-def load_library = fun(path : string) {
+def load_library = fun(path : String) {
   ffi_load_library(ref path)
 }
 
-def load_library_symbol = fun(lib : Library, path : string) {
+def load_library_symbol = fun(lib : Library, path : String) {
   ffi_load_library_symbol(lib, ref path)
 }
 

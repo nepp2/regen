@@ -583,10 +583,21 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
     }
     "fun" => {
       ps.pop_type(TokenType::Symbol)?;
+      // Check if there is a name
+      let name = {
+        if ps.peek()?.string == "(" {
+          None
+        }
+        else {
+          let paren_precedence = infix_precedence(ps, "(");
+          let name = pratt_parse_non_value(ps, paren_precedence)?;
+          Some(name)
+        }
+      };
       // arguments
+      ps.expect("(")?;
       let arg_start = ps.peek_marker();
       let mut arg_exprs = vec![];
-      ps.expect("(")?;
       parse_function_arg_list(ps, &mut arg_exprs)?;
       ps.expect(")")?;
       let args = ps.list_expr(Syntax, arg_exprs, arg_start);
@@ -599,7 +610,15 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       };
       // body
       let body = parse_block_in_braces(ps)?;
-      ps.list_expr(Fun, vec![args, ret, body], start)
+      let fun_expr = ps.list_expr(Fun, vec![args, ret, body], start);
+      if let Some(name) = name {
+        // this is a named function def
+        ps.list_expr(Def, vec![name, fun_expr], start)
+      }
+      else {
+        // this is an anonymous function def
+        fun_expr
+      }
     }
     "def" => {
       ps.pop_type(TokenType::Symbol)?;
@@ -607,6 +626,17 @@ fn try_parse_keyword_term(ps : &mut ParseState) -> Result<Option<Expr>, Error> {
       ps.pop_syntax("=")?;
       let value = pratt_parse(ps, kp)?;
       ps.list_expr(Def, vec![name, value], start)
+    }
+    "type" => {
+      ps.pop_type(TokenType::Symbol)?;
+      let name = pratt_parse_non_value(ps, kp)?;
+      ps.pop_syntax("=")?;
+      let type_expr = pratt_parse(ps, kp)?;
+      let named_type = {
+        let b = ExprBuilder::new(type_expr.loc(), ps.st);
+        templates::named_type_macro(&b, name, type_expr)
+      };
+      ps.list_expr(Def, vec![name, named_type], start)
     }
     "reactive" => {
       ps.pop_type(TokenType::Symbol)?;

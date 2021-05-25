@@ -206,7 +206,7 @@ def render_slider = fun (slider : ptr Slider) {
   sdl_present(r);
 };
 
-def create_slider_view = fun(name : string, width : i64, height : i64) {
+def create_slider_view = fun(name : String, width : i64, height : i64) {
   let window = create_window(name, width, height);
   let window_id = sdl_get_window_id(window);
   let renderer =
