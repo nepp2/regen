@@ -1,15 +1,53 @@
 
-def create_window = fun(title : String, width : i64, height : i64) {
+type Window = struct {
+  id : i64,
+  sdl_id : u32,
+  handle : SdlWindowHandle,
+  r : SdlRendererHandle,
+  w : i64,
+  h : i64,
+}
+
+embed define_list_type(#WindowList, #Window);
+
+def _active_windows = WindowList::new();
+
+fun create_window(id : i64, title : String, width : i64, height : i64) {
+  // destroy the window if it already exists
+  for i in 0 to _active_windows.length {
+    let w = WindowList::get_ptr(_active_windows, i);
+    if w.id == id {
+      sdl_destroy_window(w.handle);
+      *w = WindowList::pop(_active_windows);
+      break;
+    }
+  }
+
+  // create the new window
   sdl_init(SDL_INIT_VIDEO);
-  sdl_create_window(
+  let handle = sdl_create_window(
     title.data, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-    width as i32, height as i32, SDL_WINDOW_SHOWN)
+    width as i32, height as i32, SDL_WINDOW_SHOWN);
+  let r = sdl_create_renderer(handle, -1 as i32, SDL_RENDERER_ACCELERATED);
+  sdl_set_blend_mode(r, 1 as u32);
+  let sdl_id = sdl_get_window_id(handle);
+  let w = init Window(id, sdl_id, handle, r, width, height);
+  WindowList::add(_active_windows, w);
+  w
 };
 
-def create_renderer = fun(window : SdlWindowHandle) {
-  let r = sdl_create_renderer(window, -1 as i32, SDL_RENDERER_ACCELERATED);
-  sdl_set_blend_mode(r, 1 as u32);
-  r
+// def create_window = fun(title : String, width : i64, height : i64) {
+//   sdl_init(SDL_INIT_VIDEO);
+//   let window = sdl_create_window(
+//     title.data, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+//     width as i32, height as i32, SDL_WINDOW_SHOWN);
+//   let r = sdl_create_renderer(window, -1 as i32, SDL_RENDERER_ACCELERATED);
+//   sdl_set_blend_mode(r, 1 as u32);
+//   window
+// };
+
+fun get_renderer(window : SdlWindowHandle) {
+  sdl_get_renderer(window)
 }
 
 def tick_event_tag = 1;
@@ -24,7 +62,7 @@ def Event = struct {
 
 embed define_list_type(#EventList, #Event);
 
-def poll_input = fun(es : EventList, tick : i64) {
+fun poll_input(es : EventList, tick : i64) {
   let start_len = es.length;
   let e = zero_init SdlEvent;
   while sdl_poll_event(ref e) == (1 as i32) {
@@ -35,7 +73,7 @@ def poll_input = fun(es : EventList, tick : i64) {
   changed
 }
 
-def flush_and_poll_input = fun(es : EventList, tick : i64) {
+fun flush_and_poll_input(es : EventList, tick : i64) {
   if es.length > 0 {
     EventList::clear(es);
     poll_input(es, tick);
@@ -44,4 +82,8 @@ def flush_and_poll_input = fun(es : EventList, tick : i64) {
   else {
     poll_input(es, tick)
   }
+}
+
+fun sdl_rect(x : i64, y : i64, w : i64, h : i64) {
+  init SdlRect(x as i32, y as i32, w as i32, h as i32)
 }

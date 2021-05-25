@@ -1,7 +1,26 @@
 
 embed import("regen_libs/list.gen");
 embed import("regen_libs/sdl2.gen");
-embed import("examples/platformer/window.gen");
-// embed import("examples/time_control/slider.gen");
+embed import("regen_libs/window.gen");
+embed import("examples/time_control/slider.gen");
+
+def width = 800;
+def height = 600;
+
+def window = create_window(0, "JumpMan", width, height);
+def slider_window = create_window(1, "Timeline", 400, 50);
+
+embed import("examples/platformer/sprites.gen");
 embed import("examples/platformer/game.gen");
-//embed import("examples/platformer/launch.gen");
+embed import("examples/platformer/state.gen");
+
+{
+  // clear screen
+  sdl_set_draw_color(window.r, 255 as u8, 255 as u8, 255 as u8, 255 as u8);
+  sdl_clear(window.r);
+
+  // draw game
+  render_game(window.r, ref game.state);
+  sdl_present(window.r);
+}
+

@@ -9,9 +9,7 @@ def onion_image = sdl_img_load("examples/time_control/onion.png".data);
 type SliderView = struct {
   width : i64,
   height : i64,
-  window : SdlWindowHandle,
-  window_id : u32,
-  renderer : SdlRendererHandle,
+  window : Window,
   record_texture : SdlTextureHandle,
   pause_texture : SdlTextureHandle,
   stop_texture : SdlTextureHandle,
@@ -101,16 +99,17 @@ fun slider_handle_event(slider : ptr Slider, event : Event) {
   }
   // handle time events
   let e = ref event.input;
+  let window_id = slider.view.window.sdl_id;
   if e.event_type == SDL_MOUSEDOWN {
     let me = to_mouse_button_event(e);
-    if me.window_id == slider.view.window_id {
+    if me.window_id == window_id {
       slider_handle_click(slider, me.x as i64, me.y as i64);
       return true;
     }
   }
   if e.event_type == SDL_MOUSEUP {
     let me = to_mouse_button_event(e);
-    if me.window_id == slider.view.window_id {
+    if me.window_id == window_id {
       slider.mouse_down = false;
       return true;
     }
@@ -118,7 +117,7 @@ fun slider_handle_event(slider : ptr Slider, event : Event) {
   if e.event_type == SDL_MOUSEMOTION {
     if slider.mouse_down {
       let mm = to_mouse_motion_event(e);
-      if mm.window_id == slider.view.window_id {
+      if mm.window_id == window_id {
         update_slider(slider, mm.x as i64, mm.y as i64);
         return true;
       }
@@ -144,16 +143,12 @@ fun slider_handle_events(slider : ptr Slider, es : ptr EventList) {
   changes
 }
 
-fun new_rect(x : i64, y : i64, w : i64, h : i64) {
-  init SdlRect(x as i32, y as i32, w as i32, h as i32)
-}
-
 fun set_color(rend: SdlRendererHandle, r : i64, g : i64, b : i64) {
   sdl_set_draw_color(rend, r as u8, g as u8, b as u8, 255 as u8);
 }
 
 fun render_slider (slider : ptr Slider) {
-  let r = slider.view.renderer;
+  let r = slider.view.window.r;
   let v = ref slider.view;
   // render
   set_color(r, 200, 200, 200);
@@ -206,25 +201,24 @@ fun render_slider (slider : ptr Slider) {
   sdl_present(r);
 };
 
-fun create_slider_view(name : String, width : i64, height : i64) {
-  let window = create_window(name, width, height);
-  let window_id = sdl_get_window_id(window);
-  let renderer =
-    sdl_create_renderer(window, -1 as i32, SDL_RENDERER_ACCELERATED);
-  let record_texture = sdl_create_texture_from_surface(renderer, record_image);
-  let pause_texture = sdl_create_texture_from_surface(renderer, pause_image);
-  let stop_texture = sdl_create_texture_from_surface(renderer, stop_image);
-  let onion_texture = sdl_create_texture_from_surface(renderer, onion_image);
+fun create_slider_view(window : Window) {
+  let width = window.w;
+  let height = window.h;
+
+  let record_texture = sdl_create_texture_from_surface(window.r, record_image);
+  let pause_texture = sdl_create_texture_from_surface(window.r, pause_image);
+  let stop_texture = sdl_create_texture_from_surface(window.r, stop_image);
+  let onion_texture = sdl_create_texture_from_surface(window.r, onion_image);
 
   let button_size = height;
-  let record_rect = new_rect(0, 0, button_size, button_size);
-  let stop_rect = new_rect(button_size, 0, button_size, button_size);
-  let onion_rect = new_rect(button_size * 2, 0, button_size, button_size);
+  let record_rect = sdl_rect(0, 0, button_size, button_size);
+  let stop_rect = sdl_rect(button_size, 0, button_size, button_size);
+  let onion_rect = sdl_rect(button_size * 2, 0, button_size, button_size);
   let slider_offset = button_size * 3;
   let slider_length = width - slider_offset;
-  let bar_rect = new_rect(slider_offset, 0, slider_length, height);
+  let bar_rect = sdl_rect(slider_offset, 0, slider_length, height);
   init SliderView(
-    width, height, window, window_id, renderer,
+    width, height, window,
     record_texture, pause_texture, stop_texture, onion_texture,
     record_rect, stop_rect, onion_rect, bar_rect, button_size,
   )

@@ -189,8 +189,6 @@ reactive frame_events = container(
   }
 );
 
-def slider_view = create_slider_view("Events", 400, 50);
-
 reactive slider = container(
   observe frame_events,
   create_slider(slider_view),
@@ -229,7 +227,7 @@ reactive pong_states = container(
   }
 );
 
-def renderer = create_renderer(window);
+def renderer = get_renderer(window);
 
 {
   // clear screen

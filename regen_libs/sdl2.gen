@@ -7,6 +7,10 @@ def SDL_WINDOW_SHOWN = 4 as u32;
 def SDL_WINDOW_ALWAYS_ON_TOP = 32768 as u32;
 def SDL_RENDERER_ACCELERATED = 2 as u32;
 
+def SDL_FLIP_NONE = 0 as u32;
+def SDL_FLIP_HORIZONTAL = 1 as u32;
+def SDL_FLIP_VERTICAL = 2 as u32;
+
 def SDL_DEFAULT_RENDER_INDEX = -1 as i32;
 
 def sdl2 = load_library("shared_libs/SDL2");
@@ -101,6 +105,10 @@ def sdl_get_window_id =
   load_library_symbol(sdl2, "SDL_GetWindowID")
     as cfun (win : SdlWindowHandle) => u32;
 
+def sdl_get_window_size =
+  load_library_symbol(sdl2, "SDL_GetWindowSize")
+    as cfun (win : SdlWindowHandle, width : ptr i32, height : ptr i32) => void;
+
 def sdl_set_window_position =
   load_library_symbol(sdl2, "SDL_SetWindowPosition")
     as cfun(window : SdlWindowHandle, x : i32, y : i32) => void;
@@ -120,6 +128,10 @@ def sdl_create_renderer =
       driver_index : i32,
       flags : u32,
     ) => SdlRendererHandle;
+
+def sdl_get_renderer =
+  load_library_symbol(sdl2, "SDL_GetRenderer")
+    as cfun(window : SdlWindowHandle) => SdlRendererHandle;
 
 def sdl_set_blend_mode =
   load_library_symbol(sdl2, "SDL_SetRenderDrawBlendMode")
@@ -158,6 +170,18 @@ def sdl_render_copy =
       tex : SdlTextureHandle,
       src : ptr SdlRect,
       dest : ptr SdlRect
+    ) => void;
+
+def sdl_render_copy_ex =
+  load_library_symbol(sdl2, "SDL_RenderCopyEx")
+    as cfun(
+      r : SdlRendererHandle,
+      tex : SdlTextureHandle,
+      src : ptr SdlRect,
+      dest : ptr SdlRect,
+      angle : u64,
+      center : ptr void,
+      flip : u32,
     ) => void;
 
 def sdl_create_texture_from_surface =

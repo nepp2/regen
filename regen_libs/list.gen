@@ -65,6 +65,12 @@ fun define_list_type(name : expr, t : expr) {
         ptr_index(l.data, i) = v;
       }
 
+      fun pop(l : ($name)::list) {
+        let v = ($name)::get(l, l.length - 1);
+        l.length = l.length - 1;
+        v
+      };
+
       ($name)::list
   });
 };

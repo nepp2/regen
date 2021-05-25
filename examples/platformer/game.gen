@@ -1,45 +1,18 @@
 
 type Vec2 = struct { x : i64, y : i64 };
 
-type Game = struct {};
-
-fun game_update(state : ptr Game, e : ptr Event) {
-  // // handle input events
-  // if e.tag == sdl_event_tag {
-  //   let event_type = e.input.event_type;
-  //   if event_type == SDL_KEYDOWN {
-  //     let k = to_keyboard_event(ref e.input);
-  //     if k.window_id == window_id {
-  //       if k.keysym.scancode == ARROW_DOWN {
-  //         // TODO
-  //       }
-  //       if k.keysym.scancode == ARROW_UP {
-  //         // TODO
-  //       }
-  //     }
-  //   }
-  //   if event_type == SDL_KEYUP {
-  //     let k = to_keyboard_event(ref e.input);
-  //     if k.window_id == window_id {
-  //       if k.keysym.scancode == ARROW_DOWN {
-  //         // TODO
-  //       }
-  //       if k.keysym.scancode == ARROW_UP {
-  //         // TODO
-  //       }
-  //     }
-  //   }
-  // }
-  // // handle tick events
-  // if e.tag == tick_event_tag {
-  //   // TODO
-  // }
+type Game = struct {
+  frame : i64
 };
 
-fun render_game(r : SdlRendererHandle, state : ptr Game) {
-  sdl_set_draw_color(r, 255 as u8, 0 as u8, 0 as u8, 255 as u8);
+fun game_update(g : ptr Game, e : ptr Event) {
+  // handle tick events
+  if e.tag == tick_event_tag {
+    g.frame = g.frame + 1;
+  }
+};
 
-  // Paddle p1
-  let rect = init SdlRect(50 as i32, 50 as i32, 200 as i32, 200 as i32);
-  sdl_fill_rect(r, ref rect);
+fun render_game(r : SdlRendererHandle, g : ptr Game) {
+  draw_anim(r, 0, 0, ref king_run_anim, g.frame);
+  draw_anim(r, 150, 150, ref pig_run_anim, g.frame);
 };

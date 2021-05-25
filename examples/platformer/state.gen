@@ -1,10 +1,4 @@
 
-def width = 800;
-def height = 600;
-
-def window = create_window("JumpMan", width, height);
-def window_id = sdl_get_window_id(window);
-
 type BufferedGame = struct {
   event_count : i64,
   initial_state : Game,
@@ -12,7 +6,7 @@ type BufferedGame = struct {
 };
 
 def initial_game_state = {
-  init Game()
+  init Game(0)
 };
 
 fun new_buffered_game(g : Game) {
@@ -32,7 +26,7 @@ fun buffered_game_update(g : ptr BufferedGame, buffer : ptr EventList) {
   }
 }
 
-reactive frame_tick = create_timer(30);
+reactive frame_tick = create_timer(1000/30);
 
 reactive frame_events = container(
   observe frame_tick,
@@ -50,13 +44,13 @@ fun handle_game_window_events() {
     if e.tag == sdl_event_tag {
       let event_type = e.input.event_type;
       if event_type == SDL_QUIT {
-        sdl_destroy_window(window);
+        sdl_destroy_window(window.handle);
       }
     }
   }
 }
 
-def slider_view = create_slider_view("Timeline", 400, 50);
+def slider_view = create_slider_view(slider_window);
 
 reactive slider = container(
   observe frame_events,
@@ -71,16 +65,4 @@ def game_events = slider_events_slice(ref slider);
 reactive game = {
   let g = new_buffered_game(initial_game_state);
   container(observe game_events, g, buffered_game_update)
-}
-
-def renderer = create_renderer(window);
-
-{
-  // clear screen
-  sdl_set_draw_color(renderer, 0 as u8, 0 as u8, 0 as u8, 0 as u8);
-  sdl_clear(renderer);
-
-  // draw game
-  render_game(renderer, ref game.state);
-  sdl_present(renderer);
 }

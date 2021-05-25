@@ -578,25 +578,29 @@ fn hotload_input_changes(
   
   let change_flush = std::cmp::min(forced_flush, input_flush);
 
-  if change_flush < FlushLevel::NoFlush {
-    env.broken_cells.remove(&uid);
-  }
-
   // Don't update unless the build level can support the flush level
   let incompleteness_flush = {
-    if env.broken_cells.contains(&uid) {
-      FlushLevel::NoFlush
-    }
-    else {
-      let status = env.cell_build_status.get(&uid).cloned().unwrap_or(BuildStatus::Empty);
-      match status {
-        BuildStatus::Empty => FlushLevel::Compile,
-        BuildStatus::Compiled => FlushLevel::Evaluate,
-        BuildStatus::Evaluated => FlushLevel::NoFlush,
-      }
+    let status = env.cell_build_status.get(&uid).cloned().unwrap_or(BuildStatus::Empty);
+    match status {
+      BuildStatus::Empty => FlushLevel::Compile,
+      BuildStatus::Compiled => FlushLevel::Evaluate,
+      BuildStatus::Evaluated => FlushLevel::NoFlush,
     }
   };
+  
+  // Check if the cell already failed to update
+  if env.broken_cells.contains(&uid) {
+    // Only try updating it again if something actually changed
+    if change_flush <= incompleteness_flush {
+      env.broken_cells.remove(&uid);
+    }
+    else {
+      return Ok(());
+    }
+  }
+  
   let flush_level = std::cmp::min(change_flush, incompleteness_flush);
+
   if flush_level < FlushLevel::NoFlush {
     let change = apply_update(env, hs, uid, src, flush_level)?;
     env.cell_build_status.insert(uid, BuildStatus::Evaluated);
@@ -760,6 +764,7 @@ fn root_diff_update(mut env : Env, mut hs : HotloadState, module_expr : Expr) {
   // in it. This reverses the dependency graph.
   let TODO = ();
   env.update_lists.clear();
+  env.broken_cells.clear();
   
   std::mem::swap(&mut env.active_cells, &mut hs.active_cells);
 
@@ -800,7 +805,6 @@ pub fn hotload_module(mut env : Env, module_name : &str, code : &str) {
   };
   let hs = HotloadState::new();
   // this was to force all errors to repeat when a file is edited
-  env.broken_cells.clear();
   root_diff_update(env, hs, module_expr);
   env.root_expr = Some(module_expr);
 }
