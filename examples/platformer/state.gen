@@ -5,10 +5,6 @@ type BufferedGame = struct {
   state : Game,
 };
 
-def initial_game_state = {
-  init Game(0)
-};
-
 fun new_buffered_game(g : Game) {
   init BufferedGame(0, g, g);
 };
@@ -63,6 +59,6 @@ render_slider(ref slider);
 def game_events = slider_events_slice(ref slider);
 
 reactive game = {
-  let g = new_buffered_game(initial_game_state);
+  let g = new_buffered_game(new_game());
   container(observe game_events, g, buffered_game_update)
 }

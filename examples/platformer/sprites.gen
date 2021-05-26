@@ -9,24 +9,13 @@ type Anim = struct {
   w : i64,
   h : i64,
   frames : i64,
+  flip : bool,
 }
 
-
-fun draw_anim(r : SdlRendererHandle, x : i64, y : i64, anim : ptr Anim, frame : i64) {
-  let anim_frame = (frame / 3) % anim.frames;
-  sdl_render_copy_ex(r, anim.tex,
-    ref sdl_rect(anim.w * anim_frame, 0, anim.w, anim.h),
-    ref sdl_rect(x, y, anim.w * 3, anim.h * 3),
-    0 as u64,
-    0 as ptr void,
-    SDL_FLIP_HORIZONTAL
-  );
-}
-
-fun load_anim(r : SdlRendererHandle, path : String, w : i64, h : i64, frames : i64) {
+fun load_anim(r : SdlRendererHandle, path : String, w : i64, h : i64, frames : i64, flip : bool) {
   let image = sdl_img_load(path.data);
   let tex = sdl_create_texture_from_surface(r, image);
-  init Anim(tex, w, h, frames);
+  init Anim(tex, w, h, frames, flip);
 }
 
 def king_idle_anim = load_anim(
@@ -34,20 +23,23 @@ def king_idle_anim = load_anim(
   "examples/platformer/assets/Sprites/01-King Human/Idle (78x58).png",
   78, 58,
   11,
+  false,
 );
 
 def king_jump_anim = load_anim(
   window.r,
   "examples/platformer/assets/Sprites/01-King Human/Jump (78x58).png",
   78, 58,
-  1
+  1,
+  false,
 );
 
 def king_run_anim = load_anim(
   window.r,
   "examples/platformer/assets/Sprites/01-King Human/Run (78x58).png",
   78, 58,
-  8
+  8,
+  false,
 );
 
 def pig_idle_anim = load_anim(
@@ -55,6 +47,7 @@ def pig_idle_anim = load_anim(
   "examples/platformer/assets/Sprites/03-Pig/Idle (34x28).png",
   34, 28,
   11,
+  true,
 );
 
 def pig_run_anim = load_anim(
@@ -62,6 +55,7 @@ def pig_run_anim = load_anim(
   "examples/platformer/assets/Sprites/03-Pig/Run (34x28).png",
   34, 28,
   6,
+  true,
 );
 
 def pig_dead_anim = load_anim(
@@ -69,4 +63,5 @@ def pig_dead_anim = load_anim(
   "examples/platformer/assets/Sprites/03-Pig/Dead (34x28).png",
   34, 28,
   4,
+  true,
 );

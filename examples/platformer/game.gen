@@ -1,18 +1,111 @@
 
 type Vec2 = struct { x : i64, y : i64 };
 
+fun add_vec2(a : Vec2, b : Vec2) {
+  init Vec2(a.x + b.x, a.y + b.y)
+}
+
+def FACE_LEFT = 0;
+def FACE_RIGHT = 1;
+
+type Character = struct {
+  pos : Vec2,
+  vel : Vec2,
+  anim : ptr Anim,
+  facing : i64,
+}
+
 type Game = struct {
-  frame : i64
+  frame : i64,
+  king : Character,
+  pig : Character,
 };
 
+fun new_game() {
+  let king = init Character(
+    init Vec2(0, 0),
+    init Vec2(0, 0),
+    ref king_idle_anim,
+    FACE_LEFT,
+  );
+  let pig = init Character(
+    init Vec2(150, 150),
+    init Vec2(0, 0),
+    ref pig_idle_anim,
+    FACE_RIGHT,
+  );
+  init Game(0, king, pig)
+}
+
+def gravity = 1;
+
+def ARROW_RIGHT = 79 as u32;
+def ARROW_LEFT = 80 as u32;
+def ARROW_DOWN = 81 as u32;
+def ARROW_UP = 82 as u32;
+
+
+
 fun game_update(g : ptr Game, e : ptr Event) {
+  // handle sdl input
+  if e.tag == sdl_event_tag {
+    let event_type = e.input.event_type;
+    if event_type == SDL_KEYDOWN {
+      let k = to_keyboard_event(ref e.input);
+      if k.window_id == window.sdl_id {
+        if k.keysym.scancode == ARROW_LEFT {
+          g.king.vel.x = -5;
+          g.king.facing = FACE_LEFT;
+        }
+        if k.keysym.scancode == ARROW_RIGHT {
+          g.king.vel.x = 5;
+          g.king.facing = FACE_RIGHT;
+        }
+      }
+    }
+    if event_type == SDL_KEYUP {
+      let k = to_keyboard_event(ref e.input);
+      if k.window_id == window.sdl_id {
+        if k.keysym.scancode == ARROW_LEFT && g.king.vel.x < 0 {
+          g.king.vel.x = 0;
+        }
+        if k.keysym.scancode == ARROW_RIGHT && g.king.vel.x > 0 {
+          g.king.vel.x = 0;
+        }
+      }
+    }
+  }
+
   // handle tick events
   if e.tag == tick_event_tag {
     g.frame = g.frame + 1;
+
+    g.king.pos = add_vec2(g.king.pos, g.king.vel);
   }
 };
 
+fun draw_anim(r : SdlRendererHandle, x : i64, y : i64, anim : ptr Anim, frame : i64, facing : i64) {
+  let flip = ((facing + (if anim.flip { 1 } else { 0 })) % 2) == 0;
+  let anim_frame = (frame / 3) % anim.frames;
+  let flip_flag = if flip { SDL_FLIP_HORIZONTAL } else { SDL_FLIP_NONE };
+  let center = init SdlPoint(0 as i32, 0 as i32);
+  sdl_render_copy_ex(r, anim.tex,
+    ref sdl_rect(anim.w * anim_frame, 0, anim.w, anim.h),
+    ref sdl_rect(x, y, anim.w * 3, anim.h * 3),
+    0 as u64,
+    ref center,
+    flip_flag,
+  );
+
+  sdl_set_draw_color(r, 255 as u8, 0 as u8, 0 as u8, 255 as u8);
+  sdl_fill_rect(r, ref sdl_rect(x, y, 10, 10));
+}
+
+fun draw_character(r : SdlRendererHandle, c : ptr Character, frame : i64) {
+  draw_anim(r, c.pos.x, c.pos.y, c.anim, frame, c.facing);
+}
+
 fun render_game(r : SdlRendererHandle, g : ptr Game) {
-  draw_anim(r, 0, 0, ref king_run_anim, g.frame);
-  draw_anim(r, 150, 150, ref pig_run_anim, g.frame);
+  draw_character(r, ref g.king, g.frame);
+  draw_character(r, ref g.pig, g.frame);
 };

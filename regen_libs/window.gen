@@ -36,16 +36,6 @@ fun create_window(id : i64, title : String, width : i64, height : i64) {
   w
 };
 
-// def create_window = fun(title : String, width : i64, height : i64) {
-//   sdl_init(SDL_INIT_VIDEO);
-//   let window = sdl_create_window(
-//     title.data, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-//     width as i32, height as i32, SDL_WINDOW_SHOWN);
-//   let r = sdl_create_renderer(window, -1 as i32, SDL_RENDERER_ACCELERATED);
-//   sdl_set_blend_mode(r, 1 as u32);
-//   window
-// };
-
 fun get_renderer(window : SdlWindowHandle) {
   sdl_get_renderer(window)
 }

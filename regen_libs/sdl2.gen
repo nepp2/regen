@@ -30,6 +30,10 @@ type SdlRect = struct {
   x : i32, y : i32, w : i32, h : i32
 };
 
+type SdlPoint = struct {
+  x : i32, y : i32,
+};
+
 // https://wiki.libsdl.org/SDL_Keysym
 type SdlKeysym = struct {
   scancode : u32,
@@ -170,7 +174,7 @@ def sdl_render_copy =
       tex : SdlTextureHandle,
       src : ptr SdlRect,
       dest : ptr SdlRect
-    ) => void;
+    ) => i32;
 
 def sdl_render_copy_ex =
   load_library_symbol(sdl2, "SDL_RenderCopyEx")
@@ -180,9 +184,9 @@ def sdl_render_copy_ex =
       src : ptr SdlRect,
       dest : ptr SdlRect,
       angle : u64,
-      center : ptr void,
+      center : ptr SdlPoint,
       flip : u32,
-    ) => void;
+    ) => i32;
 
 def sdl_create_texture_from_surface =
   load_library_symbol(sdl2, "SDL_CreateTextureFromSurface")
