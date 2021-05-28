@@ -56,10 +56,12 @@ fun game_update(g : ptr Game, e : ptr Event) {
         if k.keysym.scancode == ARROW_LEFT {
           g.king.vel.x = -5;
           g.king.facing = FACE_LEFT;
+          g.king.anim = ref king_run_anim;
         }
         if k.keysym.scancode == ARROW_RIGHT {
           g.king.vel.x = 5;
           g.king.facing = FACE_RIGHT;
+          g.king.anim = ref king_run_anim;
         }
       }
     }
@@ -68,9 +70,11 @@ fun game_update(g : ptr Game, e : ptr Event) {
       if k.window_id == window.sdl_id {
         if k.keysym.scancode == ARROW_LEFT && g.king.vel.x < 0 {
           g.king.vel.x = 0;
+          g.king.anim = ref king_idle_anim;
         }
         if k.keysym.scancode == ARROW_RIGHT && g.king.vel.x > 0 {
           g.king.vel.x = 0;
+          g.king.anim = ref king_idle_anim;
         }
       }
     }
